@@ -6,5 +6,7 @@ build/
 coverage/
 *.log
 .DS_Store
-storage/private_uploads/*
+storage/private_uploads/*.dat
+server/storage/private_uploads/*.dat
 !storage/private_uploads/.gitkeep
+!server/storage/private_uploads/.gitkeep
