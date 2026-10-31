@@ -1,0 +1,26 @@
+{
+  "name": "aarogya-drishti",
+  "version": "0.2.0",
+  "private": true,
+  "description": "AI-assisted oral-cancer screening, telemedicine and patient navigation simulation platform (ITDA Paderu)",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace=server run dev",
+    "dev:client": "npm --workspace=client run dev",
+    "build": "npm --workspace=server run build && npm --workspace=client run build",
+    "test": "npm --workspace=server run test",
+    "test:coverage": "npm --workspace=server run test:coverage"
+  },
+  "keywords": [
+    "aarogya-drishti",
+    "simulation",
+    "telemedicine",
+    "oral-cancer-screening",
+    "pwa"
+  ],
+  "author": "AAROHAN Inter-Centre Hackathon 2026 Team",
+  "license": "UNLICENSED"
+}

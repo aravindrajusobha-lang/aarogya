@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+coverage/
+*.log
+.DS_Store
+storage/private_uploads/*
+!storage/private_uploads/.gitkeep
