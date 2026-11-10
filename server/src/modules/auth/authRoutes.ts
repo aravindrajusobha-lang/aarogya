@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
+import jwt from 'jsonwebtoken';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth } from '../../middleware/authGuard.js';
 import { auditTag } from '../../middleware/auditTag.js';
@@ -455,6 +456,7 @@ const RegisterSchema = z.object({
   fullName: z.string().min(2, 'Full name required'),
   role: z.enum(['system_admin', 'admin', 'medical_officer', 'anm', 'asha', 'patient']).default('asha'),
   phone: z.string().optional(),
+  phoneToken: z.string().optional(),
   hospitalId: z.string().optional().default('hosp_paderu_dh'),
   deviceId: z.string().optional().default(() => `dev_${uuidv4()}`),
   deviceName: z.string().optional().default('Web Browser / Mobile App'),
@@ -466,7 +468,20 @@ router.post(
   auditTag('AUTH_REGISTER', 'auth'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { username, password, fullName, role, phone, hospitalId, deviceId, deviceName } = req.body;
+      const { phoneToken, phone } = req.body;
+      let data: any;
+      try {
+        data = jwt.verify(phoneToken, process.env.JWT_SECRET || 'super-secret-aarogya-drishti-encryption-key-2026-itda-paderu');
+      } catch {
+        res.status(400).json({ message: 'Verify your phone first' });
+        return;
+      }
+      if (data.phone !== phone || data.purpose !== 'REGISTER') {
+        res.status(400).json({ message: 'Phone not verified' });
+        return;
+      }
+
+      const { username, password, fullName, role, hospitalId, deviceId, deviceName } = req.body;
       const normalizedUsername = username.toLowerCase().trim();
 
       const existing = await User.findOne({ username: normalizedUsername });

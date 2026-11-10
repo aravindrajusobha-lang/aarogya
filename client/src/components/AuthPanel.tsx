@@ -50,6 +50,11 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   const [regPhone, setRegPhone] = useState('');
   const [regRole, setRegRole] = useState<'patient' | 'asha' | 'anm' | 'medical_officer'>('patient');
   const [regHospitalId, setRegHospitalId] = useState('hosp_paderu_dh');
+  const [regPhoneToken, setRegPhoneToken] = useState<string | null>(null);
+  const [regOtpCode, setRegOtpCode] = useState('');
+  const [regOtpSent, setRegOtpSent] = useState(false);
+  const [regOtpCooldown, setRegOtpCooldown] = useState(0);
+  const [regOtpLoading, setRegOtpLoading] = useState(false);
 
   // Edit profile state
   const [editFullName, setEditFullName] = useState(currentUser?.fullName || '');
@@ -92,6 +97,73 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
     }
     return () => clearInterval(timer);
   }, [lockoutSec]);
+
+  useEffect(() => {
+    let timer: any;
+    if (regOtpCooldown > 0) {
+      timer = setInterval(() => {
+        setRegOtpCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [regOtpCooldown]);
+
+  const handleSendRegOtp = async () => {
+    const clean = regPhone.replace(/\D/g, '').slice(-10);
+    if (clean.length !== 10) {
+      setErrorMsg('Please enter a valid 10-digit Indian phone number.');
+      return;
+    }
+    setRegOtpLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: clean, purpose: 'REGISTER' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.message || 'Failed to send OTP');
+        return;
+      }
+      setRegOtpSent(true);
+      setRegOtpCooldown(30);
+      setSuccessMsg(`OTP code dispatched to +91 ${clean}. Enter the 6-digit verification code below.`);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error while requesting OTP');
+    } finally {
+      setRegOtpLoading(false);
+    }
+  };
+
+  const handleVerifyRegOtp = async () => {
+    const clean = regPhone.replace(/\D/g, '').slice(-10);
+    if (!regOtpCode || regOtpCode.length !== 6) {
+      setErrorMsg('Please enter the 6-digit OTP code.');
+      return;
+    }
+    setRegOtpLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: clean, otp: regOtpCode, purpose: 'REGISTER' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.phoneToken) {
+        setErrorMsg(data.message || 'Failed to verify OTP');
+        return;
+      }
+      setRegPhoneToken(data.phoneToken);
+      setSuccessMsg('✅ Phone number verified successfully!');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error during verification');
+    } finally {
+      setRegOtpLoading(false);
+    }
+  };
 
   // Demo Preset Credentials
   const PRESETS = [
@@ -178,6 +250,19 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
       return;
     }
 
+    const cleanPhone = regPhone.replace(/\D/g, '').slice(-10);
+    if (!cleanPhone || cleanPhone.length !== 10) {
+      setErrorMsg('A valid 10-digit Indian phone number is required.');
+      setLoading(false);
+      return;
+    }
+
+    if (!regPhoneToken) {
+      setErrorMsg('Please verify your phone number via OTP first.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/v1/auth/register', {
         method: 'POST',
@@ -187,15 +272,16 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           fullName: regFullName.trim(),
           password: regPassword,
           role: regRole,
-          phone: regPhone.trim() || undefined,
+          phone: cleanPhone,
+          phoneToken: regPhoneToken,
           hospitalId: regHospitalId || undefined,
         }),
       });
 
       const envelope = await res.json();
 
-      if (!res.ok || !envelope.success) {
-        setErrorMsg(envelope.error?.message || 'Registration failed. Username may already exist.');
+      if (!res.ok || (envelope.success === false && !envelope.data)) {
+        setErrorMsg(envelope.message || envelope.error?.message || 'Registration failed. Username may already exist.');
         return;
       }
 
@@ -938,14 +1024,69 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Phone Number (Optional)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    placeholder="+91 9876543210"
-                  />
+                  <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Phone Number *</span>
+                    {regPhoneToken && <span style={{ color: '#10b981', fontWeight: 600, fontSize: '0.82rem' }}>✓ Verified</span>}
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={regPhone}
+                      onChange={(e) => {
+                        setRegPhone(e.target.value);
+                        setRegPhoneToken(null);
+                        setRegOtpSent(false);
+                      }}
+                      placeholder="10-digit phone (e.g. 9848012345)"
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="btn-forest-secondary"
+                      onClick={handleSendRegOtp}
+                      disabled={regOtpLoading || regOtpCooldown > 0 || Boolean(regPhoneToken)}
+                      style={{ whiteSpace: 'nowrap', padding: '6px 12px', fontSize: '0.85rem' }}
+                    >
+                      {regOtpLoading ? 'Sending...' : regOtpCooldown > 0 ? `${regOtpCooldown}s` : regPhoneToken ? '✓ Done' : 'Send OTP'}
+                    </button>
+                  </div>
+
+                  {regOtpSent && !regPhoneToken && (
+                    <div style={{ marginTop: '8px', padding: '10px', background: 'rgba(16, 185, 129, 0.05)', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
+                        Enter the 6-digit OTP sent to your phone:
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={regOtpCode}
+                          onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          placeholder="6-digit OTP"
+                          style={{ maxWidth: '140px', letterSpacing: '2px', textAlign: 'center', fontWeight: 'bold' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-forest-primary"
+                          onClick={handleVerifyRegOtp}
+                          disabled={regOtpLoading || regOtpCode.length !== 6}
+                          style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+                        >
+                          {regOtpLoading ? 'Verifying...' : 'Verify OTP'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-forest-secondary"
+                          onClick={() => setRegOtpCode('123456')}
+                          style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                          title="Fills simulated test OTP"
+                        >
+                          Fill 123456
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

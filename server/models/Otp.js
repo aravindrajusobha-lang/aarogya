@@ -21,3 +21,4 @@ const Otp = mongoose.models.Otp || mongoose.model("Otp", OtpSchema);
 module.exports = Otp;
 module.exports.Otp = Otp;
 module.exports.default = Otp;
+

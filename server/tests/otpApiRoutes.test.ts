@@ -4,6 +4,7 @@ import express, { Express } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { otpRouter, inMemoryOtpStore } from '../src/modules/auth/otpRoutes.js';
+import { authRouter } from '../src/modules/auth/authRoutes.js';
 
 describe('OTP API Routes Suite (/api/otp)', () => {
   let app: Express;
@@ -18,6 +19,7 @@ describe('OTP API Routes Suite (/api/otp)', () => {
     app = express();
     app.use(express.json());
     app.use('/api/otp', otpRouter);
+    app.use('/api/v1/auth', authRouter);
   });
 
   describe('POST /api/otp/send', () => {
@@ -154,6 +156,75 @@ describe('OTP API Routes Suite (/api/otp)', () => {
       // Record must be deleted after single use
       const consumed = inMemoryOtpStore.get(`${mockPhone}:LOGIN`);
       expect(consumed).toBeUndefined();
+    });
+  });
+
+  describe('Registration PhoneToken Gate (POST /api/v1/auth/register)', () => {
+    const validRegisterBody = {
+      username: 'test_raju_99',
+      fullName: 'Raju Test',
+      password: 'StrongPassword@2026',
+      role: 'patient',
+      phone: mockPhone,
+    };
+
+    it('rejects registration without phoneToken with 400 "Verify your phone first"', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send(validRegisterBody);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Verify your phone first');
+    });
+
+    it('rejects registration with invalid or expired phoneToken with 400 "Verify your phone first"', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({
+          ...validRegisterBody,
+          phoneToken: 'malformed.fake.jwt-token',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Verify your phone first');
+    });
+
+    it('rejects registration when phoneToken phone does not match submitted phone with 400 "Phone not verified"', async () => {
+      const attackerPhoneToken = jwt.sign(
+        { phone: '9988776655', purpose: 'REGISTER' },
+        testSecret,
+        { expiresIn: '10m' }
+      );
+
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({
+          ...validRegisterBody,
+          phone: mockPhone, // 9848099887 does not match token phone 9988776655
+          phoneToken: attackerPhoneToken,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Phone not verified');
+    });
+
+    it('rejects registration when phoneToken purpose is not REGISTER with 400 "Phone not verified"', async () => {
+      const loginToken = jwt.sign(
+        { phone: mockPhone, purpose: 'LOGIN' },
+        testSecret,
+        { expiresIn: '10m' }
+      );
+
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({
+          ...validRegisterBody,
+          phone: mockPhone,
+          phoneToken: loginToken,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Phone not verified');
     });
   });
 });

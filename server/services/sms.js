@@ -25,3 +25,4 @@ async function sendOtpSms(phone, otp) {
 module.exports = {
   sendOtpSms,
 };
+
