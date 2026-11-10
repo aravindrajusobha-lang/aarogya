@@ -966,6 +966,7 @@ router.post(
 // ==========================================
 const PatientSendOtpSchema = z.object({
   phone: z.string().min(10, 'Valid 10-digit mobile number required'),
+  purpose: z.enum(['REGISTER', 'LOGIN', 'RESET']).optional().default('REGISTER'),
 });
 
 router.post(
@@ -976,7 +977,8 @@ router.post(
     try {
       const result = await PatientOtpService.requestOtp(
         req.body.phone,
-        req.ip || req.socket.remoteAddress || '127.0.0.1'
+        req.ip || req.socket.remoteAddress || '127.0.0.1',
+        req.body.purpose || 'REGISTER'
       );
       res.envelope(result);
     } catch (err: any) {
@@ -988,6 +990,7 @@ router.post(
 const PatientVerifyOtpSchema = z.object({
   phone: z.string().min(10, 'Valid 10-digit mobile number required'),
   otp: z.string().length(6, '6-digit OTP code required'),
+  purpose: z.enum(['REGISTER', 'LOGIN', 'RESET']).optional().default('REGISTER'),
   deviceId: z.string().optional(),
   deviceName: z.string().optional(),
 });
@@ -1001,6 +1004,7 @@ router.post(
       const result = await PatientOtpService.verifyOtp({
         phone: req.body.phone,
         otp: req.body.otp,
+        purpose: req.body.purpose || 'REGISTER',
         deviceId: req.body.deviceId,
         deviceName: req.body.deviceName,
         userAgent: req.headers['user-agent'] || 'Unknown',

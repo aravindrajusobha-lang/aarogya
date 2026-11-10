@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthUser } from '../../components/AuthPanel';
 import { LiveVideoConsultationModal } from '../../components/LiveVideoConsultationModal';
 import { PrescriptionModal } from '../../components/PrescriptionModal';
@@ -24,7 +24,9 @@ interface ClinicalPatient {
   aiTriageFlag: string;
   riskCategory: 'HIGH' | 'MODERATE' | 'LOW';
   sha256Hash: string;
+  photoUrl?: string;
   status: 'PENDING_REVIEW' | 'REVIEWED' | 'REFERRED';
+  createdAt?: string;
 }
 
 export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
@@ -49,64 +51,67 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [riskFilter, setRiskFilter] = useState<'ALL' | 'HIGH' | 'MODERATE' | 'LOW'>('ALL');
 
-  const [patients, setPatients] = useState<ClinicalPatient[]>([
-    {
-      id: 'DEMO-PAD-8492',
-      name: 'Balaraju Somulu',
-      age: 48,
-      gender: 'Male',
-      village: 'Dumbriguda',
-      mandal: 'Paderu Agency',
-      lesionSite: 'Right Buccal Mucosa',
-      durationWeeks: 3,
-      aiTriageFlag: 'White keratotic mucosal patch (>2 wks)',
-      riskCategory: 'HIGH',
-      sha256Hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      status: 'PENDING_REVIEW',
-    },
-    {
-      id: 'DEMO-ARA-3914',
-      name: 'Chitti Lakshmi',
-      age: 42,
-      gender: 'Female',
-      village: 'Padmapuram',
-      mandal: 'Araku Valley',
-      lesionSite: 'Lateral Tongue Margin',
-      durationWeeks: 1,
-      aiTriageFlag: 'Mild aphthous erythema (low risk)',
-      riskCategory: 'LOW',
-      sha256Hash: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
-      status: 'PENDING_REVIEW',
-    },
-    {
-      id: 'DEMO-CHI-1102',
-      name: 'Kondababu Raju',
-      age: 55,
-      gender: 'Male',
-      village: 'Lammasingi',
-      mandal: 'Chintapalli',
-      lesionSite: 'Gingivobuccal Sulcus',
-      durationWeeks: 4,
-      aiTriageFlag: 'Exophytic irregular mucosal margin',
-      riskCategory: 'HIGH',
-      sha256Hash: 'b45cffe084dd3d20d928bee85e7b0f21',
-      status: 'PENDING_REVIEW',
-    },
-    {
-      id: 'DEMO-MUN-7731',
-      name: 'Gangi Reddy',
-      age: 38,
-      gender: 'Male',
-      village: 'Jolaput Border',
-      mandal: 'Munchingiputtu',
-      lesionSite: 'Labial Mucosa',
-      durationWeeks: 2,
-      aiTriageFlag: 'Superficial friction keratosis',
-      riskCategory: 'MODERATE',
-      sha256Hash: 'c7be21a7d65b2149b071a067e4da884f',
-      status: 'REVIEWED',
-    },
-  ]);
+  // Real-Time Uploaded Clinical Screening Cases (No hardcoded demo items)
+  const [patients, setPatients] = useState<ClinicalPatient[]>([]);
+  const [loadingCases, setLoadingCases] = useState<boolean>(true);
+
+  const fetchRealTimeCases = async () => {
+    setLoadingCases(true);
+    try {
+      const token = localStorage.getItem('aarogya_token') || '';
+      const res = await fetch('/api/v1/screening/cases', {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const payload = await res.json().catch(() => null);
+      if (res.ok && payload?.data?.items && payload.data.items.length > 0) {
+        const mapped: ClinicalPatient[] = payload.data.items.map((item: any) => ({
+          id: item.caseId || item._id,
+          name: item.patientName || `Patient ${item.patientId?.slice(-4) || 'Beneficiary'}`,
+          age: item.patientAge || 45,
+          gender: item.patientGender || 'Other',
+          village: item.villageName || item.villageId || 'Tribal Settlement',
+          mandal: item.mandal || 'Paderu Agency',
+          lesionSite: item.anatomicalSite || item.demoAiResult?.observedCondition || 'Oral Mucosa',
+          durationWeeks: item.durationWeeks || 2,
+          aiTriageFlag: item.demoAiResult?.observedCondition || item.priority || 'Uploaded Oral Screening',
+          riskCategory: item.priority === 'urgent' || item.demoAiResult?.riskSupportLabel === 'high_risk_support'
+            ? 'HIGH'
+            : item.priority === 'high_priority' || item.demoAiResult?.riskSupportLabel === 'moderate_risk_support'
+            ? 'MODERATE'
+            : 'LOW',
+          sha256Hash: item.currentSha256 || item.photoIds?.[0] || 'sha256_live_upload',
+          photoUrl: item.photoUrl,
+          status: item.status === 'assessed' || item.status === 'reviewed' ? 'REVIEWED' : 'PENDING_REVIEW',
+          createdAt: item.createdAt,
+        }));
+        setPatients(mapped);
+      } else {
+        // Also check real-time locally queued screenings from localStorage
+        const localCasesStr = localStorage.getItem('aarogya_realtime_cases');
+        if (localCasesStr) {
+          try {
+            const localCases = JSON.parse(localCasesStr);
+            if (Array.isArray(localCases) && localCases.length > 0) {
+              setPatients(localCases);
+              return;
+            }
+          } catch {}
+        }
+        setPatients([]);
+      }
+    } catch {
+      setPatients([]);
+    } finally {
+      setLoadingCases(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRealTimeCases();
+  }, []);
 
   const handleReviewPatient = (p: ClinicalPatient) => {
     setSelectedPatient(p);
@@ -114,9 +119,32 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
     setSaveSuccess(false);
   };
 
-  const handleSaveAssessment = (e: React.FormEvent) => {
+  const handleSaveAssessment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPatient) return;
+
+    try {
+      const token = localStorage.getItem('aarogya_token') || '';
+      await fetch(`/api/v1/screening/cases/${selectedPatient.id}/assess`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          clinicalImpression: clinicalNotes || 'Clinician visual examination completed.',
+          riskCategorization: selectedPatient.riskCategory === 'HIGH'
+            ? 'high_risk_support'
+            : selectedPatient.riskCategory === 'MODERATE'
+            ? 'moderate_risk_support'
+            : 'low_risk_support',
+          recommendedFollowUpDays: disposition === 'BIOPSY_RECOMMENDED' ? 7 : 30,
+          clinicalNotes,
+        }),
+      }).catch(() => null);
+    } catch (err) {
+      console.warn('Could not post assessment to backend:', err);
+    }
 
     setPatients((prev) =>
       prev.map((p) =>
@@ -173,6 +201,16 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
           <button
             type="button"
+            className="dash-btn dash-btn-outline"
+            onClick={fetchRealTimeCases}
+            title="Reload real-time uploaded cases from database"
+            style={{ fontSize: '0.84rem', padding: '8px 14px' }}
+          >
+            {loadingCases ? '⏳ Refreshing...' : '🔄 Refresh Real-Time Queue'}
+          </button>
+
+          <button
+            type="button"
             className="dash-btn"
             style={{
               background: 'var(--btn-primary-bg)',
@@ -196,7 +234,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
               : '💊 Issue Prescription (Rx)'}
           </button>
 
-          <span className="dash-status-pill status-completed">PORTAL: CLINICAL REVIEW</span>
+          <span className="dash-status-pill status-completed">PORTAL: REAL-TIME QUEUE</span>
         </div>
       </div>
 
@@ -329,18 +367,57 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
               </tr>
             </thead>
             <tbody>
-              {patients
-                .filter((p) => {
-                  const matchQ =
-                    !searchQuery.trim() ||
-                    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    p.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    p.mandal.toLowerCase().includes(searchQuery.toLowerCase());
-                  const matchR = riskFilter === 'ALL' || p.riskCategory === riskFilter;
-                  return matchQ && matchR;
-                })
-                .map((p) => (
+              {patients.filter((p) => {
+                const matchQ =
+                  !searchQuery.trim() ||
+                  p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  p.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  p.mandal.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchR = riskFilter === 'ALL' || p.riskCategory === riskFilter;
+                return matchQ && matchR;
+              }).length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-secondary)' }}>
+                    {loadingCases ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '1.5rem', animation: 'spin 1s infinite linear' }}>⏳</span>
+                        <span>Loading real-time screening cases from database...</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ fontSize: '2rem' }}>📂</div>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '1rem' }}>
+                          No Screening Cases in Real-Time Queue
+                        </div>
+                        <div style={{ fontSize: '0.82rem', maxWidth: '420px', margin: '0 auto', color: 'var(--text-muted)' }}>
+                          Screening cases captured in the field by ASHA/ANM frontline workers or uploaded by patients will appear here live.
+                        </div>
+                        <button
+                          type="button"
+                          className="dash-btn dash-btn-outline"
+                          onClick={fetchRealTimeCases}
+                          style={{ marginTop: '8px', fontSize: '0.8rem', padding: '6px 12px' }}
+                        >
+                          🔄 Check for New Uploads
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                patients
+                  .filter((p) => {
+                    const matchQ =
+                      !searchQuery.trim() ||
+                      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      p.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      p.mandal.toLowerCase().includes(searchQuery.toLowerCase());
+                    const matchR = riskFilter === 'ALL' || p.riskCategory === riskFilter;
+                    return matchQ && matchR;
+                  })
+                  .map((p) => (
                 <tr key={p.id}>
                   <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--accent)' }}>{p.id}</td>
                   <td>
@@ -399,7 +476,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                     </button>
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>
@@ -588,11 +665,26 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
             {/* TAB 3: UPLOADED PHOTOS */}
             {activePatientRecordTab === 'images' && (
               <div style={{ textAlign: 'center', padding: '20px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '10px' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📸</div>
-                <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>High-Resolution Oral Mucosa Clinical Photo</div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  Captured by ASHA worker with informed patient consent • SHA-256 Hashed on capture
-                </div>
+                {selectedPatient.photoUrl ? (
+                  <div>
+                    <img
+                      src={selectedPatient.photoUrl}
+                      alt="Uploaded oral mucosa screening"
+                      style={{ maxWidth: '100%', maxHeight: '340px', borderRadius: '8px', border: '1.5px solid var(--border)', objectFit: 'contain' }}
+                    />
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                      Real-time uploaded oral photo • Cryptographic SHA-256: <code>{selectedPatient.sha256Hash?.slice(0, 20)}...</code>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📸</div>
+                    <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>Real-Time Oral Mucosa Screening Image</div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Cryptographic Verification: <code>{selectedPatient.sha256Hash}</code>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

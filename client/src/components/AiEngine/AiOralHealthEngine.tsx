@@ -25,16 +25,9 @@ export interface AiOralHealthEngineProps {
   onClose?: () => void;
 }
 
-const DEMO_PATIENTS = [
-  { id: 'DEMO-PAD-8492', name: 'Balaraju Somulu (48M - Dumbriguda, Paderu Agency)' },
-  { id: 'DEMO-ARA-3914', name: 'Chitti Lakshmi (42F - Padmapuram, Araku Valley)' },
-  { id: 'DEMO-CHI-1102', name: 'Kondababu Raju (55M - Lammasingi, Chintapalli)' },
-  { id: 'DEMO-MUN-7731', name: 'Gangi Reddy (38M - Jolaput Border, Munchingiputtu)' },
-];
-
 export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
-  patientId = 'DEMO-PAD-8492',
-  patientName = 'Balaraju Somulu',
+  patientId = 'PAT-LIVE-001',
+  patientName = 'Real-Time Patient Intake',
   hospitalId = 'HOSP-PADERU-01',
   userRole = 'asha',
   token = '',
@@ -42,8 +35,8 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
   onReportGenerated,
   onClose,
 }) => {
-  const [selectedPatientId, setSelectedPatientId] = useState<string>(patientId);
-  const [selectedPatientName, setSelectedPatientName] = useState<string>(patientName);
+  const selectedPatientId = patientId;
+  const selectedPatientName = patientName;
 
   // Wizard Steps: 1: Mucosal, 2: Dental, 3: Risk History, 4: Consolidated Report
   const [activeStep, setActiveStep] = useState<1 | 2 | 3 | 4>(1);
@@ -270,42 +263,6 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Helper to load pre-loaded demo healthcare sample images
-  const loadSampleImage = async (url: string, type: 'mucosal' | 'dental') => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        const img = new Image();
-        img.onload = () => {
-          const canvas = canvasRef.current || document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(img, 0, 0);
-
-          const quality = evaluateImageQualityClient(canvas, ctx);
-
-          if (type === 'mucosal') {
-            setMucosalImageSrc(dataUrl);
-            setMucosalQuality(quality);
-            setMucosalResult(null);
-          } else {
-            setDentalImageSrc(dataUrl);
-            setDentalQuality(quality);
-            setDentalResult(null);
-          }
-        };
-        img.src = dataUrl;
-      };
-      reader.readAsDataURL(blob);
-    } catch (err) {
-      console.error('Failed to load sample image', err);
-    }
-  };
-
   // Execute Module A Analysis
   const runModuleA = async () => {
     if (!mucosalImageSrc) return;
@@ -371,6 +328,30 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
       mucosalImageSrc || undefined,
       dentalImageSrc || undefined
     );
+
+    // Save into real-time screening cases for live clinical review
+    try {
+      const existingCasesStr = localStorage.getItem('aarogya_realtime_cases');
+      const existingCases = existingCasesStr ? JSON.parse(existingCasesStr) : [];
+      const newLiveCase = {
+        id: report.screeningId || report.clientId || `SC-LIVE-${Date.now().toString().slice(-6)}`,
+        name: selectedPatientName,
+        age: 42,
+        gender: 'Patient',
+        village: 'Paderu Agency Catchment',
+        mandal: 'Paderu Agency',
+        lesionSite: mucosalResult?.label || 'Oral Cavity',
+        durationWeeks: 2,
+        aiTriageFlag: report.combinedRecommendation?.advice || 'Live Screening Photo Uploaded',
+        riskCategory: (report.combinedRecommendation?.triageCategory === 'URGENT_SPECIALIST' ? 'HIGH' : report.combinedRecommendation?.triageCategory === 'DENTAL_MONITOR' ? 'MODERATE' : 'LOW') as 'HIGH' | 'MODERATE' | 'LOW',
+        sha256Hash: report.clientId || `sha_${Date.now()}`,
+        photoUrl: mucosalImageSrc || undefined,
+        status: 'PENDING_REVIEW' as const,
+        createdAt: report.createdAt || new Date().toISOString(),
+      };
+      existingCases.unshift(newLiveCase);
+      localStorage.setItem('aarogya_realtime_cases', JSON.stringify(existingCases));
+    } catch {}
 
     setCombinedReport(report);
     setIsSubmittingReport(false);
@@ -462,30 +443,9 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
               Patient: <strong style={{ color: 'var(--text-primary)' }}>{selectedPatientId}</strong> ({selectedPatientName}) • Facility:{' '}
               <strong style={{ color: 'var(--text-primary)' }}>{hospitalId}</strong>
             </span>
-            <select
-              value={selectedPatientId}
-              onChange={(e) => {
-                const found = DEMO_PATIENTS.find((p) => p.id === e.target.value);
-                setSelectedPatientId(e.target.value);
-                if (found) setSelectedPatientName(found.name.split(' (')[0]);
-              }}
-              style={{
-                background: 'var(--surface-2)',
-                color: 'var(--accent)',
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                padding: '4px 8px',
-                fontSize: '0.76rem',
-                cursor: 'pointer',
-              }}
-              title="Switch demo patient"
-            >
-              {DEMO_PATIENTS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.id} — {p.name}
-                </option>
-              ))}
-            </select>
+            <span style={{ background: 'var(--surface-2)', color: 'var(--accent)', border: '1px solid var(--border)', borderRadius: '6px', padding: '3px 8px', fontSize: '0.74rem', fontWeight: 600 }}>
+              ● Live Upload Mode
+            </span>
           </div>
         </div>
 
@@ -651,29 +611,6 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                   </div>
                 </div>
               )}
-
-              {/* Sample Photo Quick Buttons */}
-              <div style={{ marginBottom: '14px', background: 'var(--surface)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
-                  ⚡ Quick Demo Test Images (1-Click Load):
-                </span>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => loadSampleImage('/assets/healthcare/oral-lesion-exam.jpg', 'mucosal')}
-                    style={{ fontSize: '0.72rem', padding: '5px 9px', borderRadius: '6px', background: 'var(--surface-2)', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    🔍 Sample: Oral Lesion Exam
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadSampleImage('/assets/healthcare/oral-screening.jpg', 'mucosal')}
-                    style={{ fontSize: '0.72rem', padding: '5px 9px', borderRadius: '6px', background: 'var(--surface-2)', border: '1px solid var(--btn-primary-bg)', color: 'var(--btn-primary-bg)', cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    📸 Sample: Screening Clinic Photo
-                  </button>
-                </div>
-              </div>
 
               {mucosalImageSrc && (
                 <div>
@@ -944,34 +881,21 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                 </div>
               )}
 
-              {/* Sample Dental Photo Quick Buttons */}
-              <div style={{ marginBottom: '14px', background: 'var(--surface)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
-                  ⚡ Quick Demo Test Image (1-Click Load):
-                </span>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {mucosalImageSrc && (
+                <div style={{ marginBottom: '14px' }}>
                   <button
                     type="button"
-                    onClick={() => loadSampleImage('/assets/healthcare/dental-examination.jpg', 'dental')}
-                    style={{ fontSize: '0.72rem', padding: '5px 9px', borderRadius: '6px', background: 'var(--surface-2)', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}
+                    onClick={() => {
+                      setDentalImageSrc(mucosalImageSrc);
+                      setDentalQuality(mucosalQuality);
+                      setDentalResult(null);
+                    }}
+                    style={{ fontSize: '0.78rem', padding: '6px 12px', borderRadius: '6px', background: 'var(--surface-2)', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                   >
-                    🦷 Sample: Dental Examination Arch
+                    🔄 Reuse Step 1 Live Oral Photo for Dental Check
                   </button>
-                  {mucosalImageSrc && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDentalImageSrc(mucosalImageSrc);
-                        setDentalQuality(mucosalQuality);
-                        setDentalResult(null);
-                      }}
-                      style={{ fontSize: '0.72rem', padding: '5px 9px', borderRadius: '6px', background: 'var(--surface-2)', border: '1px solid var(--accent)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}
-                    >
-                      🔄 Reuse Step 1 Oral Photo
-                    </button>
-                  )}
                 </div>
-              </div>
+              )}
 
               {(dentalImageSrc || mucosalImageSrc) && (
                 <div>

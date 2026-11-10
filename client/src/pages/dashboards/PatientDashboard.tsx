@@ -369,78 +369,40 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   const [activeConsultationId] = useState<string>('CONS-PAD-8492');
   const [isDoctorCallActive, setIsDoctorCallActive] = useState<boolean>(false);
 
-  // Digital Prescription Viewer Modal State (Module 6 & 7)
-  const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
-  const [prescriptionsList] = useState<any[]>([
-    {
-      prescriptionId: 'RX-PAD-981240',
-      patientId: currentUser?.patientId || 'DEMO-PAD-8492',
-      patientName: currentUser?.fullName || 'Balaraju Somulu',
-      doctorName: 'Dr. K. Somasekhar (MO)',
-      doctorSpecialty: 'Dental Surgeon & Oral Medicine',
-      hospitalName: 'Community Health Centre (CHC) Paderu',
-      clinicalObservations: 'Superficial creamy white plaques on lower labial mucosa, erythematous background.',
-      diagnosisImpression: 'Oral Pseudomembranous Candidiasis (Oral Thrush)',
-      createdAt: new Date().toISOString(),
-      followUpDate: new Date(Date.now() + 7 * 86400000).toISOString(),
-      status: 'active',
-      medicines: [
-        {
-          medicineName: 'Clotrimazole 1% Mouth Paint',
-          dosage: '10 to 15 drops',
-          frequency: '3-4 times daily (Apply locally)',
-          durationDays: 7,
-          instructions: 'Swish and hold over lesions for 2 minutes after meals.',
-        },
-        {
-          medicineName: 'Warm Saline Gargle',
-          dosage: '1 Glass warm water + salt',
-          frequency: '3 times daily after food',
-          durationDays: 10,
-          instructions: 'Soothes inflamed mucosa and clears plaques.',
-        },
-        {
-          medicineName: 'Vitamin B-Complex Tablets',
-          dosage: '1 Tablet',
-          frequency: '1-0-0 (After breakfast)',
-          durationDays: 14,
-          instructions: 'Take with warm water.',
-        },
-      ],
-      dietaryLifestyleAdvice: [
-        'Strict 100% cessation of betel nut, tobacco, and gutka.',
-        'Avoid spicy, acidic, crunchy, or very hot foods.',
-      ],
-    },
-  ]);
+  // Real-Time Patient Identifier
+  const patientId = currentUser?.patientId || 'PAT-LOCAL-001';
+  const patientName = currentUser?.fullName || 'Beneficiary';
 
-  // Referrals List State (Module 5)
-  const [referralsList] = useState<any[]>([
-    {
-      referralId: 'REF-PAD-2026-081',
-      patientId: currentUser?.patientId || 'DEMO-PAD-8492',
-      patientName: currentUser?.fullName || 'Balaraju Somulu',
-      referringDoctorName: 'Dr. K. Somasekhar (CHC Paderu)',
-      destinationHospitalName: 'King George Hospital (KGH) Visakhapatnam',
-      specialty: 'Oral & Maxillofacial Oncology & Biopsy Unit',
-      priority: 'high_priority',
-      status: 'SCHEDULED',
-      reasonForReferral: 'Suspicious persistent mucosal lesion evaluation and punch biopsy verification.',
-      scheduledFollowUpDate: new Date(Date.now() + 4 * 86400000).toISOString(),
-    },
-    {
-      referralId: 'REF-PAD-2026-039',
-      patientId: currentUser?.patientId || 'DEMO-PAD-8492',
-      patientName: currentUser?.fullName || 'Balaraju Somulu',
-      referringDoctorName: 'Dr. Ananya Roy (PHC Dumbriguda)',
-      destinationHospitalName: 'Community Health Centre (CHC) Paderu',
-      specialty: 'Dental Surgeon & Oral Medicine',
-      priority: 'routine',
-      status: 'ATTENDED',
-      reasonForReferral: 'Initial oral mucosal evaluation and routine scaling.',
-      scheduledFollowUpDate: new Date(Date.now() - 12 * 86400000).toISOString(),
-    },
-  ]);
+  // Digital Prescription Viewer Modal State (Module 6 & 7) - Loaded from real patient records
+  const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
+  const [prescriptionsList] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem(`aarogya_prescriptions_${patientId}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Referrals List State (Module 5) - Loaded from real patient referrals
+  const [referralsList] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem(`aarogya_referrals_${patientId}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Real-time Uploaded Oral Screening History
+  const [screeningHistory, setScreeningHistory] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem(`aarogya_screenings_${patientId}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Voice Guidance (Module 11) - Web Speech API
   const speakText = (text: string) => {
@@ -496,10 +458,8 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
     salineRinse: true,
   });
 
-  const patientName = currentUser?.fullName || 'Balaraju Somulu';
-  const patientId = currentUser?.patientId || 'DEMO-PAD-8492';
-  const village = 'Dumbriguda Settlement';
-  const mandal = 'Paderu Agency';
+  const village = (currentUser as any)?.villageName || 'Agency Habitation';
+  const mandal = (currentUser as any)?.mandal || 'Paderu Agency';
 
   // Cleanup camera stream on unmount
   useEffect(() => {
@@ -583,7 +543,67 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       // Step 1: Run Primary Neural Model (ONNX WebAssembly)
       const result = await analyzeMucosalLesion(canvas, patientId);
       setLiveScreeningResult(result);
-      setScreeningDate(new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }));
+      const currentDateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      setScreeningDate(currentDateStr);
+
+      // Record in live screening history
+      const newHistoryEntry = {
+        id: `SCR-LIVE-${Date.now().toString().slice(-6)}`,
+        date: currentDateStr,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        imageUrl: dataUrl,
+        label: result.label,
+        confidence: Math.round(result.confidence * 100),
+        status: 'Real-Time AI Complete',
+        notes: (result as any).geminiAnalysis?.clinicalSummary || 'Live photo oral screening inference.',
+      };
+
+      setScreeningHistory((prev) => {
+        const updated = [newHistoryEntry, ...prev];
+        try {
+          localStorage.setItem(`aarogya_screenings_${patientId}`, JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      // Also dispatch to backend real-time screening case queue
+      try {
+        const token = localStorage.getItem('aarogya_token') || '';
+        fetch('/api/v1/screening/ai/analyze', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            patientId,
+            patientName,
+            imageBase64: dataUrl,
+          }),
+        }).catch(() => null);
+
+        // Also queue in real-time cases for MO Doctor Dashboard
+        const existingCasesStr = localStorage.getItem('aarogya_realtime_cases');
+        const existingCases = existingCasesStr ? JSON.parse(existingCasesStr) : [];
+        const newDoctorCase = {
+          id: newHistoryEntry.id,
+          name: patientName,
+          age: 40,
+          gender: 'Beneficiary',
+          village,
+          mandal,
+          lesionSite: result.label || 'Oral Cavity',
+          durationWeeks: 1,
+          aiTriageFlag: result.label,
+          riskCategory: result.label === 'opmd' ? 'HIGH' : result.label === 'benign_inflammatory' ? 'MODERATE' : 'LOW',
+          sha256Hash: `live_sha_${Date.now()}`,
+          photoUrl: dataUrl,
+          status: 'PENDING_REVIEW',
+          createdAt: new Date().toISOString(),
+        };
+        existingCases.unshift(newDoctorCase);
+        localStorage.setItem('aarogya_realtime_cases', JSON.stringify(existingCases));
+      } catch {}
 
       // Step 2: Intelligent Multi-Tier Gate:
       // Invoke Google Gemini Multimodal Vision to analyze mucosal observations, recommend specialist doctor & home remedies
@@ -665,36 +685,6 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
-  };
-
-  // Sample quick test triggers for testing the UI
-  const handleQuickTestSample = (sampleType: 'normal' | 'benign_inflammatory' | 'opmd' | 'suspected_malignant') => {
-    stopCameraStream();
-    if (!canvasRef.current) return;
-    const canvas = canvasRef.current;
-    canvas.width = 224;
-    canvas.height = 224;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    if (sampleType === 'normal') {
-      ctx.fillStyle = '#f8a5a5';
-      ctx.fillRect(0, 0, 224, 224);
-    } else if (sampleType === 'benign_inflammatory') {
-      ctx.fillStyle = '#dc2626';
-      ctx.fillRect(0, 0, 224, 224);
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(112, 112, 35, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = '#fef08a';
-      ctx.fillRect(0, 0, 224, 224);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(40, 40, 144, 144);
-    }
-
-    processCanvasImage(canvas);
   };
 
   const getGreeting = () => {
@@ -1450,74 +1440,46 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
               </div>
             )}
 
-            {/* Quick Testing Shortcut Triggers */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '18px' }}>
-              <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>
-                💡 {currentLang === 'te' ? 'నమూనా పరీక్షలు (Quick Test):' : currentLang === 'hi' ? 'नमूना परीक्षण:' : 'Quick Test Triggers:'}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleQuickTestSample('normal')}
+            {/* REAL-TIME COMPREHENSIVE RESULT CARD OR AWAITING UPLOAD STATE */}
+            {!capturedImagePreview && !liveScreeningResult ? (
+              <div
                 style={{
-                  background: 'rgba(16, 185, 129, 0.15)',
-                  border: '1px solid #10b981',
-                  color: '#34d399',
-                  borderRadius: '8px',
-                  padding: '4px 10px',
-                  fontSize: '0.76rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
+                  background: 'var(--surface)',
+                  border: '1.5px dashed var(--border)',
+                  borderRadius: '16px',
+                  padding: '36px 20px',
+                  textAlign: 'center',
+                  color: 'var(--text-secondary)',
+                  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)',
                 }}
               >
-                ✨ Normal Mouth
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickTestSample('benign_inflammatory')}
+                <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>📸</div>
+                <h4 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', color: 'var(--text-primary)', fontWeight: 700 }}>
+                  {currentLang === 'te'
+                    ? 'నిజ-సమయ ఓరల్ ఫోటో స్క్రీనింగ్ కోసం వేచి చూస్తున్నాము'
+                    : currentLang === 'hi'
+                    ? 'रीयल-टाइम ओरल फोटो स्क्रीनिंग की प्रतीक्षा है'
+                    : 'Awaiting Real-Time Oral Photo Upload'}
+                </h4>
+                <p style={{ margin: '0 auto', maxWidth: '440px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  {currentLang === 'te'
+                    ? 'పై కెమెరా వీక్షణ ద్వారా ప్రత్యక్ష ఫోటో తీయండి లేదా మీ గ్యాలరీ నుండి ఫోటో ఎంచుకోండి. ఆర్టిఫిషియల్ ఇంటెలిజెన్స్ మరియు జెమినీ మల్టీమోడల్ విశ్లేషణ ఇక్కడ స్వయంచాలకంగా కనిపిస్తాయి.'
+                    : currentLang === 'hi'
+                    ? 'ऊपर दिए गए कैमरे से लाइव फोटो लें या अपनी गैलरी से फोटो चुनें। एआई और जेमिनी मल्टीमॉडल विश्लेषण यहां दिखाई देगा।'
+                    : 'Open the live camera viewfinder above or choose a photo from your gallery. Multi-tier AI neural inference and Google Gemini vision analysis will run directly on your uploaded image.'}
+                </p>
+              </div>
+            ) : (
+              <div
                 style={{
-                  background: 'rgba(245, 158, 11, 0.15)',
-                  border: '1px solid #f59e0b',
-                  color: '#fbbf24',
-                  borderRadius: '8px',
-                  padding: '4px 10px',
-                  fontSize: '0.76rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
+                  background: diseaseInfo.badgeBg,
+                  border: `1.5px solid ${diseaseInfo.badgeBorder}`,
+                  borderRadius: '16px',
+                  padding: '22px',
+                  color: 'var(--text-primary)',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
                 }}
               >
-                🩹 Ulcer / Stomatitis
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickTestSample('opmd')}
-                style={{
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid #ef4444',
-                  color: '#f87171',
-                  borderRadius: '8px',
-                  padding: '4px 10px',
-                  fontSize: '0.76rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                ⚠️ Lichen Planus (OPMD)
-              </button>
-            </div>
-
-            {/* ========================================================================= */}
-            {/* REAL-TIME COMPREHENSIVE RESULT CARD (DISEASE, RISK, MEDICATION & CARE) */}
-            {/* ========================================================================= */}
-            <div
-              style={{
-                background: diseaseInfo.badgeBg,
-                border: `1.5px solid ${diseaseInfo.badgeBorder}`,
-                borderRadius: '16px',
-                padding: '22px',
-                color: 'var(--text-primary)',
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
-              }}
-            >
               {/* Result Header & Risk Badge */}
               <div
                 style={{
@@ -1826,6 +1788,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 ⚠️ <strong>DEMO AI Screening Assistance:</strong> This tool provides preliminary algorithmic triage support for remote tribal habitations and does NOT constitute a definitive medical diagnosis. All official diagnoses, prescriptions, and therapeutic plans are performed exclusively in person by qualified Medical Officers and Dental Officers at CHC Paderu.
               </div>
             </div>
+            )}
           </div>
 
           {/* Daily Oral Hygiene Progress & Habits Card */}
@@ -1947,7 +1910,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 lineHeight: 1.5,
               }}
             >
-              💡 <strong>Follow-up Reminder:</strong> Routine in-person clinical checkup due on <strong>14 Nov 2026</strong> at CHC Paderu. ASHA Lakshmi Devi will accompany your habitation group.
+              💡 <strong>Follow-up Reminder:</strong> Routine in-person clinical checkup at CHC Paderu. ASHA frontline staff can assist with transportation navigation.
             </div>
           </div>
         </div>
@@ -2535,49 +2498,63 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 ? '📜 मेरा चिकित्सा एवं स्क्रीनिंग इतिहास (Medical History Timeline)'
                 : '📜 My Medical & Screening History Timeline'}
             </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ padding: '14px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.03)', borderLeft: '4px solid #10b981' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#94a3b8' }}>
-                  <span>09 Nov 2026</span>
-                  <span style={{ color: '#10b981', fontWeight: 700 }}>AI + Multimodal Vision Complete</span>
+            {screeningHistory.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8' }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📂</div>
+                <div style={{ fontWeight: 700, color: '#ffffff', fontSize: '1rem', marginBottom: '4px' }}>
+                  {currentLang === 'te' ? 'ఇంకా ఎటువంటి స్క్రీనింగ్ ఫోటోలు అప్‌లోడ్ చేయలేదు' : 'No Screening Photos Uploaded Yet'}
                 </div>
-                <div style={{ fontWeight: 700, color: '#ffffff', marginTop: '4px' }}>
+                <p style={{ margin: '0 auto', maxWidth: '440px', fontSize: '0.82rem', color: '#cbd5e1' }}>
                   {currentLang === 'te'
-                    ? 'ఓరల్ శ్లేష్మ ఫోటో స్క్రీనింగ్ (Lower Labial Mucosa)'
-                    : currentLang === 'hi'
-                    ? 'ओरल म्यूकोसा फोटो स्क्रीनिंग (Lower Labial Mucosa)'
-                    : 'Oral Mucosa Photo Screening (Lower Labial Mucosa)'}
-                </div>
-                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#cbd5e1' }}>
-                  {currentLang === 'te'
-                    ? 'ప్రాథమిక మోడల్ మరియు జెమినీ క్లినికల్ విజన్ విశ్లేషణ: కాండిడియాసిస్ పూత పరిశీలించబడింది. CHC పాడేరు దంత విభాగానికి రిఫర్ చేయబడింది.'
-                    : currentLang === 'hi'
-                    ? 'प्राथमिक मॉडल और जेमिनी क्लीनिकल विज़न विश्लेषण: कैंडिडिआसिस पैच पाया गया। सीएचसी पाडेरु दंत चिकित्सा विभाग को रेफर किया गया।'
-                    : 'Primary neural model & Gemini Clinical Vision analysis: Candidiasis lesion observed. Referred to CHC Paderu Dental Department.'}
+                    ? 'హోమ్ ట్యాబ్‌లో కెమెరా ద్వారా లైవ్ ఫోటో తీయండి లేదా ఫోటో అప్‌లోడ్ చేయండి. మీ నిజ-సమయ స్క్రీనింగ్ ఫలితాలు ఇక్కడ రికార్డ్ అవుతాయి.'
+                    : 'Capture a live oral photo or choose a photo on the Health Home tab. Real-time screening inferences and doctor findings will be saved to your timeline.'}
                 </p>
               </div>
-
-              <div style={{ padding: '14px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.03)', borderLeft: '4px solid #38bdf8' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#94a3b8' }}>
-                  <span>24 Oct 2026</span>
-                  <span style={{ color: '#38bdf8', fontWeight: 700 }}>Frontline Camp Screened</span>
-                </div>
-                <div style={{ fontWeight: 700, color: '#ffffff', marginTop: '4px' }}>
-                  {currentLang === 'te'
-                    ? 'డుంబ్రిగుడ మొబైల్ ట్రైబల్ హెల్త్ క్యాంప్'
-                    : currentLang === 'hi'
-                    ? 'डुंब्रिगुडा मोबाइल आदिवासी स्वास्थ्य शिविर'
-                    : 'Dumbriguda Mobile Tribal Health Camp'}
-                </div>
-                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#cbd5e1' }}>
-                  {currentLang === 'te'
-                    ? 'ఆశా కార్యకర్త ఆధ్వర్యంలో పౌష్టికాహార పంపిణీ మరియు ప్రాథమిక నోటి తనిఖీ నిర్వహించబడింది.'
-                    : currentLang === 'hi'
-                    ? 'आशा कार्यकर्ता की देखरेख में पोषण आहार वितरण और प्राथमिक मौखिक जांच की गई।'
-                    : 'Frontline screening and nutritional counseling conducted by ASHA worker.'}
-                </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {screeningHistory.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    style={{
+                      padding: '16px',
+                      borderRadius: '12px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderLeft: '4px solid #10b981',
+                      display: 'flex',
+                      gap: '16px',
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    {item.imageUrl && (
+                      <img
+                        src={item.imageUrl}
+                        alt="Uploaded screening thumbnail"
+                        style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.15)' }}
+                      />
+                    )}
+                    <div style={{ flex: 1, minWidth: '220px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#94a3b8' }}>
+                        <span>📅 {item.date} {item.time ? `• ${item.time}` : ''}</span>
+                        <span style={{ color: '#10b981', fontWeight: 700 }}>● {item.status || 'AI Analyzed'}</span>
+                      </div>
+                      <div style={{ fontWeight: 700, color: '#ffffff', marginTop: '4px', fontSize: '0.95rem' }}>
+                        {item.label ? `Oral Triage: ${item.label.toUpperCase()}` : 'Oral Mucosa Visual Screening'}
+                      </div>
+                      <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#cbd5e1' }}>
+                        {item.notes || 'Real-time uploaded oral image evaluated.'}
+                      </p>
+                      {item.confidence && (
+                        <div style={{ fontSize: '0.74rem', color: '#38bdf8', marginTop: '6px' }}>
+                          Model Confidence: <strong>{item.confidence}%</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
