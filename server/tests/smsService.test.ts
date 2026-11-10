@@ -69,3 +69,4 @@ describe('MSG91 sendOtpSms Service Suite', () => {
     await expect(sendOtpSms('9848012345', '112233')).rejects.toThrow('SMS provider failed');
   });
 });
+

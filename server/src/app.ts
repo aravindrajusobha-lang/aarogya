@@ -6,6 +6,7 @@ import { requestLogger } from './middleware/requestLogger.js';
 import { healthRouter } from './modules/health/healthRoutes.js';
 import { storageRouter } from './modules/storage/storageRoutes.js';
 import { authRouter } from './modules/auth/authRoutes.js';
+import { otpRouter } from './modules/auth/otpRoutes.js';
 import { auditRouter } from './modules/audit/auditRoutes.js';
 import { consentRouter } from './modules/consent/consentRoutes.js';
 import { hospitalRouter } from './modules/hospital/hospitalRoutes.js';
@@ -149,6 +150,10 @@ export function createApp(): Express {
   // AI Oral Lesion Screening Routes (Online & Offline Sync)
   app.use('/api/ai', aiRouter);
   app.use('/api/v1/ai', aiRouter);
+
+  // Dedicated Patient OTP Authentication Routes (Send & Verify with MSG91 & bcrypt)
+  app.use('/api/otp', otpRouter);
+  app.use('/api/v1/otp', otpRouter);
 
   // 404 Handler (returns standard envelope)
 

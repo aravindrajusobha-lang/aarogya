@@ -34,3 +34,4 @@ export const sendOtpSms = async (phone: string, otp: string): Promise<void> => {
 };
 
 export default sendOtpSms;
+

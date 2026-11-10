@@ -640,7 +640,7 @@ aiRouter.post(
         consentTimestamp: new Date(),
         syncStatus: 'SYNCED',
         clientId,
-        geminiAnalysis: aiResponseData.geminiAnalysis,
+        geminiAnalysis: req.body.geminiAnalysis || moduleA?.geminiAnalysis,
       });
 
       // Also append to patient history
