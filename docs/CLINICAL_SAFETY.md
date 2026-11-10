@@ -52,3 +52,21 @@ The automated test suite enforces the following terminology rules via `wordingSa
 2. **Demo AI Inference:** Runs preliminary screening heuristics. Tags findings as `DEMO AI` risk classification (e.g., "Screening Flag: Visual Lesion Observed - Requires MO Review").
 3. **Medical Officer Review:** Only a logged-in Medical Officer can review images, validate or overturn screening flags, and initiate tele-referral.
 4. **Audit Logging:** Every view, screening edit, flag change, and referral creation is recorded with an immutable audit entry containing actor ID, role, action, and timestamp. No patient identifiers or secrets are recorded in audit logs.
+
+---
+
+## 5. Multi-Disease AI Engine Safety & Non-Diagnosis Governance
+
+### 5.1 Patient-Reported Habit Boundary
+- **Never Claim Visual Habit Detection:** The AI Engine never claims to detect tobacco, gutka, paan, or alcohol consumption from oral photographs. All habit, duration, and lifestyle data is explicitly labeled in reports and databases as `"Reported by patient"`.
+- **Habit-Symptom Scoring:** Module C questionnaire results are explicitly stamped with:  
+  `"To be validated by a clinician. Screening risk scoring aid only; not a diagnosis."`
+
+### 5.2 Multi-Factor Specialist Escalation
+- **Safety Triaging Invariant:** A patient with a high-risk history (e.g. non-healing ulcer > 2 weeks, trismus, or prolonged heavy tobacco exposure) MUST be flagged for specialist referral (`referToSpecialist: true`) even if the photographed oral image appears visually normal (`Module A = normal`). Visual inspection alone must never override critical red-flag clinical history.
+- **Low Confidence Threshold Safety:** Any mucosal lesion prediction with confidence $< 60\%$ is automatically escalated for in-person specialist review.
+
+### 5.3 Clear Separation of Dental and Oncological Triaging
+- Dental pathologies (dental caries, calculus, gingivitis, soft plaque deposits) produce a distinct, separate recommendation: `"Dentist Consultation Advised"`.
+- Dental conditions are color-coded **AMBER** (or **GREEN** if routine) and are strictly separated from oncological/OPMD **RED** specialist referrals to prevent patient alarm and unnecessary tertiary hospital crowding.
+

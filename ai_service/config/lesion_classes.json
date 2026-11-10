@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "classes": [
+    "benign_inflammatory",
+    "opmd",
+    "suspected_malignant"
+  ],
+  "specialist_referral_classes": [
+    "opmd",
+    "suspected_malignant",
+    "osmf",
+    "non_healing_ulcer"
+  ],
+  "confidence_threshold": 0.60
+}
+

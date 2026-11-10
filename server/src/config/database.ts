@@ -76,7 +76,7 @@ export async function verifyReplicaSet(conn: Connection = mongoose.connection): 
 }
 
 export async function connectDatabase(uri?: string): Promise<Connection> {
-  const mongoUri = uri || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aarogya_drishti?replicaSet=rs0';
+  const mongoUri = uri || process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aarogya_drishti';
 
   try {
     await mongoose.connect(mongoUri, {

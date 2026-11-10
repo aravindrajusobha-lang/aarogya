@@ -6,6 +6,7 @@ import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { initAgenda, stopAgenda } from './config/agenda.js';
 import { logger } from './config/logger.js';
 import { ensureStorageDirectory } from './modules/storage/storageService.js';
+import { runMasterSeed } from './modules/seed/masterSeed.js';
 
 const PORT = process.env.PORT || 5000;
 
@@ -13,6 +14,7 @@ async function bootstrap() {
   try {
     await ensureStorageDirectory();
     const conn = await connectDatabase();
+    await runMasterSeed();
     await initAgenda({ mongoConnection: conn });
 
     const app = createApp();

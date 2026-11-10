@@ -1,0 +1,1323 @@
+/* ==========================================================================
+   AAROGYA DRISHTI: ORAL CHECKUP DEMO & PROCEDURE VIDEO PLAYER
+   Based strictly on: Aarogya Drishti_ Oral Checkup Demo.md
+   Cinematic glassmorphism, responsive 16:9 stage, live scanning laser HUD,
+   dialogue bubbles, and telemetry doctor sync animation.
+   ========================================================================== */
+
+.oral-procedure-showcase-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(11, 17, 33, 0.94);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.7), 0 0 24px rgba(6, 214, 160, 0.1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #f8fafc;
+  width: 100%;
+}
+
+/* 1. Header Bar */
+.procedure-showcase-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.procedure-header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 260px;
+  flex: 1;
+}
+
+.procedure-header-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.procedure-live-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #06d6a0;
+  box-shadow: 0 0 10px #06d6a0;
+  animation: pulseLiveDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseLiveDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.6; }
+}
+
+.procedure-tag-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #38bdf8;
+}
+
+.procedure-simulation-chip {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.procedure-showcase-title {
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+}
+
+.procedure-showcase-subtitle {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+/* Header Actions & Controls */
+.procedure-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.procedure-mode-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.85);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.procedure-mode-btn {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.procedure-mode-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.procedure-mode-btn.mode-active {
+  background: #0ea5e9;
+  color: #ffffff;
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.35);
+}
+
+.demo-lang-pills {
+  display: flex;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.85);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.demo-lang-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.demo-lang-btn:hover {
+  color: #f8fafc;
+}
+
+.demo-lang-btn.lang-active {
+  background: rgba(6, 214, 160, 0.2);
+  color: #06d6a0;
+  border-color: rgba(6, 214, 160, 0.4);
+}
+
+/* 2. Visual Cinema Stage Container */
+.procedure-video-screen-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 280px;
+  max-height: 440px;
+  background: #020617;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8);
+}
+
+/* Clinical Operatory Video */
+.operatory-video-box {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.procedure-main-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ==========================================================================
+   ANIMATED STORYBOARD CINEMA SCENES (Aarogya Drishti Oral Checkup Demo)
+   ========================================================================== */
+
+.story-cinema-scene {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 30%, #0f172a 0%, #020617 85%);
+}
+
+.story-ambient-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 80% 20%, rgba(14, 165, 233, 0.12), transparent 50%),
+              radial-gradient(ellipse at 20% 80%, rgba(6, 214, 160, 0.1), transparent 50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.story-hud-grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Scene Top Status Bar */
+.story-scene-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 4;
+}
+
+.story-scene-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  backdrop-filter: blur(8px);
+}
+
+.step-glow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+}
+
+.step-num-txt {
+  font-weight: 800;
+  color: #38bdf8;
+  text-transform: uppercase;
+}
+
+.step-name-txt {
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.story-location-badge {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+/* Scene Footer Callout */
+.story-scene-footer-action {
+  position: relative;
+  z-index: 4;
+  background: rgba(15, 23, 42, 0.9);
+  border-left: 3px solid #06d6a0;
+  border-radius: 0 6px 6px 0;
+  padding: 6px 10px;
+  font-size: 0.73rem;
+  color: #cbd5e1;
+  line-height: 1.35;
+  backdrop-filter: blur(8px);
+}
+
+.animate-fade-in {
+  animation: fadeInScene 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInScene {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --------------------------------------------------------------------------
+   SCENE 0: INTRO OVERVIEW
+   -------------------------------------------------------------------------- */
+.story-scene-intro {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 10px 14px;
+  gap: 8px;
+  margin: auto;
+}
+
+.intro-emblem-wrap {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.intro-emblem-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed rgba(6, 214, 160, 0.5);
+  animation: rotateEmblem 20s linear infinite;
+}
+
+@keyframes rotateEmblem {
+  to { transform: rotate(360deg); }
+}
+
+.intro-leaf-icon {
+  font-size: 2rem;
+  animation: pulseLeaf 3s infinite ease-in-out;
+}
+
+@keyframes pulseLeaf {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+.intro-big-title {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #f8fafc 30%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
+}
+
+.intro-sub-banner {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #34d399;
+  font-weight: 600;
+}
+
+.intro-desc-lead {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  max-width: 480px;
+  line-height: 1.45;
+}
+
+.intro-tags-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.intro-chip {
+  background: rgba(30, 41, 59, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  color: #e2e8f0;
+}
+
+/* --------------------------------------------------------------------------
+   SCENE 1: HOME VISIT (Lakshmi meets Ravi)
+   -------------------------------------------------------------------------- */
+.story-scene-home-visit {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  gap: 10px;
+}
+
+.story-split-actors {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  margin: auto 0;
+}
+
+.actor-card {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  backdrop-filter: blur(8px);
+}
+
+.actor-card.actor-lakshmi {
+  border-color: rgba(6, 214, 160, 0.35);
+  box-shadow: 0 4px 16px rgba(6, 214, 160, 0.1);
+}
+
+.actor-card.actor-ravi {
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.1);
+}
+
+.actor-avatar-halo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actor-emoji {
+  font-size: 1.6rem;
+}
+
+.actor-live-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #06d6a0;
+  box-shadow: 0 0 6px #06d6a0;
+}
+
+.actor-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.actor-name {
+  font-size: 0.82rem;
+  color: #f8fafc;
+}
+
+.actor-role-chip {
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.actor-speech-bubble {
+  background: rgba(30, 41, 59, 0.9);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: #f1f5f9;
+  position: relative;
+}
+
+.lakshmi-bubble {
+  border-left: 3px solid #06d6a0;
+}
+
+.ravi-bubble {
+  border-left: 3px solid #f59e0b;
+}
+
+.actor-speech-bubble p {
+  margin: 0;
+}
+
+.speech-quote-icon {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.2);
+  line-height: 1;
+  display: block;
+}
+
+.story-center-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.connector-circle {
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.connector-circle span {
+  font-size: 1.1rem;
+}
+
+.connector-circle small {
+  font-size: 0.55rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   SCENE 2: CAMERA AI SCAN (White patch found)
+   -------------------------------------------------------------------------- */
+.story-scene-scan {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  gap: 10px;
+}
+
+.scan-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 14px;
+  align-items: center;
+  margin: auto 0;
+}
+
+.scan-actor-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scan-actor-box .actor-card.mini {
+  padding: 8px 10px;
+}
+
+.scan-instruction-card {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.scan-instruction-card h5 {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  color: #38bdf8;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.scan-instruction-card ul {
+  margin: 0;
+  padding-left: 14px;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* Smartphone Viewfinder Mockup */
+.phone-viewfinder-mockup {
+  position: relative;
+  background: #020617;
+  border: 2px solid rgba(56, 189, 248, 0.5);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 20px rgba(14, 165, 233, 0.25);
+  aspect-ratio: 16 / 10;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-screen-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.95);
+  padding: 3px 8px;
+  font-size: 0.62rem;
+  color: #94a3b8;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 5;
+}
+
+.phone-camera-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+.phone-hud-title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #38bdf8;
+}
+
+.phone-camera-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.phone-camera-feed-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Animated Laser Line */
+.hud-laser-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #06d6a0 50%, transparent);
+  box-shadow: 0 0 10px #06d6a0;
+  animation: laserScan 2.5s infinite ease-in-out;
+  z-index: 3;
+}
+
+@keyframes laserScan {
+  0% { top: 10%; opacity: 0.3; }
+  50% { top: 85%; opacity: 1; }
+  100% { top: 10%; opacity: 0.3; }
+}
+
+/* Corner Reticles */
+.hud-target-bracket {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #38bdf8;
+  z-index: 4;
+}
+
+.hud-target-bracket.top-left {
+  top: 8px;
+  left: 8px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.hud-target-bracket.top-right {
+  top: 8px;
+  right: 8px;
+  border-left: none;
+  border-bottom: none;
+}
+
+.hud-target-bracket.bottom-left {
+  bottom: 8px;
+  left: 8px;
+  border-right: none;
+  border-top: none;
+}
+
+.hud-target-bracket.bottom-right {
+  bottom: 8px;
+  right: 8px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Detection Bounding Box */
+.hud-detection-bounding-box {
+  position: absolute;
+  top: 35%;
+  left: 38%;
+  width: 32%;
+  height: 38%;
+  border: 1.5px dashed #fbbf24;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.12);
+  z-index: 4;
+  animation: pulseBox 2s infinite ease-in-out;
+}
+
+@keyframes pulseBox {
+  0%, 100% { border-color: #fbbf24; box-shadow: 0 0 6px rgba(245, 158, 11, 0.3); }
+  50% { border-color: #f59e0b; box-shadow: 0 0 14px rgba(245, 158, 11, 0.6); }
+}
+
+.detection-tag-pulse {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  background: #d97706;
+  color: #ffffff;
+  font-size: 0.55rem;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* App Alert Banner */
+.hud-app-alert-pill {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  border-radius: 6px;
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+
+.alert-bell-icon {
+  font-size: 1rem;
+}
+
+.alert-text-body {
+  font-size: 0.68rem;
+  line-height: 1.25;
+  color: #f1f5f9;
+}
+
+.alert-text-body strong {
+  color: #fbbf24;
+  margin-right: 4px;
+}
+
+/* --------------------------------------------------------------------------
+   SCENE 3: DOCTOR TELE-REPORT SYNC
+   -------------------------------------------------------------------------- */
+.story-scene-sync {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  gap: 10px;
+}
+
+.sync-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  margin: auto 0;
+}
+
+.sync-node-card {
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-node-card.asha-node {
+  border-color: rgba(6, 214, 160, 0.35);
+}
+
+.sync-node-card.doctor-node {
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 16px rgba(14, 165, 233, 0.15);
+}
+
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-icon {
+  font-size: 1.5rem;
+}
+
+.node-header strong {
+  display: block;
+  font-size: 0.82rem;
+  color: #f8fafc;
+}
+
+.node-header small {
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.node-packet-badge {
+  font-size: 0.62rem;
+  color: #34d399;
+  background: rgba(6, 214, 160, 0.15);
+  border: 1px solid rgba(6, 214, 160, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.node-appointment-ticket {
+  font-size: 0.65rem;
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.15);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  padding: 3px 6px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.doctor-bubble {
+  border-left: 3px solid #38bdf8;
+}
+
+/* Telecom Beam */
+.sync-telecom-beam {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  min-width: 90px;
+}
+
+.beam-pulse-line {
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #06d6a0, #38bdf8);
+  box-shadow: 0 0 8px #38bdf8;
+}
+
+.beam-packet-orb {
+  position: absolute;
+  top: -10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  box-shadow: 0 0 10px #0ea5e9;
+  animation: movePacket 2s infinite ease-in-out;
+}
+
+@keyframes movePacket {
+  0% { left: 0%; }
+  100% { left: 85%; }
+}
+
+.beam-label {
+  font-size: 0.58rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   SCENE 4: HEALTHY RECOVERY & VALUE
+   -------------------------------------------------------------------------- */
+.story-scene-recovery {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  gap: 10px;
+}
+
+.recovery-hero-card {
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(6, 214, 160, 0.35);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  margin: auto 0;
+  box-shadow: 0 0 20px rgba(6, 214, 160, 0.12);
+}
+
+.recovery-icon-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(6, 214, 160, 0.15);
+  border: 1px solid rgba(6, 214, 160, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+}
+
+.recovery-headline {
+  margin: 0;
+  font-size: 1rem;
+  color: #f1f5f9;
+  font-weight: 700;
+  max-width: 460px;
+  line-height: 1.35;
+}
+
+.recovery-dialog-quote {
+  background: rgba(30, 41, 59, 0.85);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-left: 3px solid #06d6a0;
+  max-width: 440px;
+}
+
+.quote-avatar {
+  font-size: 1.2rem;
+}
+
+.recovery-dialog-quote blockquote {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  font-style: italic;
+  line-height: 1.3;
+}
+
+.quote-author {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.recovery-outro-box {
+  margin-top: 2px;
+}
+
+.outro-title {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.outro-lead {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+/* Play Center Overlay Button */
+.procedure-play-center-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(14, 165, 233, 0.9);
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 0 24px rgba(14, 165, 233, 0.6);
+  transition: transform 0.2s ease;
+}
+
+.procedure-play-center-btn:hover {
+  transform: translate(-50%, -50%) scale(1.12);
+  background: #0284c7;
+}
+
+.play-triangle-icon {
+  width: 0;
+  height: 0;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-left: 16px solid #ffffff;
+  margin-left: 4px;
+}
+
+/* ==========================================================================
+   3. BOTTOM HUD SCRUBBER & PLAYBACK CONTROLS BAR
+   ========================================================================== */
+.procedure-hud-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.hud-primary-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-control-btn {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.hud-control-btn:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #38bdf8;
+  border-color: #38bdf8;
+}
+
+.hud-control-btn.btn-active {
+  background: rgba(6, 214, 160, 0.2);
+  color: #06d6a0;
+  border-color: rgba(6, 214, 160, 0.5);
+}
+
+.hud-time-readout {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: monospace;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-left: 4px;
+}
+
+.time-cur {
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
+/* Scrubber Range Input */
+.hud-scrubber-track-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.hud-timeline-slider {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+  z-index: 2;
+  position: relative;
+}
+
+.hud-timeline-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #06d6a0;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px #06d6a0;
+  cursor: pointer;
+}
+
+.hud-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 6px;
+  background: linear-gradient(90deg, #0ea5e9, #06d6a0);
+  border-radius: 9999px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.hud-secondary-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-speed-pill {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   4. PROCEDURE CHAPTERS NAVIGATION CARDS
+   ========================================================================== */
+.procedure-chapters-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.procedure-chapters-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.chapters-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.procedure-queue-link-btn {
+  background: rgba(6, 214, 160, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(6, 214, 160, 0.35);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.procedure-queue-link-btn:hover {
+  background: rgba(6, 214, 160, 0.3);
+  color: #ffffff;
+}
+
+.procedure-chapters-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.procedure-chapter-card {
+  position: relative;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: all 0.2s ease;
+}
+
+.procedure-chapter-card:hover {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.procedure-chapter-card.chapter-active {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: #0ea5e9;
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
+}
+
+.chapter-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chapter-step-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #38bdf8;
+}
+
+.chapter-time-pill {
+  font-size: 0.6rem;
+  color: #64748b;
+  font-family: monospace;
+}
+
+.chapter-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1.25;
+}
+
+.chapter-action-text {
+  margin: 0;
+  font-size: 0.64rem;
+  color: #94a3b8;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chapter-active-glow-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #38bdf8;
+  box-shadow: 0 0 6px #38bdf8;
+}
+
+/* ==========================================================================
+   HERO BANNER TWO-COLUMN INTEGRATION
+   Eliminates empty space on right side of hero and embeds video player
+   ========================================================================== */
+.hero-procedure-video-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+}
+
+.forest-hero-card,
+.theme-study .forest-hero-card {
+  display: grid !important;
+  grid-template-columns: 1fr 1.05fr !important;
+  gap: 32px !important;
+  align-items: center !important;
+}
+
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* Responsiveness */
+@media (max-width: 1080px) {
+  .forest-hero-card,
+  .theme-study .forest-hero-card {
+    grid-template-columns: 1fr !important;
+    gap: 24px !important;
+    padding: 24px 20px !important;
+  }
+  .procedure-chapters-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .story-split-actors {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .story-center-connector {
+    display: none;
+  }
+  .scan-layout-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .sync-layout-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .sync-telecom-beam {
+    display: none;
+  }
+  .procedure-chapters-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

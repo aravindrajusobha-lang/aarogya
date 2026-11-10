@@ -1,543 +1,1077 @@
 import React, { useState, useEffect } from 'react';
 import { SimulationBanner } from './components/SimulationBanner';
-import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { OfflineStatusIndicator } from './components/OfflineStatusIndicator';
-import { LoadingView, EmptyView, ErrorView, SuccessView } from './components/UIStateViews';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { Sidebar } from './components/Sidebar';
+import { NAV_ITEMS } from './components/navItems';
+import { DashboardOverview } from './components/DashboardOverview';
+import { AsrDistrictMap } from './components/AsrDistrictMap';
+import { ScreeningManager } from './components/ScreeningManager';
+import { TeleconsultationManager } from './components/TeleconsultationManager';
+import { PatientManager } from './components/PatientManager';
+import { AppointmentManager } from './components/AppointmentManager';
+import { CampManager } from './components/CampManager';
+import { CampPlanningManager } from './components/CampPlanningManager';
+import { AssignmentManager } from './components/AssignmentManager';
+import { VillageGroupManager } from './components/VillageGroupManager';
+import { SpecialistDirectory } from './components/SpecialistDirectory';
+import { HospitalManager } from './components/HospitalManager';
+import { LocationAdminManager } from './components/LocationAdminManager';
+import { InvitationManager } from './components/InvitationManager';
+import { NotificationCenter } from './components/NotificationCenter';
+import { AccountRecoveryManager } from './components/AccountRecoveryManager';
+import { ConsentManager } from './components/ConsentManager';
+import { CapabilityMatrixViewer } from './components/CapabilityMatrixViewer';
+import { AadhaarMockManager } from './components/AadhaarMockManager';
+import { AuthPanel, AuthUser, AuthTokens } from './components/AuthPanel';
+import { AIRobotAssistant } from './components/AIRobotAssistant';
+import AarogyaDrishtiIntro from './components/AarogyaDrishtiIntro';
+import { DashboardLayout } from './components/DashboardLayout';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { Login } from './pages/Login';
+import { LandingPage } from './pages/LandingPage';
+import { PatientDashboard } from './pages/dashboards/PatientDashboard';
+import { DoctorDashboard } from './pages/dashboards/DoctorDashboard';
+import { AdminDashboard } from './pages/dashboards/AdminDashboard';
+import { AiOralHealthEngine } from './components/AiEngine/AiOralHealthEngine';
+import { PageTransition } from './components/PageTransition';
+import { LanguagePreferenceModal } from './components/LanguagePreferenceModal';
+import { ThemeToggle } from './components/ThemeToggle';
 import { LanguageCode, translations, getClientTranslation } from './i18n';
-import { db, OfflineScreening } from './db/aarogyaDb';
 
-interface SystemHealthData {
-  status: string;
-  service: string;
-  version: string;
-  simulation: boolean;
-  database: {
-    connected: boolean;
-    isReplicaSet: boolean;
-    setName: string | null;
-    supportsTransactions: boolean;
-  };
-  scheduler: {
-    running: boolean;
-    jobCount: number;
-  };
-}
+export type MainTabType =
+  | 'dashboard'
+  | 'asr-map'
+  | 'screening'
+  | 'ai-screening'
+  | 'teleconsultation'
+  | 'patients'
+  | 'appointments'
+  | 'camps'
+  | 'camp-planning'
+  | 'assignments'
+  | 'village-groups'
+  | 'specialists'
+  | 'hospitals'
+  | 'location-admin'
+  | 'invitations'
+  | 'notifications'
+  | 'recovery'
+  | 'consent'
+  | 'matrix'
+  | 'aadhaar'
+  | 'diagnostics'
+  | 'auth'
+  | 'reports'
+  | 'help';
 
 export const App: React.FC = () => {
-  const [lang, setLang] = useState<LanguageCode>('en');
-  const dict = translations[lang];
+  const [lang, setLang] = useState<LanguageCode>(() => {
+    try {
+      const saved = localStorage.getItem('aarogya_language');
+      if (saved && ['en', 'te', 'hi', 'ta', 'kn', 'ml'].includes(saved)) {
+        return saved as LanguageCode;
+      }
+    } catch {}
+    return 'te'; // Default to Telugu for ITDA Paderu Tribal Agency
+  });
+
+  const [showLanguageModal, setShowLanguageModal] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem('aarogya_lang_prompted');
+    } catch {
+      return false;
+    }
+  });
+
+  const dict = translations[lang] || translations.en;
   const t = (path: string) => getClientTranslation(dict, path);
 
-  // System Diagnostics State
-  const [systemHealth, setSystemHealth] = useState<SystemHealthData | null>(null);
-  const [healthLoading, setHealthLoading] = useState<boolean>(true);
-  const [healthError, setHealthError] = useState<string | null>(null);
+  // Active Main Navigation Tab (Defaulting to Command Dashboard)
+  const [mainTab, setMainTab] = useState<MainTabType>('dashboard');
 
-  // ASHA Screening Form State
-  const [patientDemoId, setPatientDemoId] = useState<string>('DEMO-PAD-8492');
-  const [tobaccoHabit, setTobaccoHabit] = useState<boolean>(true);
-  const [durationYears, setDurationYears] = useState<number>(8);
-  const [lesionObserved, setLesionObserved] = useState<boolean>(true);
-  const [lesionType, setLesionType] = useState<string>('whitePatch');
-  const [anatomicalSite, setAnatomicalSite] = useState<string>('buccalMucosa');
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-
-  // Screening Submission State
-  const [submitting, setSubmitting] = useState<boolean>(false);
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // State Demo Viewer Toggle
-  const [demoState, setDemoState] = useState<'normal' | 'loading' | 'empty' | 'error' | 'success'>('normal');
-
-  // Fetch System Health from Backend API Envelope
-  const fetchHealth = async () => {
-    setHealthLoading(true);
-    setHealthError(null);
+  // Cinematic Intro Animation State (Plays on initial opening of website; hidden for all roles after register/login)
+  const [showIntro, setShowIntro] = useState<boolean>(() => {
     try {
-      const res = await fetch('/api/v1/health');
-      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
-      const payload = await res.json();
-      if (payload.success && payload.data) {
-        setSystemHealth(payload.data);
-      } else {
-        throw new Error(payload.error?.message || 'Failed to parse response envelope');
-      }
-    } catch (err) {
-      setHealthError((err as Error).message);
-    } finally {
-      setHealthLoading(false);
+      return !sessionStorage.getItem('aarogya_intro_seen');
+    } catch {
+      return false;
     }
+  });
+
+  // Sidebar Layout State (Preserved Side Dashboard)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
+  // Supported 2D Animated Nurse Assistant ("Drishti AI") State (hidden by default)
+  const [isNurseAssistantOpen, setIsNurseAssistantOpen] = useState<boolean>(() => {
+    return localStorage.getItem('aarogya_va_open') === 'true';
+  });
+
+  const toggleNurseAssistant = () => {
+    setIsNurseAssistantOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem('aarogya_va_open', String(next));
+      return next;
+    });
   };
+
+  // Authentication & Session State (with resilient fallback for corrupted storage)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('aarogya_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      localStorage.removeItem('aarogya_user');
+      return null;
+    }
+  });
+  const [tokens, setTokens] = useState<AuthTokens | null>(() => {
+    try {
+      const saved = localStorage.getItem('aarogya_tokens');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      localStorage.removeItem('aarogya_tokens');
+      return null;
+    }
+  });
+
+    const handleLoginSuccess = (user: AuthUser, userTokens: AuthTokens) => {
+      setCurrentUser(user);
+      setTokens(userTokens);
+      localStorage.setItem('aarogya_user', JSON.stringify(user));
+      localStorage.setItem('aarogya_tokens', JSON.stringify(userTokens));
+    };
+
+    const handleLogout = async () => {
+      if (tokens?.accessToken) {
+        try {
+          await fetch('/api/v1/auth/logout', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tokens.accessToken}` },
+          });
+        } catch {
+          // Continue clearing client credentials
+        }
+      }
+      setCurrentUser(null);
+      setTokens(null);
+      localStorage.removeItem('aarogya_user');
+      localStorage.removeItem('aarogya_tokens');
+    };
+
+    const handleQuickDemoLogin = async (role?: 'asha' | 'doctor') => {
+      try {
+        const targetRole = role || 'asha';
+        const credentials =
+          targetRole === 'doctor'
+            ? { username: 'doctor.paderu', password: 'Doctor@2026' }
+            : { username: 'asha.pad01', password: 'Asha@2026' };
+
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(credentials),
+        });
+
+        const json = await res.json();
+        if (json.success && json.data) {
+          const authTokens: AuthTokens = {
+            accessToken: json.data.accessToken || json.data.tokens?.accessToken,
+            refreshToken: json.data.refreshToken || json.data.tokens?.refreshToken,
+            deviceSessionId: json.data.deviceSessionId || json.data.tokens?.deviceSessionId || '',
+          };
+          handleLoginSuccess(json.data.user, authTokens);
+        } else {
+          setMainTab('auth');
+        }
+      } catch {
+        setMainTab('auth');
+      }
+    };
+
+  // Hash Route Listener for Role-Based Dashboards & Login
+  const [currentRoute, setCurrentRoute] = useState<string>(() => window.location.hash || '#/');
 
   useEffect(() => {
-    fetchHealth();
+    const handleHashChange = () => {
+      setCurrentRoute(window.location.hash || '#/');
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Handle Photo File Select & Preview
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        setPhotoPreview(uploadEvent.target?.result as string);
+  const getPageTitle = (tab: MainTabType): Record<LanguageCode, string> => {
+    const found = NAV_ITEMS.find((item) => item.id === tab);
+    if (found) {
+      return {
+        en: found.label,
+        te: found.labelTe || found.label,
+        hi: found.labelHi || found.label,
+        ta: found.labelTa || found.label,
+        kn: found.labelKn || found.label,
+        ml: found.labelMl || found.label,
       };
-      reader.readAsDataURL(file);
     }
+    return {
+      en: 'Aarogya-Drishti',
+      te: 'ఆరోగ్య దృష్టి',
+      hi: 'आरोग्य दृष्टि',
+      ta: 'ஆரோக்கிய திருஷ்டி',
+      kn: 'ಆರೋಗ್ಯ ದೃಷ್ಟಿ',
+      ml: 'ആരോഗ്യ ദൃഷ്ടಿ',
+    };
   };
 
-  // Preliminary Screening Risk Category (Demo AI Heuristic)
-  const computeRiskTier = (): { tier: 'Tier 1' | 'Tier 2' | 'Tier 3'; label: string; class: string } => {
-    if (!lesionObserved) {
-      return { tier: 'Tier 1', label: t('screening.riskTier.low'), class: 'risk-tier-1' };
-    }
-    if (lesionType === 'ulcer' || lesionType === 'redPatch') {
-      return { tier: 'Tier 3', label: t('screening.riskTier.high'), class: 'risk-tier-3' };
-    }
-    return { tier: 'Tier 2', label: t('screening.riskTier.moderate'), class: 'risk-tier-2' };
-  };
+    const activeTitle = getPageTitle(mainTab);
 
-  const riskTier = computeRiskTier();
+    // Omnipresent Multilingual AI Assistant Chatbot ("Drishti AI")
+    const renderAssistant = () => (
+      <AIRobotAssistant
+        currentLang={lang}
+        onSelectLang={setLang}
+        onNavigateTab={(tab) => {
+          if (tab === 'home' || tab === 'landing') {
+            window.location.hash = '#/';
+          } else if (tab === 'patient') {
+            window.location.hash = '#/patient';
+          } else if (tab === 'doctor') {
+            window.location.hash = '#/doctor';
+          } else if (tab === 'admin') {
+            window.location.hash = '#/admin';
+          } else if (tab === 'login') {
+            window.location.hash = '#/login';
+          } else {
+            setMainTab(tab as MainTabType);
+          }
+        }}
+        isOpen={isNurseAssistantOpen}
+        onClose={toggleNurseAssistant}
+        authToken={tokens?.accessToken}
+        currentUser={currentUser}
+        onLoginSuccess={handleLoginSuccess}
+        activeTab={mainTab}
+      />
+    );
 
-  // Save to Local Dexie DB (Offline First)
-  const handleSaveOffline = async () => {
-    try {
-      const record: OfflineScreening = {
-        patientDemoId,
-        campId: 'CAMP-PADERU-DEMO-01',
-        ashaId: 'ASHA-CHINTAPALLI-102',
-        visualFindings: {
-          lesionObserved,
-          lesionType,
-          anatomicalSite,
-        },
-        demoRiskTier: riskTier.tier,
-        photoDataUrl: photoPreview || undefined,
-        syncStatus: 'local_pending',
-        createdAt: Date.now(),
-      };
-
-      await db.screenings.add(record);
-      setSubmitSuccess(
-        `Screening saved to Dexie local database for demo patient ${patientDemoId}. Queued for synchronization.`
+    // 0. OPENING CINEMATIC INTRO: Shown when first opening the website
+    if (showIntro) {
+      return (
+        <AarogyaDrishtiIntro
+          onComplete={() => {
+            try {
+              sessionStorage.setItem('aarogya_intro_seen', 'true');
+            } catch {
+              // ignore
+            }
+            setShowIntro(false);
+          }}
+        />
       );
-    } catch (err) {
-      setSubmitError((err as Error).message);
     }
-  };
 
-  // Submit via Private Storage API (Simulated Upload)
-  const handleSubmitOnline = async () => {
-    setSubmitting(true);
-    setSubmitError(null);
-    setSubmitSuccess(null);
-
-    try {
-      // 1. Create a simulated blob if photo exists or generate a mock binary
-      const mockBlob = new Blob(['SIMULATED_ORAL_CAVITY_IMAGE_BLOB'], { type: 'image/png' });
-      const formData = new FormData();
-      formData.append('file', mockBlob, `${patientDemoId}_oral_mucosa_demo.png`);
-
-      const uploadRes = await fetch('/api/v1/storage/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer sim_user_asha_chintapalli_01',
-        },
-        body: formData,
-      });
-
-      const payload = await uploadRes.json();
-      if (!payload.success) {
-        throw new Error(payload.error?.message || 'Storage upload rejected');
-      }
-
-      setSubmitSuccess(
-        `Screening image securely uploaded to private storage (ID: ${payload.data.fileId}). File has ZERO public URLs and requires MO authorization to view.`
-      );
-    } catch (err) {
-      setSubmitError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="app-layout">
-      {/* Simulation Banner - Mandatory Non-dismissible Header */}
-      <SimulationBanner />
-
-      <main className="app-container">
-        {/* Header Bar */}
-        <header className="app-header">
-          <div>
-            <h1 className="brand-title">
-              <span>🩺</span> {t('app.title')}
-            </h1>
-            <p className="brand-subtitle">{t('app.subtitle')} — ITDA Paderu</p>
-          </div>
-          <div className="header-controls">
-            <OfflineStatusIndicator
-              onlineLabel={t('app.onlineNotice')}
-              offlineLabel={t('app.offlineNotice')}
+    // 1A. ROUTE: /login -> Dedicated Login Screen (Patient, Doctor, Admin)
+    if (currentRoute.startsWith('#/login')) {
+      return (
+        <>
+          <PageTransition routeKey="#/login">
+            <SimulationBanner />
+            <LanguagePreferenceModal
+              isOpen={showLanguageModal}
+              currentLang={lang}
+              onSelectLanguage={(chosen) => {
+                setLang(chosen);
+                try {
+                  localStorage.setItem('aarogya_language', chosen);
+                  localStorage.setItem('aarogya_lang_prompted', 'true');
+                } catch {}
+              }}
+              onClose={() => setShowLanguageModal(false)}
             />
-            <LanguageSwitcher currentLang={lang} onSelect={setLang} />
-          </div>
-        </header>
+            <Login
+              currentLang={lang}
+              onSelectLang={(chosen) => {
+                setLang(chosen);
+                try {
+                  localStorage.setItem('aarogya_language', chosen);
+                } catch {}
+              }}
+              onLoginSuccess={(user, userTokens) => {
+                handleLoginSuccess(user, userTokens);
+                const role = (user.role || '').toUpperCase();
+                if (role.includes('ADMIN')) window.location.hash = '#/admin';
+                else if (role.includes('DOCTOR') || role.includes('MEDICAL')) window.location.hash = '#/doctor';
+                else window.location.hash = '#/patient';
+              }}
+              onNavigateHome={() => (window.location.hash = '#/')}
+              onPlayIntro={() => setShowIntro(true)}
+            />
+          </PageTransition>
+          {renderAssistant()}
+        </>
+      );
+    }
 
-        {/* System Diagnostics & Backend Status */}
-        <section className="dashboard-grid">
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">System Infrastructure Status</h2>
-              <span className="badge badge-mock">Simulation Mode</span>
-            </div>
+    // 1B. ROUTE: Public Landing Page (Home, Services, Camp Schedule, Why Us, Specialists)
+    if (
+      currentRoute === '#/' ||
+      currentRoute === '' ||
+      currentRoute === '#/home' ||
+      (!currentUser &&
+        !currentRoute.startsWith('#/admin') &&
+        !currentRoute.startsWith('#/doctor') &&
+        !currentRoute.startsWith('#/patient'))
+    ) {
+      return (
+        <>
+          <PageTransition routeKey="#/home">
+            <SimulationBanner />
+            <LanguagePreferenceModal
+              isOpen={showLanguageModal}
+              currentLang={lang}
+              onSelectLanguage={(chosen) => {
+                setLang(chosen);
+                try {
+                  localStorage.setItem('aarogya_language', chosen);
+                  localStorage.setItem('aarogya_lang_prompted', 'true');
+                } catch {}
+              }}
+              onClose={() => setShowLanguageModal(false)}
+            />
+            <LandingPage
+              currentLang={lang}
+              onSelectLang={(chosen) => {
+                setLang(chosen);
+                try {
+                  localStorage.setItem('aarogya_language', chosen);
+                } catch {}
+              }}
+              currentUser={currentUser}
+              onNavigateLogin={() => (window.location.hash = '#/login')}
+              onNavigatePatient={() => (window.location.hash = '#/patient')}
+              onNavigateDoctor={() => (window.location.hash = '#/doctor')}
+              onNavigateAdmin={() => (window.location.hash = '#/admin')}
+              onOpenScreening={() => {
+                if (currentUser) {
+                  window.location.hash = '#/patient';
+                } else {
+                  window.location.hash = '#/login';
+                }
+              }}
+            />
+          </PageTransition>
+          {renderAssistant()}
+        </>
+      );
+    }
 
-            {healthLoading ? (
-              <LoadingView message="Verifying backend replica set and scheduler..." />
-            ) : healthError ? (
-              <ErrorView message={`Failed to connect to backend: ${healthError}`} onRetry={fetchHealth} />
-            ) : systemHealth ? (
-              <div style={{ fontSize: '0.85rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>MongoDB Replica Set:</span>
-                  <span style={{ color: systemHealth.database.isReplicaSet ? 'var(--color-status-success)' : 'var(--color-status-warning)', fontWeight: 700 }}>
-                    {systemHealth.database.isReplicaSet ? `Connected (${systemHealth.database.setName})` : 'Standalone (No Replica)'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>ACID Transactions:</span>
-                  <span style={{ color: systemHealth.database.supportsTransactions ? 'var(--color-status-success)' : 'var(--color-status-danger)', fontWeight: 700 }}>
-                    {systemHealth.database.supportsTransactions ? 'Verified Supported' : 'Unsupported'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>Agenda Scheduler:</span>
-                  <span style={{ color: systemHealth.scheduler.running ? 'var(--color-status-success)' : 'var(--color-status-danger)', fontWeight: 700 }}>
-                    {systemHealth.scheduler.running ? 'Active (Direct Mongo)' : 'Offline'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>Response Envelope:</span>
-                  <span style={{ color: 'var(--color-status-success)', fontWeight: 700 }}>
-                    Strict {'{ success, data, error, meta }'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>Log Redaction:</span>
-                  <span style={{ color: 'var(--color-status-success)', fontWeight: 700 }}>
-                    Pino PHI & Secrets Redaction
-                  </span>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          {/* Clinical Simulation Boundaries */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Simulation Boundaries & Adapters</h2>
-              <span className="badge badge-mock">DEMO ADAPTERS</span>
-            </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginBottom: '14px' }}>
-              All external services are simulated with transparent adapters:
-            </p>
-            <ul style={{ listStyle: 'none', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <li style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Aadhaar Verification:</span>
-                <span className="badge badge-mock">MOCK ADAPTER</span>
-              </li>
-              <li style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>AI Screening Classifier:</span>
-                <span className="badge badge-mock">DEMO AI</span>
-              </li>
-              <li style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>SMS / WhatsApp Notifications:</span>
-                <span className="badge badge-mock">MOCK GATEWAY</span>
-              </li>
-              <li style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Tele-Consultation Video/Audio:</span>
-                <span className="badge badge-mock">MOCK WEBRTC</span>
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        {/* Screening Simulation Form (ASHA / ANM Workflow) */}
-        <section className="card" style={{ marginBottom: '28px' }}>
-          <div className="card-header">
-            <div>
-              <h2 className="card-title">{t('screening.title')}</h2>
-              <p style={{ fontSize: '0.8rem', color: 'var(--color-status-warning)', marginTop: '2px' }}>
-                {t('screening.simulationDisclaimer')}
-              </p>
-            </div>
-            <span className="badge badge-mock">Field Simulation</span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-            <div>
-              <div className="form-group">
-                <label className="form-label">{t('screening.patientId')}</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={patientDemoId}
-                  onChange={(e) => setPatientDemoId(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">{t('screening.habits.tobacco')}</label>
-                <select
-                  className="form-select"
-                  value={tobaccoHabit ? 'yes' : 'no'}
-                  onChange={(e) => setTobaccoHabit(e.target.value === 'yes')}
-                >
-                  <option value="yes">Yes (Daily Khaini / Gutkha / Chutta)</option>
-                  <option value="no">No Habit Reported</option>
-                </select>
-              </div>
-
-              {tobaccoHabit && (
-                <div className="form-group">
-                  <label className="form-label">{t('screening.habits.durationYears')}</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    value={durationYears}
-                    onChange={(e) => setDurationYears(Number(e.target.value))}
-                    min={0}
-                    max={60}
-                  />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label">{t('screening.visualInspection.lesionPresent')}</label>
-                <select
-                  className="form-select"
-                  value={lesionObserved ? 'yes' : 'no'}
-                  onChange={(e) => setLesionObserved(e.target.value === 'yes')}
-                >
-                  <option value="yes">Yes (Visible mucosal lesion / patch observed)</option>
-                  <option value="no">No abnormality observed</option>
-                </select>
-              </div>
-
-              {lesionObserved && (
-                <>
-                  <div className="form-group">
-                    <label className="form-label">{t('screening.visualInspection.lesionType')}</label>
-                    <select
-                      className="form-select"
-                      value={lesionType}
-                      onChange={(e) => setLesionType(e.target.value)}
-                    >
-                      <option value="whitePatch">{t('screening.visualInspection.whitePatch')}</option>
-                      <option value="redPatch">{t('screening.visualInspection.redPatch')}</option>
-                      <option value="ulcer">{t('screening.visualInspection.ulcer')}</option>
-                      <option value="submucousFibrosis">{t('screening.visualInspection.submucousFibrosis')}</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">{t('screening.visualInspection.site')}</label>
-                    <select
-                      className="form-select"
-                      value={anatomicalSite}
-                      onChange={(e) => setAnatomicalSite(e.target.value)}
-                    >
-                      <option value="buccalMucosa">{t('screening.visualInspection.buccalMucosa')}</option>
-                      <option value="tongue">{t('screening.visualInspection.tongue')}</option>
-                      <option value="palate">{t('screening.visualInspection.palate')}</option>
-                      <option value="lip">{t('screening.visualInspection.lip')}</option>
-                    </select>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Right Column: Oral Photo Capture & Demo AI Assessment */}
-            <div>
-              <div className="form-group">
-                <label className="form-label">{t('screening.actions.capturePhoto')}</label>
-                <input
-                  type="file"
-                  accept="image/png, image/jpeg, image/webp"
-                  className="form-input"
-                  onChange={handlePhotoSelect}
-                />
-              </div>
-
-              {photoPreview ? (
-                <div className="preview-container">
-                  <img src={photoPreview} alt="Demo oral screening preview" className="preview-img" />
-                  <span className="preview-watermark">⚠️ DEMO CLINICAL PHOTO</span>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    height: '180px',
-                    border: '1px dashed var(--color-border)',
-                    borderRadius: 'var(--radius-md)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--color-text-muted)',
-                    fontSize: '0.85rem',
-                    padding: '16px',
-                    textAlign: 'center',
+    // 2. ROUTE: /admin
+    if (currentRoute.startsWith('#/admin')) {
+      return (
+        <>
+          <PageTransition routeKey="#/admin">
+            <ProtectedRoute
+              allowedRoles={['ADMIN', 'SYSTEM_ADMIN', 'DISTRICT_OFFICER']}
+              currentUser={currentUser}
+              onRedirectToLogin={() => (window.location.hash = '#/login')}
+            >
+              <DashboardLayout
+                currentUser={currentUser}
+                activeNav="overview"
+                onNavSelect={(nav) => {
+                  if (nav === 'reports') {
+                    window.location.hash = '#/';
+                    setMainTab('asr-map');
+                  } else if (nav === 'audit') {
+                    window.location.hash = '#/';
+                    setMainTab('diagnostics');
+                  }
+                }}
+                onLogout={handleLogout}
+                onToggleAIAssistant={toggleNurseAssistant}
+                title="Super Admin Command Portal"
+              >
+                <AdminDashboard
+                  currentUser={currentUser}
+                  onNavigateTab={(tab) => {
+                    window.location.hash = '#/';
+                    setMainTab(tab as any);
                   }}
+                />
+              </DashboardLayout>
+            </ProtectedRoute>
+          </PageTransition>
+          {renderAssistant()}
+        </>
+      );
+    }
+
+    // 3. ROUTE: /doctor
+    if (currentRoute.startsWith('#/doctor')) {
+      return (
+        <>
+          <PageTransition routeKey="#/doctor">
+            <ProtectedRoute
+              allowedRoles={['DOCTOR', 'SPECIALIST_DOCTOR', 'MEDICAL_OFFICER', 'CHIEF_MEDICAL_OFFICER', 'HOSPITAL_MANAGER']}
+              currentUser={currentUser}
+              onRedirectToLogin={() => (window.location.hash = '#/login')}
+            >
+              <DashboardLayout
+                currentUser={currentUser}
+                activeNav="queue"
+                onNavSelect={(nav) => {
+                  if (nav === 'teleconsult') {
+                    window.location.hash = '#/';
+                    setMainTab('teleconsultation');
+                  } else if (nav === 'referrals') {
+                    window.location.hash = '#/';
+                    setMainTab('screening');
+                  }
+                }}
+                onLogout={handleLogout}
+                onToggleAIAssistant={toggleNurseAssistant}
+                title="Doctor Clinical Review Portal"
+              >
+                <DoctorDashboard
+                  currentUser={currentUser}
+                  currentLang={lang}
+                  onNavigateTab={(tab) => {
+                    window.location.hash = '#/';
+                    setMainTab(tab as any);
+                  }}
+                />
+              </DashboardLayout>
+            </ProtectedRoute>
+          </PageTransition>
+          {renderAssistant()}
+        </>
+      );
+    }
+
+    // 4. ROUTE: /patient
+    if (currentRoute.startsWith('#/patient')) {
+      return (
+        <>
+          <PageTransition routeKey="#/patient">
+            <ProtectedRoute
+              allowedRoles={['PATIENT', 'COMMUNITY_VOLUNTEER']}
+              currentUser={currentUser}
+              onRedirectToLogin={() => (window.location.hash = '#/login')}
+            >
+              <LanguagePreferenceModal
+                isOpen={showLanguageModal}
+                currentLang={lang}
+                onSelectLanguage={(chosen) => {
+                  setLang(chosen);
+                  try {
+                    localStorage.setItem('aarogya_language', chosen);
+                    localStorage.setItem('aarogya_lang_prompted', 'true');
+                  } catch {}
+                }}
+                onClose={() => setShowLanguageModal(false)}
+              />
+              <DashboardLayout
+                currentUser={currentUser}
+                activeNav="patient-home"
+                onNavSelect={(nav) => {
+                  if (nav === 'screening') {
+                    window.location.hash = '#/';
+                    setMainTab('screening');
+                  } else if (nav === 'appointments') {
+                    window.location.hash = '#/';
+                    setMainTab('appointments');
+                  } else if (nav === 'records') {
+                    window.location.hash = '#/';
+                    setMainTab('patients');
+                  }
+                }}
+                onLogout={handleLogout}
+                onToggleAIAssistant={toggleNurseAssistant}
+                title="Patient Healthcare Navigation Portal"
+              >
+                <PatientDashboard
+                  currentUser={currentUser}
+                  currentLang={lang}
+                  onOpenLanguageModal={() => setShowLanguageModal(true)}
+                  onToggleAIAssistant={toggleNurseAssistant}
+                  onNavigateTab={(tab) => {
+                    window.location.hash = '#/';
+                    setMainTab(tab as any);
+                  }}
+                />
+              </DashboardLayout>
+            </ProtectedRoute>
+          </PageTransition>
+          {renderAssistant()}
+        </>
+      );
+    }
+
+    return (
+      <div className="app-root-wrapper theme-study">
+        <LanguagePreferenceModal
+          isOpen={showLanguageModal}
+          currentLang={lang}
+          onSelectLanguage={(chosen) => {
+            setLang(chosen);
+            try {
+              localStorage.setItem('aarogya_language', chosen);
+              localStorage.setItem('aarogya_lang_prompted', 'true');
+            } catch {}
+          }}
+          onClose={() => setShowLanguageModal(false)}
+        />
+        {/* Intro Animation Overlay */}
+        {showIntro && <AarogyaDrishtiIntro onComplete={() => setShowIntro(false)} />}
+
+        {/* 1. Mandatory Non-dismissible Simulation Header (AGENTS.md Invariant 2) */}
+        <SimulationBanner />
+
+        <div className="app-master-layout">
+          {/* 2. Preserved Side Dashboard Navigation */}
+          <Sidebar
+            activeTab={mainTab}
+            onSelectTab={(tabId) => setMainTab(tabId as MainTabType)}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+            currentLang={lang}
+            onSelectLang={setLang}
+            onOpenVoiceAssistant={toggleNurseAssistant}
+            isVoiceAssistantActive={isNurseAssistantOpen}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+            isMobileOpen={isMobileSidebarOpen}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          />
+
+          {/* 3. Main Content Workspace */}
+          <main className={`main-content-layout ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+            {/* Top Header Bar */}
+            <header className="app-topbar">
+              <div className="topbar-left">
+                <button
+                  type="button"
+                  className="mobile-menu-btn"
+                  onClick={() => setIsMobileSidebarOpen(true)}
+                  title="Open Navigation Menu"
+                  aria-label="Toggle navigation"
                 >
-                  <span style={{ fontSize: '2rem', marginBottom: '8px' }}>📸</span>
-                  <span>No oral cavity photo attached yet. Upload demo image or submit survey without photo.</span>
+                  ☰
+                </button>
+                <div className="topbar-title-wrap">
+                  <h1>
+                    <span>{activeTitle[lang]}</span>
+                    {mainTab === 'aadhaar' && <span className="badge badge-mock">MOCK</span>}
+                  </h1>
+                  <span className="topbar-subtitle">
+                    {lang === 'te'
+                      ? 'ఐటీడీఏ పాడేరు గిరిజన ప్రాంత నోటి ఆరోగ్య ప్రాజెక్ట్ • తూర్పు కనుమలు'
+                      : lang === 'hi'
+                        ? 'आईटीडीए पाडेरु आदिवासी स्वास्थ्य परियोजना • पूर्वी घाट'
+                        : 'ITDA Paderu Tribal Agency • Eastern Ghats Community Oral Health Screening'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="topbar-right">
+                {/* Role-Specific Clean Navbar (Hides unauthorized roles from Patient and Doctor Portals) */}
+                {currentUser?.role?.toLowerCase() === 'patient' ? (
+                  /* PATIENT PORTAL: Absolutely no Admin or Doctor elements */
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#6ee7b7',
+                        background: 'rgba(16, 185, 129, 0.16)',
+                        border: '1px solid rgba(16, 185, 129, 0.4)',
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>🌿</span>
+                      <span>{lang === 'te' ? 'రోగి పోర్టల్' : 'Citizen Patient Portal'}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="button button-coral"
+                      style={{ fontSize: '0.76rem', padding: '6px 12px', borderRadius: '8px' }}
+                      onClick={handleLogout}
+                      title="Sign Out Session"
+                    >
+                      🚪 {lang === 'te' ? 'లాగౌట్' : 'Sign Out'}
+                    </button>
+                  </div>
+                ) : (currentUser?.role?.toLowerCase().includes('doctor') || currentUser?.role?.toLowerCase().includes('medical')) ? (
+                  /* DOCTOR PORTAL: Absolutely no Admin role on navbar */
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#7dd3fc',
+                        background: 'rgba(56, 189, 248, 0.16)',
+                        border: '1px solid rgba(56, 189, 248, 0.4)',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>👨‍⚕️</span>
+                      <span>{lang === 'te' ? 'వైద్యాధికారుల పోర్టల్' : 'Medical Officer Portal'}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="button"
+                      style={{
+                        fontSize: '0.76rem',
+                        padding: '5px 11px',
+                        borderRadius: '8px',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontWeight: 700,
+                        boxShadow: '0 2px 8px rgba(2, 132, 199, 0.4)',
+                      }}
+                      onClick={() => {
+                        window.location.hash = '#/';
+                        setMainTab('ai-screening');
+                      }}
+                      title="Launch Multi-Disease AI Screening Engine"
+                    >
+                      🔬 AI Engine
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-coral"
+                      style={{ fontSize: '0.76rem', padding: '6px 12px', borderRadius: '8px' }}
+                      onClick={handleLogout}
+                      title="Sign Out Session"
+                    >
+                      🚪 {lang === 'te' ? 'లాగౌట్' : 'Sign Out'}
+                    </button>
+                  </div>
+                ) : (
+                  /* ADMIN PORTAL: Super Admin elements strictly for Admin role */
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#fbbf24',
+                        background: 'rgba(245, 158, 11, 0.16)',
+                        border: '1px solid rgba(245, 158, 11, 0.4)',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>🛡️</span>
+                      <span>Super Admin</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="button"
+                      style={{
+                        fontSize: '0.76rem',
+                        padding: '5px 11px',
+                        borderRadius: '8px',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontWeight: 700,
+                        boxShadow: '0 2px 8px rgba(2, 132, 199, 0.4)',
+                      }}
+                      onClick={() => {
+                        window.location.hash = '#/';
+                        setMainTab('ai-screening');
+                      }}
+                      title="Launch Multi-Disease AI Screening Engine"
+                    >
+                      🔬 AI Engine
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-outline"
+                      style={{ fontSize: '0.76rem', padding: '5px 9px', borderRadius: '8px' }}
+                      onClick={() => (window.location.hash = '#/admin')}
+                      title="Open Super Admin Command Portal"
+                    >
+                      🛡️ Admin Dashboard
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-coral"
+                      style={{ fontSize: '0.76rem', padding: '6px 12px', borderRadius: '8px' }}
+                      onClick={handleLogout}
+                      title="Sign Out Session"
+                    >
+                      🚪 Sign Out
+                    </button>
+                  </div>
+                )}
+
+
+                {/* Nurse Assistant Toggle Button: Hidden from dashboards */}
+                <button
+                  type="button"
+                  className="btn-forest-voice button button-outline"
+                  style={{ display: 'none' }}
+                  onClick={toggleNurseAssistant}
+                  title="Talk with 2D Animated Multilingual AI Robotic Assistant (Drishti AI)"
+                >
+                  <span>🤖</span>
+                  <span>{isNurseAssistantOpen ? 'Hide AI Robot' : 'Drishti AI Robot'}</span>
+                </button>
+
+                {/* Online / Offline Sync Indicator */}
+                <OfflineStatusIndicator
+                  onlineLabel={t('app.onlineNotice') || 'Online (Synced)'}
+                  offlineLabel={t('app.offlineNotice') || 'Offline (Local Dexie)'}
+                  accessToken={tokens?.accessToken || null}
+                />
+
+                {/* Theme Mode Toggle (Light / Dark) */}
+                <ThemeToggle currentLang={lang} />
+
+                {/* Language Switcher */}
+                <LanguageSwitcher currentLang={lang} onSelect={setLang} />
+              </div>
+            </header>
+
+            {/* Active Workspace View */}
+            <div className="workspace-container">
+              {/* VIEW: OPERATIONS DASHBOARD (Role conditional: PatientDashboard for Patients, DashboardOverview for Clinical/Admin) */}
+              {mainTab === 'dashboard' && (
+                currentUser?.role?.toLowerCase() === 'patient' ? (
+                  <PatientDashboard
+                    currentUser={currentUser}
+                    onNavigateTab={(tab) => setMainTab(tab as MainTabType)}
+                    currentLang={lang}
+                    onOpenLanguageModal={() => setShowLanguageModal(true)}
+                  />
+                ) : (
+                  <DashboardOverview
+                    currentUser={currentUser}
+                    onNavigate={(tab) => setMainTab(tab as MainTabType)}
+                    onOpenVoiceAssistant={toggleNurseAssistant}
+                    currentLang={lang}
+                  />
+                )
+              )}
+
+              {/* VIEW: ASR DISTRICT GIS MAP */}
+              {mainTab === 'asr-map' && (
+                <AsrDistrictMap
+                  currentLang={lang}
+                  authToken={tokens?.accessToken}
+                  onPlanCampForVillage={() => setMainTab('camps')}
+                  onNavigateTab={(tab) => setMainTab(tab as MainTabType)}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: CLINICAL SCREENING & MO QUEUE */}
+              {mainTab === 'screening' && (
+                <ScreeningManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: AI ORAL HEALTH SCREENING ENGINE (MODULE A + B + C) */}
+              {mainTab === 'ai-screening' && (
+                <AiOralHealthEngine
+                  patientId="DEMO-PAD-8492"
+                  patientName="Balaraju Somulu"
+                  hospitalId={currentUser?.hospitalId || 'HOSP-PADERU-01'}
+                  userRole={currentUser?.role?.toLowerCase() || 'asha'}
+                  token={tokens?.accessToken || ''}
+                  currentLang={lang}
+                  onClose={() => setMainTab('dashboard')}
+                />
+              )}
+
+              {/* VIEW: TELECONSULTATION */}
+              {mainTab === 'teleconsultation' && (
+                <TeleconsultationManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: PATIENTS & OFFLINE SYNC */}
+              {mainTab === 'patients' && (
+                <PatientManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: OPD APPOINTMENTS */}
+              {mainTab === 'appointments' && (
+                <AppointmentManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: OUTREACH CAMPS */}
+              {mainTab === 'camps' && (
+                <CampManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: CAMP PLANNING */}
+              {mainTab === 'camp-planning' && (
+                <CampPlanningManager
+                  currentLang={lang}
+                  currentUser={currentUser}
+                  authToken={tokens?.accessToken}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: WORKER JURISDICTION ASSIGNMENTS */}
+              {mainTab === 'assignments' && (
+                <AssignmentManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: VILLAGE GROUPS */}
+              {mainTab === 'village-groups' && (
+                <VillageGroupManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                />
+              )}
+
+              {/* VIEW: SPECIALISTS DIRECTORY */}
+              {mainTab === 'specialists' && (
+                <SpecialistDirectory
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: HOSPITALS NETWORK */}
+              {mainTab === 'hospitals' && (
+                <HospitalManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: LOCATION ADMIN */}
+              {mainTab === 'location-admin' && (
+                <LocationAdminManager
+                  currentLang={lang}
+                  currentUser={currentUser}
+                  authToken={tokens?.accessToken}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: INVITATIONS */}
+              {mainTab === 'invitations' && (
+                <InvitationManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                />
+              )}
+
+              {/* VIEW: NOTIFICATION CENTER */}
+              {mainTab === 'notifications' && (
+                <NotificationCenter
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                />
+              )}
+
+              {/* VIEW: ACCOUNT RECOVERY */}
+              {mainTab === 'recovery' && (
+                <AccountRecoveryManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                />
+              )}
+
+              {/* VIEW: DPDP CONSENT */}
+              {mainTab === 'consent' && (
+                <ConsentManager
+                  patientId="DEMO-PAD-8492"
+                  accessToken={tokens?.accessToken || ''}
+                />
+              )}
+
+              {/* VIEW: RBAC CAPABILITY MATRIX */}
+              {mainTab === 'matrix' && (
+                <CapabilityMatrixViewer
+                  currentRole={currentUser?.role || null}
+                  userCapabilities={currentUser?.capabilities || []}
+                  accessToken={tokens?.accessToken || null}
+                />
+              )}
+
+              {/* VIEW: AADHAAR MOCK SERVICE */}
+              {mainTab === 'aadhaar' && (
+                <AadhaarMockManager
+                  currentUser={currentUser}
+                  accessToken={tokens?.accessToken || null}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* VIEW: ARCHITECTURE DIAGNOSTICS */}
+              {mainTab === 'diagnostics' && (
+                <div className="card forest-card-panel" style={{ padding: '24px' }}>
+                  <div className="card-header" style={{ marginBottom: '16px' }}>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                      Architecture Diagnostics &amp; Operational Probes
+                    </h2>
+                    <span className="badge badge-mock">SIMULATION HEALTH</span>
+                  </div>
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.88rem', marginBottom: '20px' }}>
+                    Live infrastructure probes monitoring MongoDB replica set, ACID multi-document transactions, Pino PHI sanitization, and background Agenda scheduler.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                    <div className="card" style={{ padding: '16px' }}>
+                      <div style={{ fontWeight: 700, marginBottom: '6px' }}>Database Replica Set</div>
+                      <div style={{ color: '#059669', fontSize: '0.9rem', fontWeight: 600 }}>Active (Port 27017)</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Supports ACID transactions and write concern majority.
+                      </div>
+                    </div>
+                    <div className="card" style={{ padding: '16px' }}>
+                      <div style={{ fontWeight: 700, marginBottom: '6px' }}>Background Scheduler</div>
+                      <div style={{ color: '#059669', fontSize: '0.9rem', fontWeight: 600 }}>Agenda Engine Running</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Automated screening expiry and sync reconciliation tasks.
+                      </div>
+                    </div>
+                    <div className="card" style={{ padding: '16px' }}>
+                      <div style={{ fontWeight: 700, marginBottom: '6px' }}>Privacy &amp; Security</div>
+                      <div style={{ color: '#059669', fontSize: '0.9rem', fontWeight: 600 }}>Zero Public Storage</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        JWT-scoped file streaming &amp; Pino SHA-256 redaction.
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* Demo AI Assessment Result Card */}
-              <div className={`risk-card ${riskTier.class}`}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <strong style={{ fontSize: '0.9rem' }}>{t('screening.riskTier.title')}</strong>
-                  <span className="badge badge-mock">DEMO AI</span>
+              {/* VIEW: AUTH, SESSIONS & PROFILE */}
+              {mainTab === 'auth' && (
+                <AuthPanel
+                  currentUser={currentUser}
+                  tokens={tokens}
+                  onLoginSuccess={handleLoginSuccess}
+                  onLogout={handleLogout}
+                  onNavigateToRecovery={() => setMainTab('recovery')}
+                />
+              )}
+
+              {/* VIEW: MEDICAL REPORTS */}
+              {mainTab === 'reports' && (
+                currentUser?.role?.toLowerCase() === 'patient' ? (
+                  <PatientDashboard
+                    currentUser={currentUser}
+                    onNavigateTab={(tab) => setMainTab(tab as MainTabType)}
+                    currentLang={lang}
+                    onOpenLanguageModal={() => setShowLanguageModal(true)}
+                  />
+                ) : (
+                  <div className="card forest-card-panel" style={{ padding: '24px' }}>
+                    <div className="card-header" style={{ marginBottom: '16px' }}>
+                      <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                        {lang === 'te' ? 'క్లినికల్ మరియు మాండల్ GIS రిపోర్టులు' : 'Clinical & Mandal GIS Reports'}
+                      </h2>
+                      <span className="dash-status-pill status-completed">ANALYTICS</span>
+                    </div>
+                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.88rem' }}>
+                      Comprehensive screening aggregates across 22 mandals of Alluri Sitharama Raju District with small-count suppression (&lt; 5).
+                    </p>
+                  </div>
+                )
+              )}
+
+              {/* VIEW: HELP AND SUPPORT */}
+              {mainTab === 'help' && (
+                <div className="card forest-card-panel" style={{ padding: '24px' }}>
+                  <div className="card-header" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                      {lang === 'te' ? 'సహాయం & మద్దతు డెస్క్' : lang === 'hi' ? 'सहायता एवं समर्थन केंद्र' : 'Help & Citizen Support Desk'}
+                    </h2>
+                    <span className="dash-status-pill status-completed">24/7 HELPLINE</span>
+                  </div>
+
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.88rem', marginBottom: '20px' }}>
+                    Emergency assistance, frontline health worker coordination, and patient helpline for remote tribal agency settlements.
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                    <div className="card" style={{ padding: '18px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                      <div style={{ fontSize: '1.4rem', marginBottom: '6px' }}>🚑</div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#f87171' }}>Emergency Tribal Ambulance</div>
+                      <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#ffffff', margin: '4px 0' }}>108 / 104</div>
+                      <div style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Free 24/7 emergency transportation to CHC Paderu &amp; Area Hospital Araku.</div>
+                    </div>
+
+                    <div className="card" style={{ padding: '18px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                      <div style={{ fontSize: '1.4rem', marginBottom: '6px' }}>👩‍⚕️</div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#34d399' }}>Assigned ASHA Worker</div>
+                      <div style={{ fontSize: '1rem', fontWeight: 600, color: '#ffffff', margin: '4px 0' }}>Lakshmi Devi</div>
+                      <div style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Contact: +91 8912345674 • Dumbriguda Settlement Sub-Centre.</div>
+                    </div>
+
+                    <div className="card" style={{ padding: '18px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                      <div style={{ fontSize: '1.4rem', marginBottom: '6px' }}>🤖</div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#38bdf8' }}>Dr. Drishti AI Assistant</div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#ffffff', margin: '4px 0' }}>Voice &amp; Symptom Guide</div>
+                      <div style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Speak or chat in Telugu, Hindi, or English for instant clinic guidance.</div>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px' }}>{riskTier.label}</div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-                  {t('screening.riskTier.reviewNotice')}
-                </p>
-              </div>
+              )}
             </div>
-          </div>
+          </main>
+        </div>
 
-          {/* Feedback Messages */}
-          {submitSuccess && (
-            <div style={{ marginTop: '16px' }}>
-              <SuccessView message={submitSuccess} onDismiss={() => setSubmitSuccess(null)} />
-            </div>
-          )}
-          {submitError && (
-            <div style={{ marginTop: '16px' }}>
-              <ErrorView message={submitError} onRetry={() => setSubmitError(null)} />
-            </div>
-          )}
+        {/* 4. Supported Multilingual 2D Animated AI Robotic Assistant ("Drishti AI") */}
+        {renderAssistant()}
+      </div>
+    );
+  };
 
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: '12px', marginTop: '24px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSubmitOnline}
-              disabled={submitting}
-            >
-              {submitting ? t('screening.actions.syncing') : `${t('screening.actions.submitScreening')} (Authorized Storage)`}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleSaveOffline}
-            >
-              {t('screening.actions.saveDraft')}
-            </button>
-          </div>
-        </section>
-
-        {/* UI State Demonstrator (Loading, Empty, Error, Success) */}
-        <section className="card" style={{ marginBottom: '28px' }}>
-          <div className="card-header">
-            <div>
-              <h2 className="card-title">UI State Handling Verification</h2>
-              <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                Demonstration of required states: Loading, Empty, Error, and Success
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button
-                type="button"
-                className={`btn btn-secondary ${demoState === 'normal' ? 'btn-primary' : ''}`}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                onClick={() => setDemoState('normal')}
-              >
-                Normal
-              </button>
-              <button
-                type="button"
-                className={`btn btn-secondary ${demoState === 'loading' ? 'btn-primary' : ''}`}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                onClick={() => setDemoState('loading')}
-              >
-                Loading
-              </button>
-              <button
-                type="button"
-                className={`btn btn-secondary ${demoState === 'empty' ? 'btn-primary' : ''}`}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                onClick={() => setDemoState('empty')}
-              >
-                Empty
-              </button>
-              <button
-                type="button"
-                className={`btn btn-secondary ${demoState === 'error' ? 'btn-primary' : ''}`}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                onClick={() => setDemoState('error')}
-              >
-                Error
-              </button>
-              <button
-                type="button"
-                className={`btn btn-secondary ${demoState === 'success' ? 'btn-primary' : ''}`}
-                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                onClick={() => setDemoState('success')}
-              >
-                Success
-              </button>
-            </div>
-          </div>
-
-          <div>
-            {demoState === 'normal' && (
-              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', padding: '12px 0' }}>
-                All views and screening lists handle asynchronous state transitions. Select any button above to preview state rendering.
-              </p>
-            )}
-            {demoState === 'loading' && <LoadingView message={t('states.loading')} />}
-            {demoState === 'empty' && (
-              <EmptyView
-                title={t('states.empty')}
-                description="No screening referrals queued in this primary health centre sector."
-                actionLabel="Create New Screening"
-                onAction={() => setDemoState('normal')}
-              />
-            )}
-            {demoState === 'error' && (
-              <ErrorView
-                title="Simulation Network Interruption"
-                message={t('states.error')}
-                onRetry={() => setDemoState('normal')}
-              />
-            )}
-            {demoState === 'success' && (
-              <SuccessView
-                title="Operation Completed"
-                message={t('states.success')}
-                onDismiss={() => setDemoState('normal')}
-              />
-            )}
-          </div>
-        </section>
-
-        {/* Footer */}
-        <footer style={{ textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: '20px', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-          <p>
-            Aarogya Drishti Simulation System — AAROHAN Inter-Centre Hackathon 2026 (ITDA Paderu).
-          </p>
-          <p style={{ marginTop: '4px', color: 'var(--color-status-warning)' }}>
-            ⚠️ Strict Clinical Safety Notice: Screening support only. Preliminary risk observation. Never provides clinical diagnosis.
-          </p>
-        </footer>
-      </main>
-    </div>
-  );
-};
-
-export default App;
+  export default App;

@@ -36,7 +36,7 @@ export async function initAgenda(options: AgendaConfigOptions = {}): Promise<Age
   const lockLifetime = options.defaultLockLifetimeMs || 10000; // 10 seconds lock
   const processEvery = options.processEvery || '5 seconds';
 
-  const mongoUri = options.dbUri || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aarogya_drishti';
+  const mongoUri = options.dbUri || process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aarogya_drishti';
 
   const agenda = new Agenda({
     db: { address: mongoUri, collection: collectionName },

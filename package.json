@@ -8,6 +8,9 @@
     "client"
   ],
   "scripts": {
+    "dev": "node scripts/dev.js",
+    "start": "node scripts/dev.js",
+    "dev:ai": "python -m uvicorn ai_service.main:app --port 8000 --host 0.0.0.0",
     "dev:server": "npm --workspace=server run dev",
     "dev:client": "npm --workspace=client run dev",
     "build": "npm --workspace=server run build && npm --workspace=client run build",
@@ -22,5 +25,18 @@
     "pwa"
   ],
   "author": "AAROHAN Inter-Centre Hackathon 2026 Team",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "animejs": "^4.5.0",
+    "axios": "^1.21.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.12.1",
+    "openai": "^7.53.0",
+    "qrcode": "^1.5.4",
+    "react-router-dom": "^7.18.5"
+  }
 }

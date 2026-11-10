@@ -30,6 +30,27 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ currentLang,
       >
         हिन्दी
       </button>
+      <button
+        type="button"
+        className={`lang-btn ${currentLang === 'ta' ? 'active' : ''}`}
+        onClick={() => onSelect('ta')}
+      >
+        தமிழ்
+      </button>
+      <button
+        type="button"
+        className={`lang-btn ${currentLang === 'kn' ? 'active' : ''}`}
+        onClick={() => onSelect('kn')}
+      >
+        ಕನ್ನಡ
+      </button>
+      <button
+        type="button"
+        className={`lang-btn ${currentLang === 'ml' ? 'active' : ''}`}
+        onClick={() => onSelect('ml')}
+      >
+        മലയാളം
+      </button>
     </div>
   );
 };

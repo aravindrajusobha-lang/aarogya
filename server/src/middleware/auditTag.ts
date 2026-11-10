@@ -19,12 +19,26 @@ export function auditTag(action: string, resourceType: string) {
           });
         }
       } catch (err) {
-        logger.error({
-          event: 'audit_log_write_failed',
-          action,
-          resourceType,
-          error: (err as Error).message,
-        });
+        const errMsg = (err as Error).message || '';
+        if (
+          errMsg.includes('client was closed') ||
+          errMsg.includes('must be connected') ||
+          errMsg.includes('topology was closed')
+        ) {
+          logger.debug({
+            event: 'audit_log_write_interrupted_shutdown',
+            action,
+            resourceType,
+            error: errMsg,
+          });
+        } else {
+          logger.error({
+            event: 'audit_log_write_failed',
+            action,
+            resourceType,
+            error: errMsg,
+          });
+        }
       }
     });
 

@@ -12,10 +12,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <title>Aarogya Drishti | Oral Screening Simulation</title>
+    <!-- Zero-Flash Pre-Paint Theme Initialization (Supports System / Light / Dark) -->
+    <script>
+      (function() {
+        try {
+          var choice = localStorage.getItem('aarogya_theme_choice') || localStorage.getItem('aarogya_theme') || 'system';
+          var resolved = 'dark';
+          if (choice === 'light') {
+            resolved = 'light';
+          } else if (choice === 'dark') {
+            resolved = 'dark';
+          } else {
+            resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', resolved);
+          document.documentElement.setAttribute('data-theme-choice', choice);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

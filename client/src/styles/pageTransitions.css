@@ -1,0 +1,99 @@
+/* ==========================================================================
+   pageTransitions.css - Aarogya-Drishti Futuristic In-Place Page Transitions
+   In-Place Dashboard Switching • Zero Scroll • Hardware Accelerated
+   ========================================================================== */
+
+/* 1. Main Route / Dashboard Switch Animation (In-Place Dissolve & Subtle 3D Scale) */
+@keyframes routeViewEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.986) translateY(5px);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+.route-transition-wrapper {
+  animation: routeViewEnter 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform, filter;
+  width: 100%;
+}
+
+/* 2. Top Futuristic Cyber Scanline Beam during Route / Tab Change */
+@keyframes scanlinePulse {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.page-scanline {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 0%, #10b981 30%, #38bdf8 70%, transparent 100%);
+  z-index: 99999;
+  pointer-events: none;
+  animation: scanlinePulse 0.45s ease-out forwards;
+}
+
+/* 3. In-Dashboard Tab Switching Animation (In-Place, No Scroll) */
+@keyframes tabPaneEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tab-pane-transition {
+  animation: tabPaneEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+/* 4. Section View Switcher Animation in Landing Page */
+@keyframes sectionViewSwitch {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.section-switch-enter {
+  animation: sectionViewSwitch 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+/* 5. Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  .route-transition-wrapper,
+  .page-scanline,
+  .tab-pane-transition,
+  .section-switch-enter {
+    animation: none !important;
+    transform: none !important;
+    filter: none !important;
+    transition: none !important;
+  }
+}
+

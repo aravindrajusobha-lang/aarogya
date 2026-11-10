@@ -3,6 +3,14 @@ dist/
 build/
 .env
 .env.local
+.env.production
+.env.*.local
+*.pem
+*.key
+*.crt
+*.pfx
+backups/
+*.dump
 coverage/
 *.log
 .DS_Store
@@ -10,3 +18,11 @@ storage/private_uploads/*.dat
 server/storage/private_uploads/*.dat
 !storage/private_uploads/.gitkeep
 !server/storage/private_uploads/.gitkeep
+
+ml_training/mod_data/
+ml_training/extra/
+ml_training/prepared/
+ml_training/.venv/
+ml_training/*.pt
+ml_training/*.onnx
+

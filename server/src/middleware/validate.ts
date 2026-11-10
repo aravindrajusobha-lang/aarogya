@@ -7,17 +7,23 @@ export interface ValidationTargets {
   params?: ZodSchema;
 }
 
-export function validate(schemas: ValidationTargets) {
+export type ValidationInput = ValidationTargets | ZodSchema;
+
+export function validate(schemas: ValidationInput) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      if (schemas.body) {
-        req.body = await schemas.body.parseAsync(req.body);
-      }
-      if (schemas.query) {
-        req.query = (await schemas.query.parseAsync(req.query)) as Record<string, string>;
-      }
-      if (schemas.params) {
-        req.params = (await schemas.params.parseAsync(req.params)) as Record<string, string>;
+      if ('parseAsync' in schemas) {
+        req.body = await (schemas as ZodSchema).parseAsync(req.body);
+      } else {
+        if (schemas.body) {
+          req.body = await schemas.body.parseAsync(req.body);
+        }
+        if (schemas.query) {
+          req.query = (await schemas.query.parseAsync(req.query)) as Record<string, string>;
+        }
+        if (schemas.params) {
+          req.params = (await schemas.params.parseAsync(req.params)) as Record<string, string>;
+        }
       }
       next();
     } catch (error) {

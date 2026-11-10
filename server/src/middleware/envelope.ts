@@ -9,13 +9,13 @@ declare global {
       startTime: number;
     }
     interface Response {
-      envelope: <T>(data: T, metaOptions?: EnvelopeMetaOptions) => Response;
+      envelope: <T>(data: T, metaOptions?: EnvelopeMetaOptions | string, statusCode?: number) => Response;
       envelopeError: (
         code: string,
         message: string,
         details?: unknown,
         statusCode?: number,
-        metaOptions?: EnvelopeMetaOptions
+        metaOptions?: EnvelopeMetaOptions | string
       ) => Response;
     }
   }
@@ -27,26 +27,30 @@ export function envelopeMiddleware(req: Request, res: Response, next: NextFuncti
   req.startTime = Date.now();
   res.setHeader('X-Request-Id', reqId);
 
-  res.envelope = function <T>(data: T, metaOptions?: EnvelopeMetaOptions) {
+  res.envelope = function <T>(data: T, metaOptions?: EnvelopeMetaOptions | string, statusCode?: number) {
+    const opts = typeof metaOptions === 'string' ? { message: metaOptions } : metaOptions;
+    const finalStatus = statusCode || res.statusCode || 200;
     const payload = buildSuccessResponse(data, {
       requestId: req.id,
-      ...metaOptions,
+      ...opts,
     });
-    return res.status(res.statusCode || 200).json(payload);
+    return res.status(finalStatus).json(payload);
   };
 
   res.envelopeError = function (
     code: string,
     message: string,
     details?: unknown,
-    statusCode = 400,
-    metaOptions?: EnvelopeMetaOptions
+    statusCode?: number,
+    metaOptions?: EnvelopeMetaOptions | string
   ) {
+    const opts = typeof metaOptions === 'string' ? { message: metaOptions } : metaOptions;
+    const finalStatus = statusCode || (res.statusCode && res.statusCode !== 200 ? res.statusCode : 400);
     const payload = buildErrorResponse(code, message, details, {
       requestId: req.id,
-      ...metaOptions,
+      ...opts,
     });
-    return res.status(statusCode).json(payload);
+    return res.status(finalStatus).json(payload);
   };
 
   next();
@@ -66,5 +70,17 @@ export function errorHandler(
   const errorCode = err.code || (statusCode === 500 ? 'INTERNAL_SERVER_ERROR' : 'REQUEST_ERROR');
   const message = err.message || 'An unexpected error occurred';
 
-  res.envelopeError(errorCode, message, err.details, statusCode);
+  if (statusCode === 500) {
+    console.error('Unhandled internal error in errorHandler:', err);
+  }
+
+  if (typeof res.envelopeError === 'function') {
+    res.envelopeError(errorCode, message, err.details, statusCode);
+  } else {
+    res.status(statusCode).json({
+      success: false,
+      error: { code: errorCode, message, details: err.details },
+      simulation: true,
+    });
+  }
 }

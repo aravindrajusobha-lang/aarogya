@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "disclaimer": "Screening risk scoring aid only. Must be validated by a clinician.",
+  "weights": {
+    "habits": {
+      "chewed_tobacco_gutka": 25,
+      "areca_nut_betel_quid": 20,
+      "smoked_tobacco": 15,
+      "alcohol": 10,
+      "years_multiplier": {
+        "0": 0.0,
+        "1_5": 1.0,
+        "6_10": 1.5,
+        "10_plus": 2.0
+      }
+    },
+    "symptoms": {
+      "ulcer_longer_than_2_weeks": 40,
+      "white_red_patch": 35,
+      "difficulty_opening_mouth": 35,
+      "neck_lump": 40,
+      "burning_sensation": 15
+    }
+  },
+  "immediate_high_risk_symptoms": [
+    "ulcer_longer_than_2_weeks",
+    "white_red_patch",
+    "difficulty_opening_mouth",
+    "neck_lump"
+  ],
+  "thresholds": {
+    "high": 60,
+    "moderate": 25
+  }
+}
+

@@ -94,3 +94,68 @@ export const SuccessView: React.FC<SuccessViewProps> = ({
     </div>
   );
 };
+
+export interface LoginRequiredViewProps {
+  moduleTitle: string;
+  moduleDescription?: string;
+  onLoginAsAsha?: () => void;
+  onLoginAsDoctor?: () => void;
+  onGoToAuth?: () => void;
+}
+
+export const LoginRequiredView: React.FC<LoginRequiredViewProps> = ({
+  moduleTitle,
+  moduleDescription = 'This module connects directly to the ASR District Tribal Health Registry and requires authenticated clinical staff access.',
+  onLoginAsAsha,
+  onLoginAsDoctor,
+  onGoToAuth,
+}) => {
+  return (
+    <div className="card panel recent-panel" style={{ padding: '32px 24px', textAlign: 'center', maxWidth: '720px', margin: '24px auto' }}>
+      <div style={{ fontSize: '2.4rem', marginBottom: '12px' }}>🔒</div>
+      <div className="eyebrow" style={{ justifyContent: 'center', marginBottom: '8px' }}>
+        <span className="eyebrow-dot" style={{ background: 'var(--coral)' }} />
+        <span>AUTHENTICATION REQUIRED • ధృవీకరణ అవసరం</span>
+      </div>
+      <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.35rem', fontWeight: 700, margin: '8px 0 12px' }}>
+        Sign In to Access {moduleTitle}
+      </h3>
+      <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.92rem', lineHeight: 1.5, margin: '0 auto 24px', maxWidth: '540px' }}>
+        {moduleDescription}
+      </p>
+      
+      <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+        {onLoginAsAsha && (
+          <button
+            type="button"
+            className="button-coral"
+            onClick={onLoginAsAsha}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+          >
+            <span>👩‍⚕️</span> Demo Login: ASHA Worker
+          </button>
+        )}
+        {onLoginAsDoctor && (
+          <button
+            type="button"
+            className="button-dark"
+            onClick={onLoginAsDoctor}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+          >
+            <span>👨‍⚕️</span> Demo Login: Medical Officer
+          </button>
+        )}
+        {onGoToAuth && (
+          <button
+            type="button"
+            className="button-outline"
+            onClick={onGoToAuth}
+          >
+            Open Staff Sign In
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+

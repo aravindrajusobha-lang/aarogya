@@ -1,0 +1,44 @@
+# =========================================================================
+# Aarogya-Drishti: Production Deployment Override Compose File
+# Use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =========================================================================
+
+services:
+  server:
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+      - SIMULATION_MODE=true
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  mongo:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4096M
+        reservations:
+          cpus: '1.0'
+          memory: 1024M
+
+  client:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  reverse-proxy:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M

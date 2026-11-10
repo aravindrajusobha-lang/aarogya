@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "labels": [
+    "caries",
+    "gingivitis",
+    "calculus",
+    "plaque_soft_deposit",
+    "discoloration"
+  ],
+  "thresholds": {
+    "caries": 0.50,
+    "gingivitis": 0.45,
+    "calculus": 0.50,
+    "plaque_soft_deposit": 0.50,
+    "discoloration": 0.55
+  },
+  "see_dentist_labels": [
+    "caries",
+    "gingivitis",
+    "calculus",
+    "plaque_soft_deposit"
+  ]
+}
+

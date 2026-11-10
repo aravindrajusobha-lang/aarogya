@@ -77,5 +77,161 @@
     "notFound": "Requested resource not found.",
     "validationFailed": "Input validation error. Please check submitted values.",
     "serverError": "Internal simulation service error."
+  },
+  "notifications": {
+    "screeningRecordedTitle": "Oral Health Screening Recorded",
+    "screeningRecordedBody": "A visual oral health screening session has been recorded. Review visual findings and follow-up recommendations.",
+    "referralDispatchedTitle": "Clinical Referral Consultation Requested",
+    "referralDispatchedBody": "Patient referred to specialist for comprehensive clinical review and further evaluation.",
+    "campScheduledTitle": "Oral Screening Camp Scheduled",
+    "campScheduledBody": "Community oral health outreach camp scheduled for your assigned tribal habitation.",
+    "duplicateAlertTitle": "Duplicate Patient Intake Review Required",
+    "duplicateAlertBody": "A newly registered patient shares demographic similarity with an existing record. Review diff for manual resolution.",
+    "securityAlertTitle": "New Device Authentication Session",
+    "securityAlertBody": "A login was authenticated for your health worker account. Review active devices if unrecognized."
+  },
+  "recovery": {
+    "initiateTitle": "Account Recovery Initiated",
+    "initiateSuccess": "Recovery ticket initiated. Three-party identity verification required before credentials can be reissued.",
+    "threePartyNotice": "Verification must be completed by an independent healthcare worker, followed by designated administrative approval.",
+    "selfVerificationBlocked": "Self-verification blocked. Verifier must be a different person than the requester.",
+    "selfApprovalBlocked": "Self-approval blocked. Approver must be a different person than the requester.",
+    "dualRoleBlocked": "Dual-role approval blocked. Approver must be a different person than the verifier."
+  },
+  "villageGroups": {
+    "createdTitle": "Village Health Group Created",
+    "createdBody": "A new village health group was automatically formed from matching patient address intake.",
+    "approvedTitle": "Village Health Group Approved",
+    "approvedBody": "Village health group has been officially approved by administrative review.",
+    "rejectedTitle": "Village Health Group Rejected",
+    "rejectedBody": "Village health group proposal was rejected by administrative review.",
+    "suppressionNotice": "Small-count cell suppression applied (< 5) to protect tribal patient privacy."
+  },
+  "moQueue": {
+    "title": "Medical Officer Case Queue",
+    "simulationBanner": "SIMULATION MODE: Case evaluations and AI analysis are demonstration support only.",
+    "assignSuccess": "Case successfully assigned to Medical Officer.",
+    "releaseSuccess": "Case results officially released for patient viewing.",
+    "escalateSuccess": "Case escalated for secondary clinical review.",
+    "referralSuccess": "Referral requested for specialist consultation."
+  },
+  "camps": {
+    "title": "Community Screening Camps",
+    "mustBePublishedToStart": "Camp must be PUBLISHED before starting.",
+    "createSuccess": "Screening camp created in draft status.",
+    "publishSuccess": "Screening camp published successfully.",
+    "startSuccess": "Screening camp is now in progress.",
+    "completeSuccess": "Screening camp marked as completed.",
+    "cancelSuccess": "Screening camp cancelled.",
+    "invalidTransition": "Invalid camp status transition.",
+    "datesMustBeFuture": "Camp start date must be in the future.",
+    "overlappingTeamAssignment": "Team member already assigned to an overlapping active camp.",
+    "prohibitedWording": "Camp details may not promise definitive clinical findings or guaranteed outcomes.",
+    "suppressionNotice": "Small-count cell suppression applied (< 5) to protect tribal patient privacy.",
+    "scheduledStartRejected": "SCHEDULED to ONGOING transition is strictly rejected."
+  },
+  "appointments": {
+    "title": "Hospital Consultation Appointments",
+    "slotConflict": "The selected consultation time slot is already booked for this facility.",
+    "selfConfirmationBlocked": "A requester cannot confirm their own appointment.",
+    "wrongHospitalDenied": "Confirmation permitted by staff of the destination hospital only.",
+    "slotMustBeFuture": "Appointment time slot must be scheduled in the future.",
+    "outsideWorkingHours": "Appointment slot must be within facility working hours (09:00 to 16:00, Monday to Saturday).",
+    "lunchRecessConflict": "Appointment slot overlaps with midday lunch recess (13:00 to 14:00).",
+    "clinicClosedSunday": "Outpatient consultation slots are unavailable on Sundays.",
+    "invalidTransition": "Invalid appointment status transition.",
+    "requestSuccess": "Appointment consultation successfully requested.",
+    "confirmSuccess": "Appointment successfully confirmed by destination facility.",
+    "rescheduleSuccess": "Appointment consultation successfully rescheduled.",
+    "cancelSuccess": "Appointment consultation successfully cancelled.",
+    "checkInSuccess": "Patient marked as checked in for consultation.",
+    "completeSuccess": "Appointment consultation completed.",
+    "smsBlockedNotice": "SMS delivery is a BLOCKED stub in simulation mode. No external telecommunications gateway configured.",
+    "emailBlockedNotice": "Email delivery is a BLOCKED stub in simulation mode. No external SMTP gateway configured."
+  },
+  "biopsy": {
+    "title": "Biopsy Workflow & Specimen Tracking",
+    "requestSuccess": "Biopsy procedure requested successfully.",
+    "scheduleSuccess": "Biopsy procedure scheduled.",
+    "collectSuccess": "Specimen collected with barcode tracking.",
+    "sendToLabSuccess": "Specimen dispatched to pathology laboratory.",
+    "recollectionRequired": "Recollection required flagged for specimen.",
+    "findingsSuccess": "Pathologist examination findings recorded.",
+    "releaseSuccess": "Biopsy findings reviewed and released for patient viewing.",
+    "amendSuccess": "Attachment amended with provenance record.",
+    "cancelSuccess": "Biopsy procedure cancelled.",
+    "notReleased": "Biopsy findings have not been released for patient viewing yet.",
+    "invalidTransition": "Invalid biopsy status transition.",
+    "unauthorizedReviewer": "Only authorized medical reviewers may release biopsy findings."
+  },
+  "referrals": {
+    "title": "Patient Referrals & Follow-Up Navigation",
+    "createSuccess": "Referral request successfully created.",
+    "acceptSuccess": "Referral successfully accepted by destination hospital.",
+    "scheduleSuccess": "Follow-up consultation successfully scheduled.",
+    "missedEscalated": "Missed follow-up consultation recorded and escalated to MO queue.",
+    "attendedSuccess": "Referral consultation marked as attended.",
+    "cancelSuccess": "Referral successfully cancelled.",
+    "crossHospitalDenied": "Destination hospital staff see only referrals addressed to their facility.",
+    "alreadyEscalated": "Missed follow-up consultation has already been escalated to the MO queue.",
+    "invalidTransition": "Invalid referral status transition."
+  },
+  "teleconsultation": {
+    "title": "Scheduled Teleconsultation & Case Discussion",
+    "requestSuccess": "Teleconsultation session requested successfully.",
+    "scheduleSuccess": "Teleconsultation session scheduled.",
+    "startSuccess": "Teleconsultation marked as in progress.",
+    "notesRecorded": "Clinical consultation notes recorded with integrity hash.",
+    "notesAmended": "Clinical notes amended with provenance record.",
+    "releaseSuccess": "Consultation summary authorized and released for patient viewing.",
+    "messagePosted": "Staff case discussion message posted.",
+    "cancelSuccess": "Teleconsultation session cancelled.",
+    "videoBlockedNotice": "Real-time video teleconsultation is a BLOCKED stub in simulation mode. No live video adapter configured.",
+    "voiceBlockedNotice": "Real-time voice teleconsultation is a BLOCKED stub in simulation mode. No live voice adapter configured.",
+    "notReleased": "Clinical consultation notes have not been released for patient viewing yet.",
+    "onlyAssignedClinician": "Only the designated clinician assigned to this consultation may record notes.",
+    "crossHospitalDenied": "Teleconsultation records are restricted to the designated health facility.",
+    "invalidTransition": "Invalid teleconsultation status transition."
+  },
+  "map": {
+    "title": "Village Data Map & Spatial Aggregation",
+    "suppressionNotice": "Small-count cell suppression applied (< 5) to safeguard tribal patient privacy.",
+    "crossCatchmentDenied": "Hospital staff may only access villages within their facility catchment.",
+    "villageScopeDenied": "Health workers may only access data for their assigned villages.",
+    "emptyStateNotice": "No aggregate screening data available for this village.",
+    "exportSuccess": "GeoJSON spatial dataset successfully generated with cell suppression."
+  },
+  "reports": {
+    "title": "Executive Health Reports & Dashboards",
+    "simulationBanner": "⚠️ SIMULATION SYSTEM - DEMO DATA ONLY - NOT FOR CLINICAL USE",
+    "suppressionNotice": "Small-count cell suppression applied (< 5) to safeguard tribal patient privacy.",
+    "exportSuccess": "Report successfully exported and recorded in security audit log.",
+    "unauthorizedPii": "Direct identifiers redacted. Explicit audited export capability required.",
+    "crossCatchmentDenied": "Hospital managers and staff may only access report data for their facility catchment."
+  },
+  "aadhaarMock": {
+    "title": "MOCK - Aadhaar Simulation Adapter",
+    "banner": "⚠️ MOCK AADHAAR SERVICE - DEMO SIMULATION ONLY - NOT CONNECTED TO UIDAI",
+    "label": "MOCK",
+    "otpGenerated": "Simulated OTP dispatched for test beneficiary.",
+    "otpMatch": "Simulated OTP match completed in demo environment.",
+    "otpMismatch": "Simulated OTP mismatch. Use test code 123456.",
+    "demographicMatch": "Simulated demographic evaluation matched test parameters.",
+    "demographicMismatch": "Simulated demographic evaluation resulted in mismatch.",
+    "realIntegrationBlocked": "Direct UIDAI integration is BLOCKED to safeguard tribal patient privacy.",
+    "fakeNumberNotice": "Test numbers only. Full 12-digit Aadhaar is never stored or logged."
+  },
+  "offline": {
+    "statusOffline": "Offline Mode Active (Cached in Paderu interior)",
+    "statusOnline": "Online (Connected to District Health Network)",
+    "queuedActions": "Actions queued offline in encrypted storage",
+    "syncSuccess": "All queued offline records synchronized successfully.",
+    "syncConflict": "Conflict detected during synchronization. Resolution required.",
+    "deviceRevokedWipe": "Device session revoked. Local offline records wiped for patient privacy.",
+    "queueLimitReached": "Maximum offline queue capacity reached (500 actions). Please sync.",
+    "photoLimitNotice": "Photo capture size limited to 5 MB raw, compressed to 2 MB."
   }
 }
+
+
+
