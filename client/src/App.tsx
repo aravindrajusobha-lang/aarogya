@@ -379,13 +379,15 @@ export const App: React.FC = () => {
                 currentUser={currentUser}
                 activeNav="overview"
                 onNavSelect={(nav) => {
-                  if (nav === 'reports') {
-                    window.location.hash = '#/';
-                    setMainTab('asr-map');
-                  } else if (nav === 'audit') {
-                    window.location.hash = '#/';
-                    setMainTab('diagnostics');
-                  }
+                  window.location.hash = '#/';
+                  const destination: Partial<Record<string, MainTabType>> = {
+                    overview: 'dashboard',
+                    hospitals: 'hospitals',
+                    doctors: 'specialists',
+                    reports: 'asr-map',
+                    audit: 'diagnostics',
+                  };
+                  setMainTab(destination[nav] || 'dashboard');
                 }}
                 onLogout={handleLogout}
                 onToggleAIAssistant={toggleNurseAssistant}
@@ -420,13 +422,15 @@ export const App: React.FC = () => {
                 currentUser={currentUser}
                 activeNav="queue"
                 onNavSelect={(nav) => {
-                  if (nav === 'teleconsult') {
-                    window.location.hash = '#/';
-                    setMainTab('teleconsultation');
-                  } else if (nav === 'referrals') {
-                    window.location.hash = '#/';
-                    setMainTab('screening');
-                  }
+                  window.location.hash = '#/';
+                  const destination: Partial<Record<string, MainTabType>> = {
+                    queue: 'screening',
+                    'high-risk': 'screening',
+                    referrals: 'screening',
+                    teleconsult: 'teleconsultation',
+                    biopsy: 'screening',
+                  };
+                  setMainTab(destination[nav] || 'screening');
                 }}
                 onLogout={handleLogout}
                 onToggleAIAssistant={toggleNurseAssistant}
@@ -472,18 +476,27 @@ export const App: React.FC = () => {
               />
               <DashboardLayout
                 currentUser={currentUser}
-                activeNav="patient-home"
+                activeNav="dashboard"
                 onNavSelect={(nav) => {
-                  if (nav === 'screening') {
-                    window.location.hash = '#/';
-                    setMainTab('screening');
-                  } else if (nav === 'appointments') {
-                    window.location.hash = '#/';
-                    setMainTab('appointments');
-                  } else if (nav === 'records') {
-                    window.location.hash = '#/';
-                    setMainTab('patients');
+                  const destination: Partial<Record<string, MainTabType>> = {
+                    dashboard: 'dashboard',
+                    screening: 'screening',
+                    specialists: 'specialists',
+                    hospitals: 'hospitals',
+                    notifications: 'notifications',
+                    consent: 'consent',
+                    auth: 'auth',
+                    appointments: 'appointments',
+                    patients: 'patients',
+                    reports: 'reports',
+                    help: 'help',
+                  };
+                  if (nav === 'dashboard') {
+                    window.location.hash = '#/patient';
+                    return;
                   }
+                  window.location.hash = '#/';
+                  setMainTab(destination[nav] || 'dashboard');
                 }}
                 onLogout={handleLogout}
                 onToggleAIAssistant={toggleNurseAssistant}
@@ -1010,6 +1023,7 @@ export const App: React.FC = () => {
                     onNavigateTab={(tab) => setMainTab(tab as MainTabType)}
                     currentLang={lang}
                     onOpenLanguageModal={() => setShowLanguageModal(true)}
+                    initialTab="reports"
                   />
                 ) : (
                   <div className="card forest-card-panel" style={{ padding: '24px' }}>

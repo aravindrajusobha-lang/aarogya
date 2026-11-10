@@ -66,6 +66,14 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         { id: 'help', label: 'Help and Support', icon: '❓' },
       ];
 
+  const primaryPatientNavIds = new Set(['dashboard', 'hospitals', 'patients', 'reports']);
+  const primaryNavItems = isAdmin || isDoctor
+    ? navItems
+    : navItems.filter((item) => primaryPatientNavIds.has(item.id));
+  const secondaryNavItems = isAdmin || isDoctor
+    ? []
+    : navItems.filter((item) => !primaryPatientNavIds.has(item.id));
+
   const getRoleClass = () => {
     if (isAdmin) return 'role-badge-admin';
     if (isDoctor) return 'role-badge-doctor';
@@ -108,7 +116,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
         {/* Nav Items */}
         <nav className="dash-sidebar-nav">
-          {navItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const isActive = activeNav === item.id;
             return (
               <button
@@ -140,6 +148,30 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               </button>
             );
           })}
+          {secondaryNavItems.length > 0 && (
+            <details style={{ marginTop: '8px' }}>
+              <summary className="dash-nav-item" style={{ cursor: 'pointer', listStyle: 'none' }}>
+                <span className="dash-nav-icon">⋯</span>
+                <span>More patient services</span>
+              </summary>
+              <div style={{ paddingLeft: '10px' }}>
+                {secondaryNavItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`dash-nav-item ${activeNav === item.id ? 'active' : ''}`}
+                    onClick={() => {
+                      onNavSelect(item.id);
+                      setIsMobileOpen(false);
+                    }}
+                  >
+                    <span className="dash-nav-icon">{item.icon}</span>
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
         </nav>
 
         {/* Footer with Logout */}

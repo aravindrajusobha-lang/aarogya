@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { AuthUser } from '../../components/AuthPanel';
-import { LiveVideoConsultationModal } from '../../components/LiveVideoConsultationModal';
 import { PrescriptionModal } from '../../components/PrescriptionModal';
 import { PrescriptionCardView } from '../../components/PrescriptionCardView';
 import { ThemeToggle } from '../../components/ThemeToggle';
@@ -40,7 +39,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
 
   // Video Consultation & Prescription Modals
-  const [showVideoModal, setShowVideoModal] = useState<boolean>(false);
   const [showPrescriptionModal, setShowPrescriptionModal] = useState<boolean>(false);
   const [viewPrescription, setViewPrescription] = useState<any | null>(null);
   const [activePatientRecordTab, setActivePatientRecordTab] = useState<
@@ -190,13 +188,13 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
               gap: '6px',
               cursor: 'pointer',
             }}
-            onClick={() => setShowVideoModal(true)}
+            onClick={() => onNavigateTab?.('teleconsultation')}
           >
             {currentLang === 'te'
               ? '📹 ప్రారంభించండి: రోగితో వీడియో కాల్'
               : currentLang === 'hi'
               ? '📹 शुरू करें: रोगी के साथ वीडियो कॉल'
-              : '📹 Start Video Consultation with Patient'}
+              : 'Open Text Case Discussion (Video Blocked)'}
           </button>
 
           <button
@@ -468,7 +466,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                       className="dash-btn"
                       style={{ padding: '5px 10px', fontSize: '0.76rem', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-text)', borderRadius: '6px', cursor: 'pointer' }}
                       onClick={() => {
-                        setShowVideoModal(true);
+                        onNavigateTab?.('teleconsultation');
                       }}
                       title="Launch WebRTC Live Video Consultation"
                     >
@@ -527,13 +525,13 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   type="button"
                   className="dash-btn"
                   style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning-text)', color: 'var(--warning-text)', fontSize: '0.78rem', padding: '6px 12px', borderRadius: '6px' }}
-                  onClick={() => setShowVideoModal(true)}
+                  onClick={() => onNavigateTab?.('teleconsultation')}
                 >
                   {currentLang === 'te'
                     ? '📹 ప్రారంభించండి: రోగితో వీడియో కాల్'
                     : currentLang === 'hi'
                     ? '📹 शुरू करें: वीडियो कॉल'
-                    : '📹 Start Video Call'}
+                    : 'Open Text Case Discussion (Video Blocked)'}
                 </button>
                 <button
                   type="button"
@@ -798,22 +796,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
       )}
 
       {/* WEBRTC LIVE VIDEO CONSULTATION MODAL (Module 4) */}
-      {showVideoModal && (
-        <LiveVideoConsultationModal
-          consultationId="CONS-PAD-8492"
-          patientName={selectedPatient ? selectedPatient.name : 'Balaraju Somulu'}
-          doctorName={currentUser?.fullName || 'Dr. K. Somasekhar (MO)'}
-          doctorSpecialty="Dental Surgeon & Oral Medicine"
-          hospitalName="Community Health Centre (CHC) Paderu"
-          userRole="doctor"
-          onClose={() => setShowVideoModal(false)}
-          onOpenPrescriptionModal={() => {
-            setShowVideoModal(false);
-            setShowPrescriptionModal(true);
-          }}
-        />
-      )}
-
       {/* PRESCRIPTION CREATION MODAL (Module 6) */}
       {showPrescriptionModal && (
         <PrescriptionModal

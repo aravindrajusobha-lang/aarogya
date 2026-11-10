@@ -7,7 +7,6 @@ import {
   IGeminiRefinementResult,
 } from '../../services/aiEngineService';
 import { LanguageCode } from '../../i18n';
-import { LiveVideoConsultationModal } from '../../components/LiveVideoConsultationModal';
 import { PrescriptionCardView } from '../../components/PrescriptionCardView';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import '../../styles/Dashboard.css';
@@ -18,6 +17,7 @@ export interface PatientDashboardProps {
   currentLang?: LanguageCode;
   onOpenLanguageModal?: () => void;
   onToggleAIAssistant?: () => void;
+  initialTab?: 'overview' | 'appointments' | 'referrals' | 'prescriptions' | 'history' | 'hospitals' | 'education' | 'care-team' | 'reports';
 }
 
 interface DiseaseInfo {
@@ -359,15 +359,14 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   currentLang = 'te',
   onOpenLanguageModal,
   onToggleAIAssistant,
+  initialTab = 'overview',
 }) => {
   const [activeTab, setActiveTab] = useState<
     'overview' | 'appointments' | 'referrals' | 'prescriptions' | 'history' | 'hospitals' | 'education' | 'care-team' | 'reports'
-  >('overview');
+  >(initialTab);
 
-  // Video Consultation & Telemedicine Modal State (Module 4)
-  const [showVideoModal, setShowVideoModal] = useState<boolean>(false);
-  const [activeConsultationId] = useState<string>('CONS-PAD-8492');
-  const [isDoctorCallActive, setIsDoctorCallActive] = useState<boolean>(false);
+  // Live video is blocked until a real teleconsultation adapter is configured.
+  const isDoctorCallActive = false;
 
   // Real-Time Patient Identifier
   const patientId = currentUser?.patientId || 'PAT-LOCAL-001';
@@ -403,6 +402,41 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       return [];
     }
   });
+
+  const removeScreeningRecord = (recordId: string | undefined, recordIndex: number) => {
+    const shouldRemove = window.confirm('Delete this screening photo and its record from this device?');
+    if (!shouldRemove) return;
+    setScreeningHistory((previous) => {
+      const updated = previous.filter((record, index) =>
+        recordId ? record.id !== recordId : index !== recordIndex
+      );
+      try {
+        localStorage.setItem(`aarogya_screenings_${patientId}`, JSON.stringify(updated));
+      } catch {
+        window.alert('Could not update the saved records on this device.');
+        return previous;
+      }
+      return updated;
+    });
+  };
+
+  const printMedicalRecords = () => {
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    if (!printWindow) {
+      window.alert('Allow pop-ups for this site to print or save your medical records as PDF.');
+      return;
+    }
+    const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>\"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;',
+    }[char] || char));
+    const historyRows = screeningHistory.map((record) => `<li><strong>${escapeHtml(record.date)} ${escapeHtml(record.time || '')}</strong> — ${escapeHtml(record.label || 'Screening record')}<br>${escapeHtml(record.notes || '')}</li>`).join('');
+    const prescriptionRows = prescriptionsList.map((record) => `<li>${escapeHtml(record.prescriptionId || 'Prescription')} — ${escapeHtml(record.doctorName || '')} (${escapeHtml(record.hospitalName || '')})</li>`).join('');
+    const referralRows = referralsList.map((record) => `<li>${escapeHtml(record.referralId || 'Referral')} — ${escapeHtml(record.destinationHospital || record.hospitalName || '')}</li>`).join('');
+    printWindow.document.write(`<!doctype html><html><head><title>Medical Records - ${escapeHtml(patientId)}</title><style>body{font:15px Arial,sans-serif;margin:32px;color:#17202a}h1,h2{color:#14532d}li{margin:10px 0}small{color:#555}</style></head><body><h1>Aarogya-Drishti Medical Records</h1><p>Patient: ${escapeHtml(patientName)}<br>Patient ID: ${escapeHtml(patientId)}<br><strong>SIMULATION — DEMO DATA ONLY — NOT FOR CLINICAL USE</strong></p><h2>Screening history</h2><ul>${historyRows || '<li>No screening records saved on this device.</li>'}</ul><h2>Prescriptions</h2><ul>${prescriptionRows || '<li>No prescription records saved on this device.</li>'}</ul><h2>Referrals</h2><ul>${referralRows || '<li>No referral records saved on this device.</li>'}</ul><small>Use your browser print dialog to print or save this page as PDF.</small></body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+  };
 
   // Voice Guidance (Module 11) - Web Speech API
   const speakText = (text: string) => {
@@ -450,6 +484,9 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const analysisRunRef = useRef(0);
+  const currentAnalysisEntryIdRef = useRef<string | null>(null);
+  const analysisAbortControllerRef = useRef<AbortController | null>(null);
 
   // Daily Habits Tracker
   const [habitChecked, setHabitChecked] = useState<{ morningBrush: boolean; eveningBrush: boolean; salineRinse: boolean }>({
@@ -534,6 +571,9 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
 
   // Run Real-Time AI Inference on Canvas
   const processCanvasImage = async (canvas: HTMLCanvasElement) => {
+    const analysisRunId = ++analysisRunRef.current;
+    analysisAbortControllerRef.current?.abort();
+    analysisAbortControllerRef.current = new AbortController();
     setIsAnalyzing(true);
     setGeminiResult(null);
     try {
@@ -542,6 +582,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
 
       // Step 1: Run Primary Neural Model (ONNX WebAssembly)
       const result = await analyzeMucosalLesion(canvas, patientId);
+      if (analysisRunRef.current !== analysisRunId) return;
       setLiveScreeningResult(result);
       const currentDateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       setScreeningDate(currentDateStr);
@@ -557,6 +598,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
         status: 'Real-Time AI Complete',
         notes: (result as any).geminiAnalysis?.clinicalSummary || 'Live photo oral screening inference.',
       };
+      currentAnalysisEntryIdRef.current = newHistoryEntry.id;
 
       setScreeningHistory((prev) => {
         const updated = [newHistoryEntry, ...prev];
@@ -580,6 +622,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
             patientName,
             imageBase64: dataUrl,
           }),
+          signal: analysisAbortControllerRef.current?.signal,
         }).catch(() => null);
 
         // Also queue in real-time cases for MO Doctor Dashboard
@@ -610,17 +653,49 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       setIsVerifyingGemini(true);
       try {
         const gemini = await verifyAndRefineWithGemini(canvas, result, currentLang, geminiApiKey);
+        if (analysisRunRef.current !== analysisRunId) return;
         setGeminiResult(gemini);
       } catch (gErr) {
         console.warn('Gemini verification error:', gErr);
       } finally {
         setIsVerifyingGemini(false);
       }
+      if (analysisRunRef.current === analysisRunId) currentAnalysisEntryIdRef.current = null;
     } catch (err) {
       console.error('Error running oral screening inference:', err);
     } finally {
-      setIsAnalyzing(false);
+      if (analysisRunRef.current === analysisRunId) setIsAnalyzing(false);
     }
+  };
+
+  const cancelImageAnalysis = () => {
+    analysisRunRef.current += 1;
+    analysisAbortControllerRef.current?.abort();
+    analysisAbortControllerRef.current = null;
+    const entryId = currentAnalysisEntryIdRef.current;
+    currentAnalysisEntryIdRef.current = null;
+    if (entryId) {
+      setScreeningHistory((previous) => {
+        const updated = previous.filter((record) => record.id !== entryId);
+        try {
+          localStorage.setItem(`aarogya_screenings_${patientId}`, JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      try {
+        const storedCases = JSON.parse(localStorage.getItem('aarogya_realtime_cases') || '[]');
+        localStorage.setItem('aarogya_realtime_cases', JSON.stringify(
+          storedCases.filter((record: any) => record.id !== entryId)
+        ));
+      } catch {}
+    }
+    stopCameraStream();
+    setIsAnalyzing(false);
+    setIsVerifyingGemini(false);
+    setCapturedImagePreview(null);
+    setLiveScreeningResult(null);
+    setGeminiResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleManualGeminiVerification = async () => {
@@ -709,6 +784,8 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
     { id: 'history' as const, label: currentLang === 'te' ? '📜 నా ఆరోగ్య చరిత్ర' : currentLang === 'hi' ? '📜 स्वास्थ्य इतिहास' : '📜 Health History' },
     { id: 'hospitals' as const, label: currentLang === 'te' ? '🏥 సమీప ఆసుపత్రులు' : currentLang === 'hi' ? '🏥 नजदीकी अस्पताल' : '🏥 Nearby Hospitals' },
     { id: 'education' as const, label: currentLang === 'te' ? '🪥 నోటి సంరక్షణ సూచనలు' : currentLang === 'hi' ? '🪥 ओरल स्वास्थ्य' : '🪥 Oral Care' },
+    { id: 'care-team' as const, label: '👥 Care Team' },
+    { id: 'reports' as const, label: '📄 Medical Records' },
   ];
 
   return (
@@ -1008,7 +1085,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
           <button
             type="button"
             className={`patient-action-btn ${isDoctorCallActive ? 'call-active' : ''}`}
-            onClick={() => setShowVideoModal(true)}
+            onClick={() => onNavigateTab?.('teleconsultation')}
           >
             <span className="patient-action-icon">{isDoctorCallActive ? '🟢' : '🩺'}</span>
             <strong className="patient-action-title">
@@ -1018,7 +1095,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   : '3. డాక్టర్‌తో మాట్లాడండి'
                 : isDoctorCallActive
                 ? '3. Doctor is Online Now!'
-                : '3. Talk to Doctor'}
+                : '3. Text Case Discussion'}
             </strong>
             <span className="patient-action-desc">
               {currentLang === 'te'
@@ -1027,7 +1104,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   : 'ప్రత్యక్ష వీడియో సంప్రదింపు'
                 : isDoctorCallActive
                 ? 'Click to Join Call'
-                : 'Live WebRTC Video'}
+                : 'Text discussion is available; live video is blocked'}
             </span>
           </button>
 
@@ -1182,7 +1259,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       {/* Active Tab View with In-Place Switch Transition */}
       <div key={activeTab} className="tab-pane-transition">
         {/* -------------------- TAB: OVERVIEW & REAL-TIME SCREENING STUDIO -------------------- */}
-        {activeTab === 'overview' && (
+          {activeTab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
           
           {/* REAL-TIME SCREENING STUDIO CARD (Clean, Simple, High-Contrast) */}
@@ -1437,6 +1514,22 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 <p style={{ margin: 0, fontSize: '0.86rem', color: '#cbd5e1' }}>
                   Testing with on-device ONNX WebAssembly neural weights &amp; mucosal colorimetric filters.
                 </p>
+                <button
+                  type="button"
+                  onClick={cancelImageAnalysis}
+                  style={{
+                    marginTop: '14px',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #dc2626',
+                    background: 'rgba(220, 38, 38, 0.12)',
+                    color: '#b91c1c',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Delete photo and cancel analysis
+                </button>
               </div>
             )}
 
@@ -1974,7 +2067,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                         : '🟢 DOCTOR ONLINE'
                       : currentLang === 'te'
                       ? '🕒 వైద్యుల కోసం వేచి ఉంది'
-                      : '🕒 WAITING FOR DOCTOR'}
+                      : 'VIDEO CALL BLOCKED'}
                   </span>
                 </div>
 
@@ -2002,14 +2095,14 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       : '✓ Your treating doctor Dr. Somasekhar has started the call. Please join now.'
                     : currentLang === 'te'
                       ? '🔒 నిబంధన: మీ చికిత్సా వైద్యులు కాల్ ప్రారంభించినప్పుడు మాత్రమే మీరు చేరగలరు. రోగులు స్వయంగా కాల్ ప్రారంభించలేరు.'
-                      : '🔒 Rule: The treating doctor initiates the call. Patient joins once the doctor is online.'}
+                      : 'Live video is blocked. Open the text-based case discussion instead.'}
                 </div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <button
                   type="button"
-                  onClick={() => setShowVideoModal(true)}
+                  onClick={() => onNavigateTab?.('teleconsultation')}
                   style={{
                     background: isDoctorCallActive
                       ? 'linear-gradient(90deg, #10b981 0%, #059669 100%)'
@@ -2033,17 +2126,17 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                     {isDoctorCallActive
                       ? currentLang === 'te'
                         ? 'కాల్లో చేరండి (Join Call)'
-                        : 'Join Video Consultation'
+                        : 'Open Text Discussion'
                       : currentLang === 'te'
                         ? 'వేచి ఉండే గది (Waiting Lobby)'
-                        : 'Enter Waiting Lobby'}
+                        : 'Open Text Discussion'}
                   </span>
                 </button>
 
                 {/* Simulation Trigger Toggle for Testing */}
                 <button
                   type="button"
-                  onClick={() => setIsDoctorCallActive(!isDoctorCallActive)}
+                  onClick={() => onNavigateTab?.('teleconsultation')}
                   style={{
                     background: 'transparent',
                     border: '1px dashed rgba(255, 255, 255, 0.25)',
@@ -2114,9 +2207,9 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
           <div className="dash-panel-header">
             <h3 className="dash-panel-title">
               <span>📄</span>
-              <span>Diagnostic Reports &amp; Verified Records</span>
+              <span>My Medical Records</span>
             </h3>
-            <span className="dash-status-pill status-completed">CRYPTOGRAPHICALLY VERIFIED</span>
+            <span className="dash-status-pill status-completed">Saved on this device</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -2135,13 +2228,13 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
             >
               <div>
                 <div style={{ fontWeight: 700, color: '#ffffff', fontSize: '0.96rem', marginBottom: '4px' }}>
-                  Oral Mucosal Biopsy &amp; Screening Summary
+                  Screening history: {screeningHistory.length} record{screeningHistory.length === 1 ? '' : 's'}
                 </div>
                 <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginBottom: '4px' }}>
-                  Report ID: <code>REP-PAD-2026-0819</code> • CHC Paderu Pathology Lab
+                  Patient: <code>{patientName}</code> • Patient ID: <code>{patientId}</code>
                 </div>
                 <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                  Verified by Dr. K. Srinivas (BDS, MDS) • Cryptographic Hash: <code>a7b2...9f41</code>
+                  Includes locally saved screening photos, prescriptions, and referrals when available.
                 </div>
               </div>
               <button
@@ -2156,9 +2249,9 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   fontSize: '0.82rem',
                   cursor: 'pointer',
                 }}
-                onClick={() => alert('Diagnostic Report PDF generated successfully for patient ' + patientId)}
+                onClick={printMedicalRecords}
               >
-                📥 Download PDF
+                🖨️ Print / Save as PDF
               </button>
             </div>
           </div>
@@ -2275,6 +2368,19 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 ? 'ఈఎన్‌టీ స్పెషలిస్ట్, ముఖ మరియు దవడ శస్త్రచికిత్స, సాధారణ శస్త్రచికిత్స మరియు కింగ్ జార్జ్ హాస్పిటల్ (KGH) విశాఖపట్నంతో టెలిమెడిసిన్ లింక్ కలిగి ఉంది.'
                 : 'Specialist ENT, Maxillofacial, General Surgery, and Tele-medicine Consultation Link with King George Hospital (KGH) Visakhapatnam.'}
             </p>
+          </div>
+          <div className="dash-panel">
+            <h4 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Hospital referral network</h4>
+            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '0.86rem', lineHeight: 1.5 }}>
+              Community Health Centre Paderu connects patients to Area Hospital Araku Valley and King George Hospital, Visakhapatnam, for clinician-directed referrals. Live video calling is unavailable; text-based case discussion is available to clinical staff.
+            </p>
+            <button
+              type="button"
+              className="dash-btn dash-btn-outline"
+              onClick={() => onNavigateTab?.('specialists')}
+            >
+              View specialist directory
+            </button>
           </div>
         </div>
       )}
@@ -2551,6 +2657,22 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                         </div>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      aria-label={`Delete screening record from this device: ${item.date || item.id || idx + 1}`}
+                      onClick={() => removeScreeningRecord(item.id, idx)}
+                      style={{
+                        border: '1px solid #dc2626',
+                        background: 'rgba(220, 38, 38, 0.12)',
+                        color: '#b91c1c',
+                        borderRadius: '8px',
+                        padding: '7px 11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 ))}
               </div>
@@ -2560,19 +2682,6 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       )}
 
       {/* WEBRTC LIVE VIDEO CONSULTATION MODAL (Module 4) */}
-      {showVideoModal && (
-        <LiveVideoConsultationModal
-          consultationId={activeConsultationId}
-          patientName={patientName}
-          doctorName="Dr. K. Somasekhar (MO)"
-          doctorSpecialty="Dental Surgeon & Oral Medicine"
-          hospitalName="Community Health Centre (CHC) Paderu"
-          userRole="patient"
-          currentLang={currentLang}
-          onClose={() => setShowVideoModal(false)}
-        />
-      )}
-
       {/* PRINTABLE DIGITAL PRESCRIPTION CARD VIEW (Module 6 & 7) */}
       {selectedPrescription && (
         <PrescriptionCardView
