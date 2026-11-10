@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { otpRouter, inMemoryOtpStore } from '../src/modules/auth/otpRoutes.js';
 import { authRouter } from '../src/modules/auth/authRoutes.js';
+import { envelopeMiddleware } from '../src/middleware/envelope.js';
 
 describe('OTP API Routes Suite (/api/otp)', () => {
   let app: Express;
@@ -18,6 +19,7 @@ describe('OTP API Routes Suite (/api/otp)', () => {
 
     app = express();
     app.use(express.json());
+    app.use(envelopeMiddleware);
     app.use('/api/otp', otpRouter);
     app.use('/api/v1/auth', authRouter);
   });
@@ -225,6 +227,50 @@ describe('OTP API Routes Suite (/api/otp)', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.message).toBe('Phone not verified');
+    });
+
+    it('successfully registers patient after verifying phone with demo OTP 123456', async () => {
+      // 1. Send OTP
+      const sendRes = await request(app)
+        .post('/api/otp/send')
+        .send({ phone: mockPhone, purpose: 'REGISTER' });
+      expect(sendRes.status).toBe(200);
+      expect(sendRes.body.demoOtp).toBe('123456');
+
+      // 2. Verify with demo OTP 123456
+      const verifyRes = await request(app)
+        .post('/api/otp/verify')
+        .send({ phone: mockPhone, otp: '123456', purpose: 'REGISTER' });
+      expect(verifyRes.status).toBe(200);
+      expect(verifyRes.body.phoneToken).toBeTruthy();
+
+      // 3. Register with phoneToken
+      const regRes = await request(app)
+        .post('/api/v1/auth/register')
+        .send({
+          username: `demo_user_${Date.now()}`,
+          fullName: 'Demo Citizen User',
+          password: 'Password@2026',
+          role: 'patient',
+          phone: mockPhone,
+          phoneToken: verifyRes.body.phoneToken,
+        });
+
+      expect(regRes.status).toBe(201);
+      expect(regRes.body.success).toBe(true);
+      expect(regRes.body.data.user.role).toBe('patient');
+      expect(regRes.body.data.accessToken).toBeTruthy();
+    });
+
+    it('allows 1-click demo patient login via /api/otp/login with demo code 123456', async () => {
+      const loginRes = await request(app)
+        .post('/api/otp/login')
+        .send({ phone: mockPhone, otp: '123456' });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.accessToken).toBeTruthy();
+      expect(loginRes.body.user).toBeTruthy();
+      expect(loginRes.body.user.role).toBe('patient');
     });
   });
 });

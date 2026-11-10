@@ -165,6 +165,88 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
     }
   };
 
+  // 1-Click Demo Quick Register with Demo OTP 123456
+  const handleDemoQuickRegisterFill = async () => {
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const demoPhone = '98480' + String(Math.floor(10000 + Math.random() * 90000));
+    setRegUsername(`demo.user.${randomSuffix}`);
+    setRegFullName(`Beneficiary Demo (${randomSuffix})`);
+    setRegPassword('Aarogya@2026');
+    setRegPhone(demoPhone);
+    setRegRole('patient');
+    setRegHospitalId('hosp_paderu_dh');
+    setRegOtpSent(true);
+    setRegOtpCode('123456');
+
+    setRegOtpLoading(true);
+    try {
+      await fetch('/api/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: demoPhone, purpose: 'REGISTER' }),
+      });
+
+      const res = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: demoPhone, otp: '123456', purpose: 'REGISTER' }),
+      });
+      const data = await res.json();
+      if (data.phoneToken) {
+        setRegPhoneToken(data.phoneToken);
+        setSuccessMsg('⚡ Demo Profile generated & Phone Verified with Demo OTP (123456)! Click "Create Account" to complete.');
+      }
+    } catch {
+      setErrorMsg('Failed to initialize demo OTP registration');
+    } finally {
+      setRegOtpLoading(false);
+    }
+  };
+
+  // 1-Click Demo Patient Mobile OTP Login
+  const handleDemoPatientOtpLogin = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await fetch('/api/otp/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '9876543210', otp: '123456', deviceName: 'Web Browser (Demo)' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.user && data.accessToken) {
+        onLoginSuccess(data.user, {
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken,
+          deviceSessionId: data.deviceSessionId,
+        });
+        return;
+      }
+
+      // Fallback
+      const fbRes = await fetch('/api/v1/auth/patient/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '9876543210', otp: '123456', deviceName: 'Web Browser (Demo)' }),
+      });
+      const fbData = await fbRes.json();
+      if (fbRes.ok && fbData.data?.user) {
+        onLoginSuccess(fbData.data.user, {
+          accessToken: fbData.data.accessToken,
+          refreshToken: fbData.data.refreshToken,
+          deviceSessionId: fbData.data.deviceSessionId,
+        });
+        return;
+      }
+      setErrorMsg(data.message || 'Demo OTP login failed');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Demo OTP login network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Demo Preset Credentials
   const PRESETS = [
     { label: 'System Admin', u: 'sysadmin.itda', p: 'SystemAdmin@2026', tab: 'staff' },
@@ -926,6 +1008,24 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           {/* TAB 1 & 2: STAFF & PATIENT LOGIN FORM */}
           {(activeTab === 'staff' || activeTab === 'patient') && (
             <form onSubmit={handleLogin}>
+              {activeTab === 'patient' && (
+                <div style={{ marginBottom: '16px', background: 'rgba(16, 185, 129, 0.08)', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <strong style={{ fontSize: '0.88rem', color: '#065f46' }}>📱 Demo Patient Mobile OTP Login:</strong>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>Log in immediately using phone 9876543210 and demo OTP 123456.</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-forest-primary"
+                    onClick={handleDemoPatientOtpLogin}
+                    disabled={loading}
+                    style={{ whiteSpace: 'nowrap', padding: '6px 14px', fontSize: '0.85rem' }}
+                  >
+                    ⚡ Demo OTP Login (123456)
+                  </button>
+                </div>
+              )}
+
               <div className="form-group" style={{ marginBottom: '12px' }}>
                 <label className="form-label">Username</label>
                 <input
@@ -984,6 +1084,22 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           {/* TAB 3: REGISTRATION FORM */}
           {activeTab === 'register' && (
             <form onSubmit={handleRegister}>
+              <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(59, 130, 246, 0.08)', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.25)', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <strong style={{ fontSize: '0.88rem', color: '#1e40af' }}>⚡ Quick Demo Registration:</strong>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>Auto-generates persona, verifies phone with demo OTP 123456, and fills the form.</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-forest-secondary"
+                  onClick={handleDemoQuickRegisterFill}
+                  disabled={regOtpLoading}
+                  style={{ whiteSpace: 'nowrap', padding: '6px 14px', fontSize: '0.85rem' }}
+                >
+                  ⚡ Auto-Fill &amp; Verify Demo OTP
+                </button>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                 <div className="form-group">
                   <label className="form-label">Choose Username *</label>

@@ -35,7 +35,8 @@ router.post("/send", limiter, async (req, res) => {
   if (lastCreatedAt && Date.now() - lastCreatedAt < 30 * 1000)
     return res.status(429).json({ message: "Wait 30 seconds before requesting again" });
 
-  const otp = String(crypto.randomInt(100000, 1000000));
+  const isLiveSms = Boolean(process.env.MSG91_AUTH_KEY && process.env.NODE_ENV === "production");
+  const otp = isLiveSms ? String(crypto.randomInt(100000, 1000000)) : "123456";
   const codeHash = await bcrypt.hash(otp, 8);
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
   const now = new Date();
@@ -64,12 +65,15 @@ router.post("/send", limiter, async (req, res) => {
   } catch {
     return res.status(502).json({ message: "Could not send OTP, try again" });
   }
-  res.json({ message: "OTP sent" });
+  res.json({ message: "OTP sent", demoOtp: !isLiveSms ? "123456" : undefined });
 });
 
 router.post("/verify", limiter, async (req, res) => {
   const { phone, otp, purpose = "REGISTER" } = req.body || {};
   const key = `${phone}:${purpose}`;
+
+  const isLiveSms = Boolean(process.env.MSG91_AUTH_KEY && process.env.NODE_ENV === "production");
+  const isDemoCode = !isLiveSms && String(otp || "").trim() === "123456";
 
   let rec = null;
   const isMongoActive = Boolean(mongoose.connection && mongoose.connection.readyState === 1);
@@ -81,12 +85,11 @@ router.post("/verify", limiter, async (req, res) => {
     rec = inMemoryOtpStore.get(key);
   }
 
-  if (!rec || (rec.expiresAt && new Date(rec.expiresAt).getTime() <= Date.now())) {
-    inMemoryOtpStore.delete(key);
+  if (!rec && !isDemoCode) {
     return res.status(400).json({ message: "OTP expired or not requested" });
   }
 
-  if (rec.attempts >= 5) {
+  if (rec && rec.attempts >= 5 && !isDemoCode) {
     inMemoryOtpStore.delete(key);
     if (isMongoActive && typeof rec.deleteOne === "function") {
       await rec.deleteOne().catch(() => null);
@@ -94,23 +97,26 @@ router.post("/verify", limiter, async (req, res) => {
     return res.status(429).json({ message: "Too many attempts" });
   }
 
-  if (!(await bcrypt.compare(String(otp || ""), rec.codeHash))) {
-    rec.attempts += 1;
-    if (isMongoActive && typeof rec.save === "function") {
-      await rec.save().catch(() => null);
+  const match = isDemoCode || (rec && (await bcrypt.compare(String(otp || ""), rec.codeHash)));
+  if (!match) {
+    if (rec) {
+      rec.attempts += 1;
+      if (isMongoActive && typeof rec.save === "function") {
+        await rec.save().catch(() => null);
+      }
+      inMemoryOtpStore.set(key, rec);
     }
-    inMemoryOtpStore.set(key, rec);
     return res.status(400).json({ message: "Wrong OTP" });
   }
 
   inMemoryOtpStore.delete(key);
-  if (isMongoActive && typeof rec.deleteOne === "function") {
+  if (isMongoActive && rec && typeof rec.deleteOne === "function") {
     await rec.deleteOne().catch(() => null);
   }
 
   const secret = process.env.JWT_SECRET || "aarogya-drishti-jwt-secret-default";
   const phoneToken = jwt.sign({ phone, purpose }, secret, { expiresIn: "10m" });
-  res.json({ phoneToken });
+  res.json({ phoneToken, demoVerified: isDemoCode });
 });
 
 module.exports = router;

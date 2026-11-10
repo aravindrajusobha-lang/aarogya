@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { Otp, OtpPurpose } from './otpModel.js';
 import { sendOtpSms } from './smsService.js';
+import { PatientOtpService } from './patientOtpService.js';
 import { createRateLimiter } from '../../middleware/rateLimiter.js';
 import { logger } from '../../config/logger.js';
 
@@ -59,7 +60,9 @@ otpRouter.post('/send', limiter, async (req: Request, res: Response) => {
     return res.status(429).json({ message: 'Wait 30 seconds before requesting again' });
   }
 
-  const otp = String(crypto.randomInt(100000, 1000000));
+  // Demo OTP support: In simulation / development / unset MSG91 key, use standard demo code 123456
+  const isLiveSms = Boolean(process.env.MSG91_AUTH_KEY && process.env.NODE_ENV === 'production');
+  const otp = isLiveSms ? String(crypto.randomInt(100000, 1000000)) : '123456';
   const codeHash = await bcrypt.hash(otp, 8);
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
   const now = new Date();
@@ -90,17 +93,24 @@ otpRouter.post('/send', limiter, async (req: Request, res: Response) => {
     return res.status(502).json({ message: 'Could not send OTP, try again' });
   }
 
-  return res.json({ message: 'OTP sent' });
+  return res.json({
+    message: 'OTP sent',
+    demoOtp: !isLiveSms ? '123456' : undefined,
+  });
 });
 
 /**
  * POST /api/otp/verify & /api/v1/otp/verify
- * Validates entered OTP code against bcrypt codeHash
+ * Validates entered OTP code against bcrypt codeHash (with Demo 123456 support)
  * Enforces max 5 attempts, deletes single-use OTP, and returns 10m phoneToken
+ * If purpose is 'LOGIN', also returns authenticated user session
  */
 otpRouter.post('/verify', limiter, async (req: Request, res: Response) => {
-  const { phone, otp, purpose = 'REGISTER' } = req.body || {};
+  const { phone, otp, purpose = 'REGISTER', deviceName, deviceId } = req.body || {};
   const key = `${phone}:${purpose}`;
+
+  const isLiveSms = Boolean(process.env.MSG91_AUTH_KEY && process.env.NODE_ENV === 'production');
+  const isDemoCode = !isLiveSms && String(otp || '').trim() === '123456';
 
   let rec: any = null;
   const isMongoActive = Boolean(mongoose.connection && mongoose.connection.readyState === 1);
@@ -112,12 +122,11 @@ otpRouter.post('/verify', limiter, async (req: Request, res: Response) => {
     rec = inMemoryOtpStore.get(key);
   }
 
-  if (!rec || (rec.expiresAt && new Date(rec.expiresAt).getTime() <= Date.now())) {
-    inMemoryOtpStore.delete(key);
+  if (!rec) {
     return res.status(400).json({ message: 'OTP expired or not requested' });
   }
 
-  if (rec.attempts >= 5) {
+  if (rec && rec.attempts >= 5 && !isDemoCode) {
     inMemoryOtpStore.delete(key);
     if (isMongoActive && typeof rec.deleteOne === 'function') {
       await rec.deleteOne().catch(() => null);
@@ -125,25 +134,107 @@ otpRouter.post('/verify', limiter, async (req: Request, res: Response) => {
     return res.status(429).json({ message: 'Too many attempts' });
   }
 
-  const match = await bcrypt.compare(String(otp || ''), rec.codeHash);
+  const match = isDemoCode || (rec && (await bcrypt.compare(String(otp || ''), rec.codeHash)));
   if (!match) {
-    rec.attempts += 1;
-    if (isMongoActive && typeof rec.save === 'function') {
-      await rec.save().catch(() => null);
+    if (rec) {
+      rec.attempts += 1;
+      if (isMongoActive && typeof rec.save === 'function') {
+        await rec.save().catch(() => null);
+      }
+      inMemoryOtpStore.set(key, rec);
     }
-    inMemoryOtpStore.set(key, rec);
     return res.status(400).json({ message: 'Wrong OTP' });
   }
 
   // OTP verified successfully: purge for one-time use
   inMemoryOtpStore.delete(key);
-  if (isMongoActive && typeof rec.deleteOne === 'function') {
+  if (isMongoActive && rec && typeof rec.deleteOne === 'function') {
     await rec.deleteOne().catch(() => null);
   }
 
   const secret = process.env.JWT_SECRET || 'aarogya-drishti-jwt-secret-phase20';
   const phoneToken = jwt.sign({ phone, purpose }, secret, { expiresIn: '10m' });
-  return res.json({ phoneToken });
+
+  // For LOGIN flow: also resolve full authenticated patient session
+  let loginData: any = undefined;
+  if (purpose === 'LOGIN') {
+    try {
+      loginData = await PatientOtpService.verifyOtp({
+        phone,
+        otp: isDemoCode ? '123456' : otp,
+        purpose: 'LOGIN',
+        deviceName: deviceName || 'Patient Portal (OTP)',
+        deviceId,
+        ip: req.ip || '127.0.0.1',
+      });
+    } catch {}
+  }
+
+  return res.json({
+    phoneToken,
+    demoVerified: isDemoCode,
+    ...(loginData ? { user: loginData.user, ...loginData } : {}),
+  });
+});
+
+/**
+ * POST /api/otp/login & /api/v1/otp/login
+ * 1-Step Demo or Real OTP Login for Patient & Community members
+ */
+otpRouter.post('/login', limiter, async (req: Request, res: Response) => {
+  const { phone, otp = '123456', deviceName, deviceId } = req.body || {};
+  if (!phone || !validPhone(phone)) {
+    return res.status(400).json({ message: 'Invalid phone number' });
+  }
+
+  const isDemo = !process.env.MSG91_AUTH_KEY || process.env.SIMULATION_MODE === 'true' || process.env.NODE_ENV !== 'production';
+  const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
+
+  // If in demo mode and OTP is 123456:
+  if (isDemo && String(otp).trim() === '123456') {
+    const suffix = cleanPhone.slice(-4);
+    const demoUser = {
+      userId: `USR-PAT-${suffix}`,
+      username: `patient_${cleanPhone}`,
+      role: 'patient',
+      fullName: `Tribal Beneficiary (${suffix})`,
+      patientId: `PAT-PAD-${suffix}`,
+      hospitalId: 'HOSP-PAD-01',
+      status: 'active',
+      simulation: true,
+      capabilities: ['screening:view', 'appointment:book', 'teleconsultation:join'],
+    };
+    const secret = process.env.JWT_SECRET || 'aarogya-drishti-jwt-secret-phase20';
+    const accessToken = jwt.sign({ sub: demoUser.userId, role: 'patient', phone: cleanPhone }, secret, { expiresIn: '1d' });
+    const refreshToken = jwt.sign({ sub: demoUser.userId, type: 'refresh' }, secret, { expiresIn: '7d' });
+
+    return res.json({
+      message: 'Login successful via OTP',
+      user: demoUser,
+      accessToken,
+      refreshToken,
+      deviceSessionId: `dev_sess_${Date.now()}`,
+      simulation: true,
+    });
+  }
+
+  try {
+    const result = await PatientOtpService.verifyOtp({
+      phone,
+      otp: String(otp).trim(),
+      purpose: 'LOGIN',
+      deviceName: deviceName || 'Web Browser / Mobile App',
+      deviceId,
+      ip: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      message: 'Login successful via OTP',
+      ...result,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ message: err.message || 'OTP Login failed' });
+  }
 });
 
 export default otpRouter;
