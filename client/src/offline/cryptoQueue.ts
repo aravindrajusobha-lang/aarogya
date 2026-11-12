@@ -197,7 +197,8 @@ export async function enqueueOfflineItem(
     }
   }
 
-  const clientMutationId = `mut_${crypto.randomUUID()}`;
+  // Keep the mutation key itself in UUID v4 format for the sync-ledger invariant.
+  const clientMutationId = crypto.randomUUID();
 
   const payloadWithMeta = {
     ...payload,

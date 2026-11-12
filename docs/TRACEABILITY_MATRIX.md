@@ -250,6 +250,7 @@ Instead, password recovery is exclusively conducted via the **Authenticated Admi
 | REQ-072 | Destination Hospital Manager or MO confirmation authorization | **PASSED** | `tests/integrationAndE2EDemo.test.ts` |
 | REQ-073 | Slot conflict detection inside ACID MongoDB transaction (409) | **PASSED** | `tests/appointmentsManagement.test.ts` |
 | REQ-074 | Reschedule appointment tracking with mandatory reason log | **PASSED** | `tests/appointmentsManagement.test.ts` |
+| REQ-APT-VIDEO-01 | Patient-specific demo video invite requires a doctor-confirmed appointment and expires within 30 minutes | **IMPLEMENTED** | `tests/appointmentsManagement.test.ts` |
 
 ### Phase 11: Biopsy & Specimen Workflow
 | Req # | Requirement Description | Status | Test Evidence |
@@ -318,6 +319,15 @@ Instead, password recovery is exclusively conducted via the **Authenticated Admi
 | REQ-116 | Prohibited wording guard: zero "verified" or "authenticated by UIDAI" | **PASSED** | `tests/aadhaarMock.test.ts` |
 | REQ-117 | Real UIDAI external production connection | **BLOCKED** | External CIDR blocked; simulated MOCK adapter used |
 | REQ-118 | Simulated OTP verification with predictable demo OTP (`123456`) | **PASSED** | `tests/integrationAndE2EDemo.test.ts` |
+
+### Phase 16A: On-Device Aadhaar Photo Registration
+| Req # | Requirement Description | Status | Test Evidence |
+|---|---|---|---|
+| REQ-152 | Front/back QR and OCR extraction runs in browser; raw Aadhaar and card images never reach API | **PASSED** | `tests/aadhaarOcrParsing.test.ts`, `tests/aadhaarPhotoRegistration.test.ts` |
+| REQ-153 | Legacy XML QR and compressed numeric Secure QR map to editable profile fields; QR takes precedence over OCR | **PASSED** | `tests/aadhaarOcrParsing.test.ts` |
+| REQ-154 | Patient registers without OTP; returning patients with contact mobile can use the existing Mobile OTP login | **PASSED** | `tests/aadhaarPhotoRegistration.test.ts` |
+| REQ-155 | Patient account starts UNVERIFIED; only assigned ASHA/ANM or scoped Medical Officer can verify in person | **PASSED** | `tests/aadhaarPhotoRegistration.test.ts`, `tests/authorizationMatrix.test.ts` |
+| REQ-156 | Server-side Aadhaar-based duplicate detection while Aadhaar remains entirely on-device | **BLOCKED** | Cannot compute a server HMAC or compare identities without sending an Aadhaar-derived value; no such value is transmitted or stored. |
 
 ### Phase 17: Offline & PWA Hardening
 | Req # | Requirement Description | Status | Test Evidence |
@@ -418,3 +428,28 @@ Instead, password recovery is exclusively conducted via the **Authenticated Admi
 | **REQ-ADD-10** | Health Data Security & Retention | TLS 1.2/1.3, Argon2id, SHA-256 integrity, private storage, binary magic bytes validation, sliding-window rate limiting, privacy headers, and automated backup manifest | **PASSED** | `tests/additionalRequirements12.test.ts` ("Requirement 10: Health Data Security") |
 | **REQ-ADD-11** | Screening Report PDF Management | On-demand streaming of tamper-evident PDF-1.4 documents with simulation demarcations, masked demographics, clinical notes, and audit logging | **PASSED** | `tests/additionalRequirements12.test.ts` ("Requirement 11: Report Management & PDF Generation") |
 | **REQ-ADD-12** | Data Model & API Documentation | Complete entity-relationship definitions, indexes, ownership rules, REST API specifications, Zod validations, and error envelopes | **PASSED** | `tests/additionalRequirements12.test.ts` ("Requirement 12: Data Model and API Documentation Parity") |
+| REQ-VIDEO-01 | Appointment-linked Daily.co consultation | Doctor accepts assigned appointment request, sends a private link, patient joins from the in-app notification, assigned doctor can rejoin after patient arrival, 30-minute server/provider expiry, and versioned notes | Implemented; configure Daily server credentials to enable | `modules/consultation/*`, `client/src/components/VideoConsultation.tsx`, `tests/appointmentsManagement.test.ts` |
+| REQ-VIDEO-02 | Direct doctor-to-patient Daily video consultation | Facility-scoped verified patient selection, patient-initiated answer, doctor/patient-only room access, in-app call notification, Daily provider readiness state, and versioned notes | Implemented; configure Daily server credentials to enable | `modules/consultation/consultationRoutes.ts`, `client/src/components/VideoConsultation.tsx`, `tests/appointmentsManagement.test.ts` |
+| REQ-VIDEO-03 | Secure Daily provider administration | System-admin-only connection test and credential update, AES-256-GCM at-rest key encryption, secret-free API status responses, and patient call rejection | Implemented; configure `VIDEO_CONFIG_ENCRYPTION_KEY` before admin storage | `modules/consultation/dailyAdapter.ts`, `modules/consultation/dailyProviderConfigModel.ts`, `client/src/pages/dashboards/AdminDashboard.tsx`, `tests/appointmentsManagement.test.ts` |
+
+| REQ-PAT-01 | Patient portal routes, ownership and navigation | Patient sidebar, direct hash routes, role guard, in-portal 404 and responsive navigation | Implemented | `PATIENT_DASHBOARD_PORTAL.md`; `client/src/App.tsx`; `client/src/pages/dashboards/PatientDashboard.tsx` |
+| REQ-PAT-02 | Patient reports and AI chat | Patient-owned screening context and saved report chat; consent before profile context; DEMO AI safety language | Implemented | `server/tests/patientTreatmentPortal.test.ts` |
+| REQ-PAT-03 | Patient profile consent and privacy | Patient-scoped read/update, explicit consent, UUID replay protection, safe allowlisted response | Implemented | `server/tests/patientTreatmentPortal.test.ts` |
+| REQ-PAT-04 | Treatment tracking | Plan from own prescription, daily idempotent check-in and patient ownership guard | Implemented | `server/tests/patientTreatmentPortal.test.ts` |
+| REQ-PAT-05 | Appointments, reminders and support | Reuse appointment/notification/referral services; consent-gated appointment context; idempotent support ticket | Implemented | `server/tests/patientTreatmentPortal.test.ts`; `tests/appointmentsManagement.test.ts` |
+| REQ-PAT-06 | Patient overview redesign | Existing patient tools retained; responsive overview, live appointment status, search, calendar, reports and care journey use patient-owned API data | Implemented | `client/src/components/PatientHomeOverview.tsx`; `client/src/pages/dashboards/PatientDashboard.tsx` |
+| REQ-DOC-01 | Assigned-doctor appointment queue | Assigned clinicians can accept / decline requests, check in offline visits, complete visits and join eligible online appointments | Implemented | `client/src/components/DoctorAppointmentsPanel.tsx`; `server/tests/appointmentsManagement.test.ts` |
+| REQ-VIDEO-04 | Appointment WebRTC signaling | Authenticated Socket.IO signaling, ownership and time-window checks, room-size limit, server-only ICE config, no media persistence | Implemented; production deployments should configure TURN | `server/src/modules/consultation/consultationSocket.ts`; `client/src/components/LiveAppointmentRoom.tsx`; `server/tests/consultationSocket.test.ts` |
+
+
+### Doctor workflow extension (2026-11-12)
+
+Doctor sidebar destinations now remain under `/doctor/:section` (queue, appointments, high-risk, referrals, biopsy, patients, availability). Admin doctor provisioning uses the existing hospital doctor API and private storage; approval requires qualification documents and council registration.
+
+- `GET/POST /api/v1/consultations/doctor/availability`: authenticated approved doctor publishes future 20-minute slots in India time; POST accepts `{startTime: ISO, mutationId: UUID}` and returns `{slot}`. GET returns own `{slots}`.
+- `GET /api/v1/consultations/availability/:doctorId?date=YYYY-MM-DD`: authenticated appointment reader receives published slots and availability. Existing patient availability listing now counts doctor-published slots. Booking validates the doctor, facility and exact published slot. Existing facility conflict protection remains in place.
+- `GET /api/v1/consultations/doctor/patients/:patientId/records`: approved doctor with patient-read capability; facility-scoped, audited patient, screenings, clinical cases, prescriptions, appointments, consultations and versioned notes. No cross-facility search.
+- Additive `doctorslots` collection: doctorId, hospitalId, startTime, endTime, mutationId; unique doctor/start and mutation indexes.
+- Additive `consultationchats` collection: messageId (unique), appointmentId, senderId, role, text (immutable), SHA-256 (immutable), timestamps. Socket chat uses authenticated appointment rooms, bounded messages and idempotent message IDs. History is returned only after room authorization. Doctor starts the room before patient joins.
+- Prescriptions add optional immutable SHA-256 and sparse unique mutationId fields. Existing documents remain valid. New prescriptions resolve doctor/patient/facility names server-side and require approved treating doctor access. UI starts with empty clinician-authored medicine fields.
+- Verification: consultationSocket tests cover doctor-first room access, signaling and saved chat replay; appointmentsManagement tests cover slot publication, publication authorization and replay; module smoke, backup/restore and secret-scanner checks. Real camera/audio testing across two devices and network TURN relay remains an operational acceptance check.

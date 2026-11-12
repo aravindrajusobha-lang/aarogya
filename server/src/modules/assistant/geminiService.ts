@@ -21,6 +21,17 @@ export interface OralPhotoAnalysisResult {
   lifestyleAdvice: string[];
   answerText: string;
   speechText: string;
+  patientExplanation?: string;
+  imageObservation?: string;
+  possibleConditions?: string[];
+  riskFactors?: string[];
+  possibleCauses?: string[];
+  thingsToAvoid?: string[];
+  whatToTellClinician?: string[];
+  whenToConsult?: string[];
+  whenToSeekReview?: string[];
+  riskCategory?: 'low' | 'moderate' | 'high';
+  informationSources?: Array<{ label: string; url: string }>;
   language: 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml';
   suggestedActions: string[];
   disclaimer: string;
@@ -45,6 +56,28 @@ export interface GeminiChatResult {
   doctorRecommendation?: DoctorRecommendation;
 }
 
+const patientResponseBlockedPattern = /\b(?:cancer|malignant|carcinoma|curative)\b|\bstage\s*(?:\d+|[ivx]+)\b|\bdiagnostic confirmation\b/i;
+
+function ensureSafePatientText(values: Array<string | undefined>): void {
+  if (values.some((value) => typeof value === 'string' && (patientResponseBlockedPattern.test(value) || /\b(?:is|are|shows|indicates|confirms)\s+(?:a\s+)?(?:diagnosis|condition|disease)\b/i.test(value)))) {
+    throw new Error('Gemini response was withheld by the patient-safety content check.');
+  }
+}
+
+function cleanPatientTextList(value: unknown, maxItems = 5): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().slice(0, 320))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+const ORAL_HEALTH_INFORMATION_SOURCES = [
+  { label: 'NHS: Mouth ulcers', url: 'https://www.nhs.uk/conditions/mouth-ulcers/' },
+  { label: 'WHO: Oral health', url: 'https://www.who.int/news-room/fact-sheets/detail/oral-health' },
+];
+
 /**
  * Checks if the Gemini API Key is configured in environment
  */
@@ -65,7 +98,7 @@ export function getGeminiModelName(): string {
 }
 
 /**
- * Calls Gemini REST API using native fetch with multi-model fallback & timeout
+ * Calls the configured Gemini model using native fetch and a bounded timeout.
  */
 async function callGeminiApi(payload: any): Promise<any> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
@@ -74,20 +107,14 @@ async function callGeminiApi(payload: any): Promise<any> {
   }
 
   const primaryModel = getGeminiModelName();
-  const fallbackCandidates = Array.from(new Set([
-    primaryModel,
-    'gemini-flash-lite-latest',
-    'gemini-3.1-flash-lite',
-    'gemini-3.5-flash',
-    'gemini-3.8-flash',
-  ]));
+  const fallbackCandidates = [primaryModel];
 
   let lastError: Error | null = null;
 
   for (const model of fallbackCandidates) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 28000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
 
     try {
       const res = await fetch(url, {
@@ -103,9 +130,8 @@ async function callGeminiApi(payload: any): Promise<any> {
 
       if (!res.ok) {
         const errText = await res.text();
-        logger.warn({ status: res.status, errText: errText.slice(0, 160), model }, 'Gemini API candidate error, attempting fallback');
+        logger.warn({ status: res.status, errText: errText.slice(0, 160), model }, 'Configured Gemini model request failed');
         lastError = new Error(`Gemini API returned HTTP ${res.status} on ${model}: ${errText.slice(0, 180)}`);
-        // If 404 or 503 (model deprecated or busy), continue loop to next candidate
         if (res.status === 404 || res.status === 503 || res.status === 429) {
           continue;
         }
@@ -116,8 +142,8 @@ async function callGeminiApi(payload: any): Promise<any> {
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
-        logger.warn({ model }, 'Gemini model call timed out, attempting next candidate');
-        lastError = new Error(`Gemini API call timed out after 28 seconds on ${model}`);
+        logger.warn({ model }, 'Configured Gemini model call timed out');
+        lastError = new Error(`Gemini API call timed out after 45 seconds on ${model}`);
         continue;
       }
       lastError = err;
@@ -143,45 +169,46 @@ export async function analyzeOralPhotoWithGemini(params: {
   // Clean base64 string if it contains data URI header
   const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-  const langPrompt =
-    language === 'te'
-      ? 'The patient communicates in Telugu (తెలుగు). Generate answerText and speechText in natural, warm, conversational Telugu script. Explain medical terms simply.'
-      : language === 'hi'
-      ? 'The patient communicates in Hindi (हिंदी). Generate answerText and speechText in clear conversational Devanagari Hindi. Explain medical terms simply.'
-      : 'The patient communicates in Indian English. Generate answerText and speechText in clear, accessible English.';
+  const languageNames: Record<typeof language, string> = {
+    en: 'clear, accessible Indian English',
+    te: 'natural, conversational Telugu script',
+    hi: 'clear, conversational Hindi in Devanagari script',
+    ta: 'clear, conversational Tamil script',
+    kn: 'clear, conversational Kannada script',
+    ml: 'clear, conversational Malayalam script',
+  };
+  const langPrompt = `Write all patient-facing text in ${languageNames[language]}. Use short sentences and explain unfamiliar health words simply.`;
 
-  const systemPrompt = `You are "Drishti AI", an advanced clinical triage and navigation assistant for the Aarogya-Drishti community healthcare platform in ITDA Paderu, Alluri Sitharama Raju (ASR) District, Andhra Pradesh.
+  const systemPrompt = `You are Drishti AI, a community health navigation assistant for Aarogya-Drishti.
 
-MANDATORY CLINICAL SAFETY GUIDELINES:
-1. You provide preliminary screening and specialist referral guidance. You DO NOT provide a final definitive clinical determination.
-2. Explicitly specify WHICH SPECIALIST DOCTOR the patient should consult (e.g. Dental Surgeon, Oral & Maxillofacial Surgeon, ENT Specialist, Head & Neck Surgical Specialist).
-3. Recommend referral facilities in ASR district or Visakhapatnam (e.g. Community Health Centre CHC Paderu, Area Hospital Araku, King George Hospital KGH Visakhapatnam).
-4. Identify potential mucosal observations (e.g., leukoplakia, erythroplakia, aphthous stomatitis, oral lichen planus, dental caries, submucous fibrosis, gingival inflammation).
-5. Specify triage risk tier: 'low_risk_support', 'moderate_risk_support', or 'high_risk_support'.
-6. Provide immediate supportive lifestyle advice (immediate cessation of betel nut, tobacco, gutka, alcohol, warm saline mouth rinses).
-7. ${langPrompt}
-8. Plain speech text: The "speechText" field will be read aloud by browser Text-to-Speech. Never include markdown asterisks, emojis, bullet symbols, or URLs in speechText.
+Use the photo only to describe visible features for DEMO AI screening support. Never diagnose, identify a disease, assign a stage, recommend medicine, or claim certainty. Explain that a qualified clinician must review any concern. Do not infer patient identity, history, or symptoms that are not provided. Suggest a clinician type and local facility only as navigation options; the clinician decides urgency and care.
+${langPrompt}
+The speechText field is read aloud. Use plain spoken sentences without markdown, emojis, or URLs.
 
-You must respond ONLY with a valid JSON object matching this schema:
+Respond only with valid JSON matching this structure. Do not name or diagnose a disease. Describe only what is visibly apparent, and distinguish that observation from general health education. Never claim that a cause applies to this patient. If the image is unclear, say so. Base general education only on NHS mouth-ulcer guidance (https://www.nhs.uk/conditions/mouth-ulcers/) and WHO oral-health guidance (https://www.who.int/news-room/fact-sheets/detail/oral-health); avoid speculation:
 {
-  "observedCondition": "short name of visual mucosal finding",
+  "observedCondition": "plain description of visible appearance, or unclear",
   "conditionCategory": "white_lesion | red_lesion | ulcerative | pigmented | dental_caries | benign_mucosa | other",
   "riskTier": "low_risk_support | moderate_risk_support | high_risk_support",
-  "confidenceScore": 0.88,
-  "anatomicalSite": "e.g. Right Buccal Mucosa or Lateral Tongue",
-  "visualFindings": ["finding 1", "finding 2"],
-  "recommendedDoctor": {
-    "specialty": "e.g. Dental Surgeon or Oral & Maxillofacial Specialist",
-    "facility": "e.g. Community Health Centre (CHC) Paderu or KGH Visakhapatnam",
-    "urgency": "routine | priority | urgent",
-    "timelineDays": 7,
-    "consultationReason": "Clear reason why this specialist should examine the lesion"
-  },
-  "urgentRedFlags": ["warning sign 1", "warning sign 2"],
-  "lifestyleAdvice": ["Immediate tobacco cessation", "Warm saline rinse twice daily"],
-  "answerText": "Comprehensive markdown response explaining what was observed, which doctor to consult, and next steps.",
-  "speechText": "Natural spoken explanation in requested language without emojis or markdown symbols.",
-  "suggestedActions": ["Book CHC Dental Appointment", "Find Nearest PHC", "Oral Self-Care Guide"]
+  "confidenceScore": 0.0,
+  "anatomicalSite": "visible location or unclear",
+  "visualFindings": ["visible feature"],
+  "recommendedDoctor": {"specialty": "appropriate clinician type", "facility": "facility name or ask local staff", "urgency": "routine | priority | urgent", "timelineDays": 0, "consultationReason": "screening support reason, without diagnosis"},
+  "urgentRedFlags": [],
+  "lifestyleAdvice": [],
+  "imageObservation": "The photo appears to show a visible feature, or the image is unclear. This description may be inaccurate.",
+  "possibleConditions": ["one to three general educational condition names only; each is possible, not a diagnosis"],
+  "riskFactors": ["only factors supplied in the patient notes; never infer from the image"],
+  "possibleCauses": ["general, common causes of a similar appearance; clearly state these are possibilities and cannot be determined from the photo"],
+  "thingsToAvoid": ["general self-care avoidance guidance, never a treatment plan"],
+  "whatToTellClinician": ["useful details the patient can share at an appointment, such as when it started or whether it is changing"],
+  "whenToConsult": ["one to two week rule and urgent symptoms as general navigation guidance"],
+  "riskCategory": "low | moderate | high; based only on supplied risk factors and symptoms, never image alone",
+  "patientExplanation": "2-4 short sentences explaining what the image appears to show, what an image cannot establish, and why a clinician review matters",
+  "whenToSeekReview": ["clear, practical signs or timeframes for arranging an in-person review"],
+  "answerText": "same plain-language explanation for existing report and chat features",
+  "speechText": "plain spoken version of the summary",
+  "suggestedActions": ["Book a clinician visit"]
 }`;
 
   const payload = {
@@ -190,7 +217,7 @@ You must respond ONLY with a valid JSON object matching this schema:
         role: 'user',
         parts: [
           {
-            text: `Please analyze this oral cavity photo for screening triage. Patient notes: "${patientNote || 'Checking mouth spot / lesion'}". Identify the observed mucosal condition, triage risk tier, and state clearly which doctor/specialist to consult.`,
+            text: `Review this oral photo for screening support only. Patient notes: "${patientNote || 'No additional notes provided'}". Describe visible features cautiously and suggest a clinician type for an in-person review.`,
           },
           {
             inlineData: {
@@ -203,7 +230,7 @@ You must respond ONLY with a valid JSON object matching this schema:
     ],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 1400,
+      maxOutputTokens: 2200,
       responseMimeType: 'application/json',
     },
     systemInstruction: {
@@ -220,32 +247,95 @@ You must respond ONLY with a valid JSON object matching this schema:
 
   const parsed = JSON.parse(textOutput);
 
+  const validRiskTiers = ['low_risk_support', 'moderate_risk_support', 'high_risk_support'];
+  const validCategories = ['white_lesion', 'red_lesion', 'ulcerative', 'pigmented', 'dental_caries', 'benign_mucosa', 'other'];
+  const validUrgencies = ['routine', 'priority', 'urgent'];
+  if (!validRiskTiers.includes(parsed.riskTier) || !validCategories.includes(parsed.conditionCategory)) {
+    throw new Error('Gemini returned an incomplete screening support response.');
+  }
+  if (typeof parsed.confidenceScore !== 'number' || !Number.isFinite(parsed.confidenceScore) || parsed.confidenceScore < 0 || parsed.confidenceScore > 1) {
+    throw new Error('Gemini returned an invalid confidence value.');
+  }
+  if (!parsed.recommendedDoctor || typeof parsed.recommendedDoctor.specialty !== 'string' || !parsed.recommendedDoctor.specialty.trim()) {
+    throw new Error('Gemini did not provide a clinician navigation suggestion.');
+  }
+  if (!validUrgencies.includes(parsed.recommendedDoctor.urgency) || !Number.isInteger(parsed.recommendedDoctor.timelineDays) || parsed.recommendedDoctor.timelineDays < 0) {
+    throw new Error('Gemini returned an invalid follow-up suggestion.');
+  }
+  if (typeof parsed.observedCondition !== 'string' || typeof parsed.answerText !== 'string' || typeof parsed.speechText !== 'string') {
+    throw new Error('Gemini returned an incomplete screening support response.');
+  }
+
+  const patientExplanation = typeof parsed.patientExplanation === 'string' && parsed.patientExplanation.trim()
+    ? parsed.patientExplanation.trim().slice(0, 1200)
+    : parsed.answerText.trim().slice(0, 1200);
+  const imageObservation = typeof parsed.imageObservation === 'string' && parsed.imageObservation.trim()
+    ? parsed.imageObservation.trim().slice(0, 1200)
+    : `The photo appears to show ${String(parsed.observedCondition || 'an area that needs clinician review')}. This description may be inaccurate.`;
+  const possibleConditions = cleanPatientTextList(parsed.possibleConditions, 3);
+  const riskFactors = cleanPatientTextList(parsed.riskFactors);
+  const possibleCauses = cleanPatientTextList(parsed.possibleCauses);
+  const thingsToAvoid = cleanPatientTextList(parsed.thingsToAvoid);
+  const whatToTellClinician = cleanPatientTextList(parsed.whatToTellClinician);
+  const whenToConsult = cleanPatientTextList(parsed.whenToConsult);
+  const whenToSeekReview = cleanPatientTextList(parsed.whenToSeekReview);
+  const visualFindings = cleanPatientTextList(parsed.visualFindings);
+  const urgentRedFlags = cleanPatientTextList(parsed.urgentRedFlags);
+  const lifestyleAdvice = cleanPatientTextList(parsed.lifestyleAdvice);
+  const suggestedActions = cleanPatientTextList(parsed.suggestedActions);
+  const riskCategory = ['low', 'moderate', 'high'].includes(parsed.riskCategory) ? parsed.riskCategory as 'low' | 'moderate' | 'high' : 'low';
+  ensureSafePatientText([
+    parsed.observedCondition,
+    parsed.answerText,
+    parsed.speechText,
+    patientExplanation,
+    imageObservation,
+    ...possibleConditions,
+    ...riskFactors,
+    parsed.recommendedDoctor.specialty,
+    parsed.recommendedDoctor.consultationReason,
+    ...possibleCauses,
+    ...thingsToAvoid,
+    ...whenToConsult,
+    ...whatToTellClinician,
+    ...whenToSeekReview,
+    ...visualFindings,
+    ...urgentRedFlags,
+    ...lifestyleAdvice,
+    ...suggestedActions,
+  ]);
+
   return {
-    observedCondition: parsed.observedCondition || 'Unspecified Mucosal Finding',
-    conditionCategory: parsed.conditionCategory || 'other',
-    riskTier: ['low_risk_support', 'moderate_risk_support', 'high_risk_support'].includes(parsed.riskTier)
-      ? parsed.riskTier
-      : 'moderate_risk_support',
-    confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.85,
-    anatomicalSite: parsed.anatomicalSite || 'Oral Mucosa',
-    visualFindings: Array.isArray(parsed.visualFindings) ? parsed.visualFindings : [],
+    observedCondition: parsed.observedCondition,
+    conditionCategory: parsed.conditionCategory,
+    riskTier: parsed.riskTier,
+    confidenceScore: parsed.confidenceScore,
+    anatomicalSite: parsed.anatomicalSite || 'Unclear from image',
+    visualFindings,
     recommendedDoctor: {
-      specialty: parsed.recommendedDoctor?.specialty || 'Dental Surgeon',
-      facility: parsed.recommendedDoctor?.facility || 'Community Health Centre (CHC) Paderu',
-      urgency: parsed.recommendedDoctor?.urgency || 'priority',
-      timelineDays: parsed.recommendedDoctor?.timelineDays || 14,
-      consultationReason:
-        parsed.recommendedDoctor?.consultationReason ||
-        'Clinical in-person examination and assessment of oral mucosal tissue.',
+      specialty: parsed.recommendedDoctor.specialty.trim(),
+      facility: typeof parsed.recommendedDoctor.facility === 'string' ? parsed.recommendedDoctor.facility : 'Ask local health staff',
+      urgency: parsed.recommendedDoctor.urgency,
+      timelineDays: parsed.recommendedDoctor.timelineDays,
+      consultationReason: typeof parsed.recommendedDoctor.consultationReason === 'string' ? parsed.recommendedDoctor.consultationReason : 'An in-person clinician review is needed.',
     },
-    urgentRedFlags: Array.isArray(parsed.urgentRedFlags) ? parsed.urgentRedFlags : [],
-    lifestyleAdvice: Array.isArray(parsed.lifestyleAdvice) ? parsed.lifestyleAdvice : [],
-    answerText: parsed.answerText || 'Please consult your nearest Community Health Centre dental officer for an in-person evaluation.',
-    speechText: parsed.speechText || 'We have analyzed your oral photo. Please consult a dental surgeon at your nearest health centre.',
+    urgentRedFlags,
+    lifestyleAdvice,
+    answerText: parsed.answerText.trim().slice(0, 1600),
+    speechText: parsed.speechText.trim().slice(0, 1200),
+    patientExplanation,
+    imageObservation,
+    possibleConditions,
+    riskFactors,
+    possibleCauses,
+    thingsToAvoid,
+    whatToTellClinician,
+    whenToConsult,
+    whenToSeekReview,
+    riskCategory,
+    informationSources: ORAL_HEALTH_INFORMATION_SOURCES,
     language,
-    suggestedActions: Array.isArray(parsed.suggestedActions) && parsed.suggestedActions.length > 0
-      ? parsed.suggestedActions
-      : ['Consult Dental Surgeon', 'Find Nearest PHC', 'Screening Queue'],
+    suggestedActions,
     disclaimer:
       'DEMO AI SCREENING SUPPORT ONLY — CONTAINS NO CONFIRMED CLINICAL FINDINGS OR STAGING. REQUIRES IN-PERSON CLINICIAN REVIEW.',
     analyzedByModel: getGeminiModelName(),

@@ -86,11 +86,11 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // New Intake / Upload State
-  const [patientId, setPatientId] = useState<string>('PAT-DEMO-2026-001');
-  const [patientName, setPatientName] = useState<string>('Parvati Devi');
-  const [villageId, setVillageId] = useState<string>('VILLAGE_ARAKU_01');
+  const [patientId, setPatientId] = useState<string>('');
+  const [patientName, setPatientName] = useState<string>('');
+  const [villageId, setVillageId] = useState<string>('');
   const [priority, setPriority] = useState<'routine' | 'urgent' | 'high_priority'>('routine');
-  const [isDemoImage, setIsDemoImage] = useState<boolean>(true);
+  const [screeningConsentGiven, setScreeningConsentGiven] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [uploadedPhoto, setUploadedPhoto] = useState<PhotoRecord | null>(null);
@@ -98,7 +98,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
 
   // Amendment State
   const [amendFile, setAmendFile] = useState<File | null>(null);
-  const [amendReason, setAmendReason] = useState<string>('Enhanced focal resolution and lighting');
+  const [amendReason, setAmendReason] = useState<string>('');
   const [amending, setAmending] = useState<boolean>(false);
 
   // AI Analysis State
@@ -107,27 +107,21 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
 
   // Queue Action Modals / State
   const [selectedCase, setSelectedCase] = useState<ScreeningCase | null>(null);
-  const [assignMoId, setAssignMoId] = useState<string>('usr_mo_paderu_01');
-  const [clinicalImpression, setClinicalImpression] = useState<string>(
-    'Well-demarcated homogenous white plaque noted on buccal mucosa.'
-  );
+  const [assignMoId, setAssignMoId] = useState<string>('');
+  const [clinicalImpression, setClinicalImpression] = useState<string>('');
   const [riskCategorization, setRiskCategorization] = useState<
-    'low_risk_support' | 'moderate_risk_support' | 'high_risk_support'
-  >('moderate_risk_support');
-  const [followUpDays, setFollowUpDays] = useState<number>(30);
-  const [patientSummaryMsg, setPatientSummaryMsg] = useState<string>(
-    'Oral visual screening completed. Follow routine oral hygiene and schedule a 30-day follow-up with your local health worker.'
-  );
-  const [recommendedAction, setRecommendedAction] = useState<string>(
-    'Routine 30-day oral mucosa review at Primary Health Centre.'
-  );
+    'low_risk_support' | 'moderate_risk_support' | 'high_risk_support' | ''
+  >('');
+  const [followUpDays, setFollowUpDays] = useState<number | ''>('');
+  const [patientSummaryMsg, setPatientSummaryMsg] = useState<string>('');
+  const [recommendedAction, setRecommendedAction] = useState<string>('');
   const [escalateReason, setEscalateReason] = useState<string>('');
   const [referralSpecialty, setReferralSpecialty] = useState<string>('oral_maxillofacial_surgery');
-  const [referralFacility, setReferralFacility] = useState<string>('District Hospital Paderu');
-  const [referralNotes, setReferralNotes] = useState<string>('Teleconsultation and secondary review.');
+  const [referralFacility, setReferralFacility] = useState<string>('');
+  const [referralNotes, setReferralNotes] = useState<string>('');
 
   // Patient Results View State
-  const [patientViewId, setPatientViewId] = useState<string>('PAT-DEMO-2026-001');
+  const [patientViewId, setPatientViewId] = useState<string>('');
   const [patientResultsData, setPatientResultsData] = useState<any>(null);
 
   const fetchCases = async () => {
@@ -166,18 +160,25 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
 
   const handleUploadPhoto = async () => {
     const effectiveToken = accessToken || localStorage.getItem('aarogya_token');
-    if (!effectiveToken || !selectedFile) {
-      if (!selectedFile) setMessage({ text: 'Please select a photo file to upload.', type: 'error' });
+    if (!effectiveToken || !selectedFile || !patientId.trim() || !screeningConsentGiven || !currentUser?.hospitalId) {
+      setMessage({ text: 'Sign in, select a saved patient, choose a photo, provide consent and use your assigned facility.', type: 'error' });
       return;
     }
     setUploading(true);
     setMessage(null);
     try {
+      const consentResponse = await fetch('/api/v1/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${effectiveToken}` },
+        body: JSON.stringify({ patientId, purpose: 'screening_ai_analysis', language: 'en', witnessName: currentUser.fullName, termsVersion: '1.0.0' }),
+      });
+      const consentPayload = await consentResponse.json();
+      if (!consentResponse.ok || !consentPayload?.success) throw new Error(consentPayload?.error?.message || 'Patient consent could not be recorded.');
       const formData = new FormData();
       formData.append('photo', selectedFile);
       formData.append('patientId', patientId);
-      formData.append('hospitalId', currentUser?.hospitalId || 'hosp_paderu_dh');
-      formData.append('isDemo', isDemoImage ? 'true' : 'false');
+      formData.append('hospitalId', currentUser.hospitalId);
+      formData.append('isDemo', 'false');
 
       const res = await fetch('/api/v1/screening/photos/upload', {
         method: 'POST',
@@ -238,27 +239,29 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
 
   const handleRunAi = async () => {
     const effectiveToken = accessToken || localStorage.getItem('aarogya_token');
-    if (!effectiveToken) return;
+    if (!effectiveToken || !selectedFile || !uploadedPhoto || !patientId.trim() || !screeningConsentGiven || !currentUser?.hospitalId) {
+      setMessage({ text: 'Upload a consented photo for a saved patient before analysis.', type: 'error' });
+      return;
+    }
     setAiLoading(true);
+    setMessage(null);
     try {
-      const res = await fetch('/api/v1/screening/ai/analyze', {
+      const formData = new FormData();
+      formData.append('image', selectedFile, selectedFile.name);
+      formData.append('patientId', patientId);
+      formData.append('hospitalId', currentUser.hospitalId);
+      formData.append('consentGiven', 'true');
+      formData.append('clientId', crypto.randomUUID());
+      const res = await fetch('/api/ai/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${effectiveToken}`,
-        },
-        body: JSON.stringify({
-          photoId: uploadedPhoto?.photoId,
-          photoSha256: uploadedPhoto?.currentSha256 || 'simulated_photo_hash',
-          imageBase64: photoPreview || undefined,
-        }),
+        headers: { Authorization: `Bearer ${effectiveToken}` },
+        body: formData,
       });
       const json = await res.json();
-      if (json.success && json.data) {
-        setAiResult(json.data);
-      }
-    } catch {
-      // Ignore
+      if (!res.ok || !json.success || !json.data) throw new Error(json.error?.message || 'AI screening did not complete.');
+      setAiResult(json.data);
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : 'AI screening did not complete.', type: 'error' });
     } finally {
       setAiLoading(false);
     }
@@ -266,6 +269,10 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
 
   const handleCreateCase = async () => {
     if (!accessToken) return;
+    if (!patientId.trim() || !patientName.trim() || !villageId.trim() || !currentUser?.hospitalId) {
+      setMessage({ text: 'Enter the patient ID, patient name, village ID and assigned facility before creating a case.', type: 'error' });
+      return;
+    }
     setLoading(true);
     setMessage(null);
     try {
@@ -279,7 +286,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
           patientId,
           patientName,
           villageId,
-          hospitalId: currentUser?.hospitalId || 'hosp_paderu_dh',
+          hospitalId: currentUser?.hospitalId,
           priority,
           photoIds: uploadedPhoto ? [uploadedPhoto.photoId] : [],
         }),
@@ -327,6 +334,10 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
 
   const handleRecordAssessment = async (caseId: string) => {
     if (!accessToken) return;
+    if (!clinicalImpression.trim() || !riskCategorization || (followUpDays !== '' && (followUpDays < 1 || followUpDays > 365))) {
+      setMessage({ text: 'Enter the clinician assessment, select a support tier and provide a valid follow-up interval.', type: 'error' });
+      return;
+    }
     try {
       const res = await fetch(`/api/v1/screening/cases/${caseId}/assess`, {
         method: 'POST',
@@ -337,8 +348,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
         body: JSON.stringify({
           clinicalImpression,
           riskCategorization,
-          recommendedFollowUpDays: followUpDays,
-          clinicalNotes: 'Preliminary frontline oral screening evaluation recorded.',
+          ...(followUpDays !== '' ? { recommendedFollowUpDays: followUpDays } : {}),
         }),
       });
       const json = await res.json();
@@ -568,10 +578,10 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
       {/* VIEW: MULTI-DISEASE AI ENGINE */}
       {activeSubTab === 'ai_engine' && (
         <AiOralHealthEngine
-          patientId={patientId || 'DEMO-PAD-8492'}
-          patientName={patientName || 'Parvati Devi'}
-          hospitalId={currentUser?.hospitalId || 'hosp_paderu_dh'}
-          userRole={currentUser?.role?.toLowerCase() || 'asha'}
+          patientId={patientId}
+          patientName={patientName}
+          hospitalId={currentUser?.hospitalId}
+          userRole={currentUser?.role?.toLowerCase() || ''}
           token={accessToken || ''}
           onClose={() => setActiveSubTab('queue')}
         />
@@ -734,6 +744,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
                             value={riskCategorization}
                             onChange={(e) => setRiskCategorization(e.target.value as any)}
                           >
+                            <option value="">Select support tier</option>
                             <option value="low_risk_support">Low Risk Support</option>
                             <option value="moderate_risk_support">Moderate Risk Support</option>
                             <option value="high_risk_support">High Risk Support</option>
@@ -746,7 +757,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
                             className="form-input"
                             style={{ fontSize: '0.8rem' }}
                             value={followUpDays}
-                            onChange={(e) => setFollowUpDays(Number(e.target.value))}
+                            onChange={(e) => setFollowUpDays(e.target.value ? Number(e.target.value) : '')}
                           />
                         </div>
                       </div>
@@ -923,12 +934,12 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
             <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '12px 0' }}>
               <input
                 type="checkbox"
-                id="demo_toggle"
-                checked={isDemoImage}
-                onChange={(e) => setIsDemoImage(e.target.checked)}
+                id="screening_consent"
+                checked={screeningConsentGiven}
+                onChange={(e) => setScreeningConsentGiven(e.target.checked)}
               />
-              <label htmlFor="demo_toggle" style={{ fontSize: '0.85rem', cursor: 'pointer' }}>
-                Tag as Demo Simulation Photo (bypasses active consent requirement)
+              <label htmlFor="screening_consent" style={{ fontSize: '0.85rem', cursor: 'pointer' }}>
+                Patient informed consent has been given for oral photo analysis and secure record storage.
               </label>
             </div>
 
@@ -1019,7 +1030,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
               2. DEMO AI Screening Support
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '14px' }}>
-              Generates non-diagnostic risk-support labels. Positioning, obstruction, and missing-area checks return "unavailable".
+              Uses the configured screening model with the uploaded image. The result remains for clinician review.
             </p>
 
             <button
@@ -1027,7 +1038,7 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
               className="btn btn-primary"
               style={{ width: '100%', marginBottom: '16px' }}
               onClick={handleRunAi}
-              disabled={aiLoading}
+              disabled={aiLoading || !uploadedPhoto || !selectedFile || !screeningConsentGiven || !patientId.trim()}
             >
               {aiLoading ? 'Analyzing...' : '⚡ Run DEMO AI Analysis'}
             </button>
@@ -1055,25 +1066,25 @@ export const ScreeningManager: React.FC<ScreeningManagerProps> = ({
                     fontWeight: 600,
                   }}
                 >
-                  {aiResult.simulationBanner}
+                  DEMO AI screening support only. This system is for demonstration and not clinical use.
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Risk Support Tier:</span>
                   <span className="badge badge-warning" style={{ fontSize: '0.8rem' }}>
-                    {aiResult.riskSupportLabel}
+                    {aiResult.geminiAnalysis?.riskTier || aiResult.label || aiResult.combinedRecommendation?.triageCategory || 'Screening result recorded'}
                   </span>
                 </div>
 
                 <div style={{ fontSize: '0.8rem' }}>
-                  <strong>Confidence:</strong> {(aiResult.confidenceScore * 100).toFixed(0)}%
+                  <strong>Model confidence:</strong> {Number.isFinite(aiResult.confidence) ? `${(aiResult.confidence * 100).toFixed(0)}%` : 'Not provided'}
                 </div>
 
                 <div style={{ padding: '8px', backgroundColor: 'var(--color-bg)', borderRadius: '4px', fontSize: '0.75rem' }}>
-                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>Quality &amp; Anatomy Checks:</div>
-                  <div>Positioning: <span style={{ color: 'var(--color-text-secondary)' }}>{aiResult.qualityChecks.positioning}</span></div>
-                  <div>Obstruction: <span style={{ color: 'var(--color-text-secondary)' }}>{aiResult.qualityChecks.obstruction}</span></div>
-                  <div>Missing Area: <span style={{ color: 'var(--color-text-secondary)' }}>{aiResult.qualityChecks.missingArea}</span></div>
+                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>Photo quality:</div>
+                  <div>Status: <span style={{ color: 'var(--color-text-secondary)' }}>{aiResult.imageQuality?.ok ? 'Accepted' : aiResult.imageQuality?.reason || 'Not available'}</span></div>
+                  {aiResult.imageQuality?.blurScore !== undefined && <div>Clarity score: <span style={{ color: 'var(--color-text-secondary)' }}>{aiResult.imageQuality.blurScore}</span></div>}
+                  {aiResult.geminiAnalysis?.observedCondition && <div>Observed image note: <span style={{ color: 'var(--color-text-secondary)' }}>{aiResult.geminiAnalysis.observedCondition}</span></div>}
                 </div>
 
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>

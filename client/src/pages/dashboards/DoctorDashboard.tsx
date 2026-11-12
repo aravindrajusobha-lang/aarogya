@@ -3,15 +3,19 @@ import { AuthUser } from '../../components/AuthPanel';
 import { PrescriptionModal } from '../../components/PrescriptionModal';
 import { PrescriptionCardView } from '../../components/PrescriptionCardView';
 import { ThemeToggle } from '../../components/ThemeToggle';
+import { ConsultationPortalPanel, DirectVideoCallPanel } from '../../components/VideoConsultation';
+import { DoctorAppointmentsPanel } from '../../components/DoctorAppointmentsPanel';
 import '../../styles/Dashboard.css';
 
 export interface DoctorDashboardProps {
+  initialRiskFilter?: 'ALL' | 'HIGH';
   currentUser: AuthUser | null;
   currentLang?: string;
   onNavigateTab?: (tab: string) => void;
 }
 
 interface ClinicalPatient {
+  patientId: string;
   id: string;
   name: string;
   age: number;
@@ -31,12 +35,14 @@ interface ClinicalPatient {
 export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   currentUser,
   currentLang = 'en',
+  initialRiskFilter = 'ALL',
   onNavigateTab,
 }) => {
   const [selectedPatient, setSelectedPatient] = useState<ClinicalPatient | null>(null);
   const [clinicalNotes, setClinicalNotes] = useState<string>('');
   const [disposition, setDisposition] = useState<'ROUTINE_MONITOR' | 'BIOPSY_RECOMMENDED' | 'SPECIALIST_REFERRAL'>('ROUTINE_MONITOR');
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [activeDoctorTab, setActiveDoctorTab] = useState<'home' | 'appointments' | 'patients'>('home');
 
   // Video Consultation & Prescription Modals
   const [showPrescriptionModal, setShowPrescriptionModal] = useState<boolean>(false);
@@ -47,7 +53,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [riskFilter, setRiskFilter] = useState<'ALL' | 'HIGH' | 'MODERATE' | 'LOW'>('ALL');
+  const [riskFilter, setRiskFilter] = useState<'ALL' | 'HIGH' | 'MODERATE' | 'LOW'>(initialRiskFilter);
 
   // Real-Time Uploaded Clinical Screening Cases (No hardcoded demo items)
   const [patients, setPatients] = useState<ClinicalPatient[]>([]);
@@ -56,17 +62,21 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const fetchRealTimeCases = async () => {
     setLoadingCases(true);
     try {
-      const token = localStorage.getItem('aarogya_token') || '';
-      const res = await fetch('/api/v1/screening/cases', {
+      const storedTokens = JSON.parse(localStorage.getItem('aarogya_tokens') || '{}');
+      const token = storedTokens.accessToken || localStorage.getItem('aarogya_token') || '';
+      const assignedId = currentUser?.userId || '';
+      const query = assignedId ? `?assignedMoId=${encodeURIComponent(assignedId)}` : '';
+      const res = await fetch(`/api/v1/screening/cases${query}`, {
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
       const payload = await res.json().catch(() => null);
-      if (res.ok && payload?.data?.items && payload.data.items.length > 0) {
+      if (res.ok && payload?.data?.items) {
         const mapped: ClinicalPatient[] = payload.data.items.map((item: any) => ({
           id: item.caseId || item._id,
+          patientId: String(item.patientId || ''),
           name: item.patientName || `Patient ${item.patientId?.slice(-4) || 'Beneficiary'}`,
           age: item.patientAge || 45,
           gender: item.patientGender || 'Other',
@@ -87,17 +97,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
         }));
         setPatients(mapped);
       } else {
-        // Also check real-time locally queued screenings from localStorage
-        const localCasesStr = localStorage.getItem('aarogya_realtime_cases');
-        if (localCasesStr) {
-          try {
-            const localCases = JSON.parse(localCasesStr);
-            if (Array.isArray(localCases) && localCases.length > 0) {
-              setPatients(localCases);
-              return;
-            }
-          } catch {}
-        }
         setPatients([]);
       }
     } catch {
@@ -122,8 +121,9 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
     if (!selectedPatient) return;
 
     try {
-      const token = localStorage.getItem('aarogya_token') || '';
-      await fetch(`/api/v1/screening/cases/${selectedPatient.id}/assess`, {
+      const storedTokens = JSON.parse(localStorage.getItem('aarogya_tokens') || '{}');
+      const token = storedTokens.accessToken || localStorage.getItem('aarogya_token') || '';
+      const response = await fetch(`/api/v1/screening/cases/${selectedPatient.id}/assess`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -139,9 +139,14 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
           recommendedFollowUpDays: disposition === 'BIOPSY_RECOMMENDED' ? 7 : 30,
           clinicalNotes,
         }),
-      }).catch(() => null);
+      });
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        throw new Error(errorPayload?.message || 'Assessment could not be saved.');
+      }
     } catch (err) {
-      console.warn('Could not post assessment to backend:', err);
+      window.alert(err instanceof Error ? err.message : 'Assessment could not be saved.');
+      return;
     }
 
     setPatients((prev) =>
@@ -160,87 +165,21 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
   return (
     <div className="doctor-dashboard-root">
-      {/* Clinician Header */}
-      <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--text-primary)' }}>
-            Clinician: {currentUser?.fullName || 'Dr. K. Somasekhar, Dental Surgeon (MO)'}
-          </h2>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>CHC Paderu Primary Dental Unit • Catchment: ITDA Agency</span>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Theme Toggle (Light / Dark Mode) */}
-          <ThemeToggle currentLang="en" />
-
-          <button
-            type="button"
-            className="dash-btn"
-            style={{
-              background: 'var(--warning-bg)',
-              color: 'var(--warning-text)',
-              border: '1px solid var(--warning-text)',
-              fontWeight: 700,
-              fontSize: '0.84rem',
-              padding: '8px 16px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-            }}
-            onClick={() => onNavigateTab?.('teleconsultation')}
-          >
-            {currentLang === 'te'
-              ? '📹 ప్రారంభించండి: రోగితో వీడియో కాల్'
-              : currentLang === 'hi'
-              ? '📹 शुरू करें: रोगी के साथ वीडियो कॉल'
-              : 'Open Text Case Discussion (Video Blocked)'}
-          </button>
-
-          <button
-            type="button"
-            className="dash-btn dash-btn-outline"
-            onClick={fetchRealTimeCases}
-            title="Reload real-time uploaded cases from database"
-            style={{ fontSize: '0.84rem', padding: '8px 14px' }}
-          >
-            {loadingCases ? '⏳ Refreshing...' : '🔄 Refresh Real-Time Queue'}
-          </button>
-
-          <button
-            type="button"
-            className="dash-btn"
-            style={{
-              background: 'var(--btn-primary-bg)',
-              color: 'var(--btn-primary-text)',
-              border: 'none',
-              fontWeight: 700,
-              fontSize: '0.84rem',
-              padding: '8px 16px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-            }}
-            onClick={() => setShowPrescriptionModal(true)}
-          >
-            {currentLang === 'te'
-              ? '💊 మందుల చీటీ (Issue Prescription)'
-              : currentLang === 'hi'
-              ? '💊 दवा का पर्चा जारी करें (Rx)'
-              : '💊 Issue Prescription (Rx)'}
-          </button>
-
-          <span className="dash-status-pill status-completed">PORTAL: REAL-TIME QUEUE</span>
-        </div>
-      </div>
-
+      {false && <DirectVideoCallPanel role="doctor" currentLang={currentLang} />}
+      {false && <ConsultationPortalPanel role="doctor" currentLang={currentLang} />}
+      <header className="doctor-portal-header">
+        <div><p>ORALCARE AI · DOCTOR PORTAL</p><h1>Welcome back, {currentUser?.fullName || 'Doctor'}</h1><span>Review patient requests and assigned screening records.</span></div>
+        <div className="doctor-portal-header-actions"><ThemeToggle currentLang="en" /><button type="button" className="dash-btn dash-btn-outline" onClick={fetchRealTimeCases}>{loadingCases ? 'Refreshing…' : 'Refresh screening queue'}</button><button type="button" className="dash-btn dash-btn-primary" onClick={() => selectedPatient ? setShowPrescriptionModal(true) : onNavigateTab?.('patients')}>Issue prescription</button></div>
+      </header>
+      <nav className="doctor-portal-tabs" aria-label="Doctor dashboard sections">{([['home', 'Home'], ['appointments', 'Appointments'], ['patients', 'Patients']] as const).map(([tab, label]) => <button key={tab} type="button" aria-current={activeDoctorTab === tab ? 'page' : undefined} className={activeDoctorTab === tab ? 'active' : ''} onClick={() => tab === 'home' ? setActiveDoctorTab(tab) : onNavigateTab?.(tab)}>{label}</button>)}</nav>
+      {activeDoctorTab === 'appointments' && <DoctorAppointmentsPanel onOpenRoom={(appointmentId) => { window.location.hash = `#/consultation/webrtc/${encodeURIComponent(appointmentId)}`; }} />}
+      {activeDoctorTab !== 'appointments' && <>
+      {activeDoctorTab === 'home' && <>
       {/* 1. Doctor KPI Stats Grid */}
       <div className="dash-kpi-grid">
         <div className="dash-kpi-card">
           <div className="dash-kpi-header">
-            <span className="dash-kpi-label">Review Queue</span>
+            <span className="dash-kpi-label">DEMO AI review support</span>
             <div className="dash-kpi-icon-wrap icon-blue">🩺</div>
           </div>
           <div className="dash-kpi-value">{patients.filter((p) => p.status === 'PENDING_REVIEW').length} Pending</div>
@@ -252,40 +191,41 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
         <div className="dash-kpi-card">
           <div className="dash-kpi-header">
-            <span className="dash-kpi-label">High-Risk Triage</span>
+            <span className="dash-kpi-label">DEMO AI review priority</span>
             <div className="dash-kpi-icon-wrap icon-rose">🚨</div>
           </div>
           <div className="dash-kpi-value" style={{ color: 'var(--danger-text)' }}>
             {patients.filter((p) => p.riskCategory === 'HIGH').length} Cases
           </div>
           <div className="dash-kpi-footer">
-            <span>Non-healing ulcers &gt; 2 wks</span>
+            <span>Requires qualified clinician review</span>
           </div>
         </div>
 
         <div className="dash-kpi-card">
           <div className="dash-kpi-header">
-            <span className="dash-kpi-label">Completed Consults</span>
+            <span className="dash-kpi-label">Clinician reviews complete</span>
             <div className="dash-kpi-icon-wrap icon-emerald">✅</div>
           </div>
-          <div className="dash-kpi-value">68</div>
+          <div className="dash-kpi-value">{patients.filter((p) => p.status === 'REVIEWED').length}</div>
           <div className="dash-kpi-footer">
-            <span>This Month (ITDA Zone)</span>
+            <span>From your assigned screening queue</span>
           </div>
         </div>
 
         <div className="dash-kpi-card">
           <div className="dash-kpi-header">
-            <span className="dash-kpi-label">Biopsy Desk</span>
+            <span>Referrals shared</span>
             <div className="dash-kpi-icon-wrap icon-amber">🔬</div>
           </div>
-          <div className="dash-kpi-value">5 Tracked</div>
+          <div className="dash-kpi-value">{patients.filter((p) => p.status === 'REFERRED').length}</div>
           <div className="dash-kpi-footer">
-            <span>King George Hospital (KGH)</span>
+            <span>From your assigned screening queue</span>
           </div>
         </div>
       </div>
 
+      </>}
       {/* 2. Clinical Review Queue Table */}
       <div className="dash-panel">
         <div className="dash-panel-header">
@@ -303,14 +243,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   onClick={() => onNavigateTab('ai-screening')}
                 >
                   🔬 AI Oral Health Engine
-                </button>
-                <button
-                  type="button"
-                  className="dash-btn dash-btn-outline"
-                  style={{ fontSize: '0.78rem' }}
-                  onClick={() => onNavigateTab('teleconsultation')}
-                >
-                  💬 Open Case Discussions
                 </button>
               </>
             )}
@@ -370,6 +302,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   !searchQuery.trim() ||
                   p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   p.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   p.mandal.toLowerCase().includes(searchQuery.toLowerCase());
                 const matchR = riskFilter === 'ALL' || p.riskCategory === riskFilter;
@@ -410,6 +343,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                       !searchQuery.trim() ||
                       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       p.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       p.mandal.toLowerCase().includes(searchQuery.toLowerCase());
                     const matchR = riskFilter === 'ALL' || p.riskCategory === riskFilter;
@@ -417,7 +351,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   })
                   .map((p) => (
                 <tr key={p.id}>
-                  <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--accent)' }}>{p.id}</td>
+                  <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--accent)' }}>{p.patientId}</td>
                   <td>
                     <strong>{p.name}</strong> ({p.age}y / {p.gender})
                   </td>
@@ -461,17 +395,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                     >
                       📋 Open Medical Record
                     </button>
-                    <button
-                      type="button"
-                      className="dash-btn"
-                      style={{ padding: '5px 10px', fontSize: '0.76rem', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-text)', borderRadius: '6px', cursor: 'pointer' }}
-                      onClick={() => {
-                        onNavigateTab?.('teleconsultation');
-                      }}
-                      title="Launch WebRTC Live Video Consultation"
-                    >
-                      📹 Call
-                    </button>
                   </td>
                 </tr>
               )))}
@@ -480,6 +403,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
         </div>
       </div>
 
+      </>}
       {/* 3. TEN-SECTION PATIENT MEDICAL RECORD VIEWER (Module 6) */}
       {selectedPatient && (
         <div
@@ -514,25 +438,13 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                 <h3 className="dash-panel-title" style={{ color: 'var(--text-primary)', fontSize: '1.2rem' }}>
                   <span>📋</span>
                   <span>Patient Medical Record: {selectedPatient.name}</span>
-                  <span style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: '0.9rem' }}>({selectedPatient.id})</span>
+                  <span style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: '0.9rem' }}>({selectedPatient.patientId})</span>
                 </h3>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                   {selectedPatient.village}, {selectedPatient.mandal} • Age: {selectedPatient.age} ({selectedPatient.gender})
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  className="dash-btn"
-                  style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning-text)', color: 'var(--warning-text)', fontSize: '0.78rem', padding: '6px 12px', borderRadius: '6px' }}
-                  onClick={() => onNavigateTab?.('teleconsultation')}
-                >
-                  {currentLang === 'te'
-                    ? '📹 ప్రారంభించండి: రోగితో వీడియో కాల్'
-                    : currentLang === 'hi'
-                    ? '📹 शुरू करें: वीडियो कॉल'
-                    : 'Open Text Case Discussion (Video Blocked)'}
-                </button>
                 <button
                   type="button"
                   className="dash-btn"
@@ -622,7 +534,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                 </div>
                 <div style={{ padding: '12px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Health ID / Registration:</span>
-                  <div style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 700 }}>{selectedPatient.id}</div>
+                  <div style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 700 }}>{selectedPatient.patientId}</div>
                 </div>
                 <div style={{ padding: '12px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Age &amp; Gender:</span>
@@ -784,7 +696,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
             {/* TAB 6 & 10: CONSULTATIONS & FOLLOW-UP */}
             {(activePatientRecordTab === 'consults' || activePatientRecordTab === 'followup') && (
               <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Scheduled Teleconsultation &amp; Follow-up</div>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Scheduled Follow-up</div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                   Next Follow-up appointment: 14 Nov 2026 at CHC Paderu Dental Outpost.
                 </div>
@@ -799,7 +711,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
       {/* PRESCRIPTION CREATION MODAL (Module 6) */}
       {showPrescriptionModal && (
         <PrescriptionModal
-          patientId={selectedPatient ? selectedPatient.id : 'DEMO-PAD-8492'}
+          patientId={selectedPatient?.patientId || ''}
           patientName={selectedPatient ? selectedPatient.name : 'Balaraju Somulu'}
           doctorName={currentUser?.fullName || 'Dr. K. Somasekhar (MO)'}
           doctorSpecialty="Dental Surgeon & Oral Medicine"

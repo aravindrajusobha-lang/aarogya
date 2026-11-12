@@ -1,0 +1,275 @@
+/* Subtle botanical texture for the shared Aarogya-Drishti application shell. */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #F7F5EF;
+  --surface: #ffffff;
+  --surface-2: #E9F0E9;
+  --border: #E7E3D6;
+  --text-primary: #253B32;
+  --text-secondary: #45574F;
+  --text-muted: #68766D;
+  --accent: #287A62;
+  --accent-text: #ffffff;
+  --success-bg: #E8F3E9;
+  --success-text: #276344;
+  --warning-bg: #FFF3DC;
+  --warning-text: #815519;
+  --danger-bg: #FCE9E7;
+  --danger-text: #A53D35;
+  --info-bg: #E9F0E9;
+  --info-text: #225D48;
+  --btn-primary-bg: #287A62;
+  --btn-primary-text: #ffffff;
+  --bar-track: #DCE6DC;
+  --bar-fill: #287A62;
+  --header-bg: #F7F1DF;
+  --header-text: #253B32;
+  --sidebar-bg: #173F35;
+  --sidebar-text: #F7F1DF;
+  --sidebar-hover: #287A62;
+  --surface-shadow: 0 3px 14px rgba(18, 60, 48, 0.08);
+  --vfx-red: #D95D55;
+  --vfx-blue: #287A62;
+  --vfx-gold: #E9A23B;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #123C30;
+  --surface: #19493B;
+  --surface-2: #225847;
+  --border: #436F5D;
+  --text-primary: #F7F1DF;
+  --text-secondary: #DCE6DC;
+  --text-muted: #B7C8BD;
+  --accent: #74B592;
+  --accent-text: #ffffff;
+  --success-bg: #1E5B43;
+  --success-text: #C4E8CE;
+  --warning-bg: #68491D;
+  --warning-text: #FFE2A8;
+  --danger-bg: #773832;
+  --danger-text: #FFD0C9;
+  --info-bg: #275C4C;
+  --info-text: #D5EADB;
+  --btn-primary-bg: #74B592;
+  --btn-primary-text: #123C30;
+  --bar-track: #225847;
+  --bar-fill: #9BC9A8;
+  --header-bg: #123C30;
+  --header-text: #F7F1DF;
+  --sidebar-bg: #123C30;
+  --sidebar-text: #F7F1DF;
+  --sidebar-hover: #287A62;
+  --surface-shadow: 0 4px 16px rgba(10, 34, 27, 0.2);
+  --vfx-red: #D95D55;
+  --vfx-blue: #74B592;
+  --vfx-gold: #E9A23B;
+}
+
+html,
+body {
+  background: var(--bg) !important;
+  color: var(--text-primary);
+}
+
+body {
+  position: relative;
+  isolation: isolate;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+body::before {
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 2%, transparent) 0 1px, transparent 1px 18px);
+  animation: avengers-energy-drift 22s ease-in-out infinite alternate;
+}
+
+body::after {
+  opacity: 0.05;
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+}
+
+@keyframes avengers-energy-drift {
+  from { transform: scale(1); filter: hue-rotate(-7deg); }
+  to { transform: scale(1.04); filter: hue-rotate(7deg); }
+}
+
+#root,
+.app-root-wrapper,
+.app-master-layout,
+.main-content-layout,
+.workspace-container,
+.dashboard-layout-root,
+.dash-main-wrapper,
+.patient-dashboard-root,
+.doctor-dashboard-root {
+  background-color: transparent;
+  color: var(--text-primary);
+}
+
+.app-topbar,
+.dash-topbar,
+.site-header {
+  background: var(--header-bg) !important;
+  color: var(--header-text) !important;
+  border-bottom: 1px solid var(--border) !important;
+  box-shadow: 0 3px 12px rgba(18, 60, 48, 0.06) !important;
+}
+
+.app-topbar h1,
+.app-topbar .topbar-subtitle,
+.app-topbar .topbar-title-wrap,
+.dash-topbar .dash-page-title,
+.dash-topbar .dash-mobile-toggle,
+.theme-study .app-topbar h1,
+.theme-study .app-topbar .topbar-subtitle {
+  color: var(--header-text) !important;
+}
+
+.forest-sidebar,
+.dash-sidebar,
+.theme-study .forest-sidebar,
+.theme-study .dash-sidebar {
+  background: var(--sidebar-bg) !important;
+  color: var(--sidebar-text) !important;
+  border-right: 1px solid rgba(247, 241, 223, 0.16) !important;
+  box-shadow: 2px 0 12px rgba(18, 60, 48, 0.12) !important;
+}
+
+.dash-sidebar-brand,
+.sidebar-brand,
+.dash-sidebar-footer,
+.sidebar-footer {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: transparent !important;
+}
+
+.brand-name,
+.dash-brand-text,
+.dash-brand-sub,
+.dash-sidebar .dash-nav-item,
+.forest-sidebar .sidebar-group-header,
+.forest-sidebar .sidebar-nav-btn,
+.forest-sidebar .sidebar-item-label,
+.forest-sidebar .sidebar-user-card,
+.forest-sidebar .user-full-name,
+.dash-sidebar .dash-user-name,
+.dash-sidebar .dash-btn-outline {
+  color: #f8fafc !important;
+}
+
+.sidebar-group-header {
+  color: #DCE6DC !important;
+}
+
+.dash-nav-item:hover,
+.sidebar-nav-btn:hover {
+  background: var(--sidebar-hover) !important;
+  color: #ffffff !important;
+}
+
+.dash-nav-item.active,
+.sidebar-nav-btn.active,
+.patient-dashboard-nav-item.active,
+.theme-study .sidebar-nav-btn.active {
+  background: #F7F1DF !important;
+  color: #173F35 !important;
+  border-color: #F7F1DF !important;
+  box-shadow: inset 3px 0 0 #287A62 !important;
+}
+
+.dash-user-card,
+.sidebar-user-card {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  color: #f8fafc !important;
+}
+
+.dash-sidebar .dash-user-role-badge.role-badge-patient {
+  color: #a7f3d0 !important;
+}
+
+.card,
+.dash-panel,
+.dash-kpi-card,
+.patient-action-btn,
+.patient-dashboard-sidebar,
+.login-card,
+.forest-hero-card,
+.forest-card-panel,
+.panel,
+.manage-card,
+.doctor-dashboard-root > section {
+  background-color: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--surface-shadow) !important;
+}
+
+.patient-dashboard-nav-item {
+  color: var(--text-primary) !important;
+}
+
+.patient-dashboard-nav-item:hover {
+  background: var(--surface-2) !important;
+  color: var(--text-primary) !important;
+}
+
+.patient-dashboard-nav-item.active {
+  border-left: 0 !important;
+}
+
+.dash-brand-icon,
+.brand-leaf-icon {
+  background: #287A62 !important;
+  box-shadow: 0 3px 10px rgba(18, 60, 48, 0.18) !important;
+}
+
+.button-primary,
+.dash-btn-primary,
+.patient-action-btn:hover {
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2), 0 0 18px rgba(56, 189, 248, 0.12);
+}
+
+.button-primary,
+.dash-btn-primary {
+  background: var(--btn-primary-bg) !important;
+  color: #ffffff !important;
+}
+
+.simulation-banner,
+.simulation-banner-root {
+  z-index: 1000;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card,
+  .dash-panel,
+  .dash-kpi-card,
+  .patient-action-btn,
+  .button-primary,
+  .dash-btn-primary {
+    transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
+  }
+
+  .card:hover,
+  .dash-panel:hover,
+  .dash-kpi-card:hover {
+    box-shadow: 0 6px 18px rgba(18, 60, 48, 0.1) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}

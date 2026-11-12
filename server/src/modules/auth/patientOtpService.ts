@@ -173,6 +173,7 @@ export class PatientOtpService {
     userAgent?: string;
     ip?: string;
   }): Promise<{
+    verified: true;
     user: any;
     accessToken: string;
     refreshToken: string;
@@ -249,6 +250,53 @@ export class PatientOtpService {
     // OTP Verified! Clean up memory store
     otpStore.delete(memKey);
     otpStore.delete(cleanPhone);
+
+    if (purpose === 'LOGIN' && mongoose.connection && mongoose.connection.readyState === 1) {
+      const phoneCandidates = [cleanPhone, cleanPhone.slice(-10), `+91${cleanPhone.slice(-10)}`];
+      const registeredUser = await User.findOne({ role: 'patient', phone: { $in: phoneCandidates } });
+      if (registeredUser) {
+        const existingPatient = registeredUser.patientId
+          ? await Patient.findOne({ patientId: registeredUser.patientId }).lean()
+          : null;
+        const tokenPair = await createDeviceSession({
+          user: registeredUser,
+          deviceId: deviceId || `device_${crypto.randomUUID().slice(0, 8)}`,
+          deviceName: deviceName || 'Mobile Patient PWA',
+          userAgent,
+          ip,
+        });
+        const patientProfile = existingPatient || {
+          patientId: registeredUser.patientId,
+          fullName: registeredUser.fullName,
+          villageName: registeredUser.village,
+          mandal: registeredUser.mandal,
+          district: registeredUser.district,
+          phone: registeredUser.phone,
+          hospitalId: registeredUser.hospitalId,
+        };
+        return {
+          verified: true,
+          user: {
+            userId: registeredUser.userId,
+            username: registeredUser.username,
+            fullName: registeredUser.fullName,
+            role: 'patient',
+            patientId: registeredUser.patientId,
+            phone: registeredUser.phone,
+            yearOfBirth: registeredUser.yearOfBirth,
+            gender: registeredUser.gender,
+            address: registeredUser.address,
+            village: registeredUser.village,
+            mandal: registeredUser.mandal,
+            pincode: registeredUser.pincode,
+            verificationStatus: registeredUser.verificationStatus,
+            capabilities: getRoleCapabilities('patient'),
+          },
+          ...tokenPair,
+          patient: patientProfile,
+        };
+      }
+    }
 
     const suffix = cleanPhone.slice(-4);
     let patient: any;
@@ -381,6 +429,7 @@ export class PatientOtpService {
     }
 
     return {
+      verified: true,
       user: {
         userId: user.userId,
         username: user.username,

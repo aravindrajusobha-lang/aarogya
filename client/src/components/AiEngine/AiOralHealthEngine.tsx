@@ -5,6 +5,7 @@ import {
   analyzeDentalFindings,
   evaluateRiskHistoryClient,
   generateCombinedReport,
+  recordScreeningConsent,
   syncPendingAiScreenings,
   IMucosalLesionResult,
   IDentalResult,
@@ -26,10 +27,10 @@ export interface AiOralHealthEngineProps {
 }
 
 export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
-  patientId = 'PAT-LIVE-001',
-  patientName = 'Real-Time Patient Intake',
-  hospitalId = 'HOSP-PADERU-01',
-  userRole = 'asha',
+  patientId = '',
+  patientName = '',
+  hospitalId,
+  userRole = '',
   token = '',
   currentLang = 'en',
   onReportGenerated,
@@ -46,12 +47,14 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
   const [mucosalQuality, setMucosalQuality] = useState<ImageQualityCheckResult | null>(null);
   const [mucosalResult, setMucosalResult] = useState<IMucosalLesionResult | null>(null);
   const [isAnalyzingMucosal, setIsAnalyzingMucosal] = useState<boolean>(false);
+  const [mucosalAnalysisError, setMucosalAnalysisError] = useState<string | null>(null);
 
   // Module B State
   const [dentalImageSrc, setDentalImageSrc] = useState<string | null>(null);
   const [dentalQuality, setDentalQuality] = useState<ImageQualityCheckResult | null>(null);
   const [dentalResult, setDentalResult] = useState<IDentalResult | null>(null);
   const [isAnalyzingDental, setIsAnalyzingDental] = useState<boolean>(false);
+  const [dentalAnalysisError, setDentalAnalysisError] = useState<string | null>(null);
 
   // Module C State (Risk Questionnaire)
   const [riskAnswers, setRiskAnswers] = useState<IRiskQuestionnaireAnswers>({
@@ -80,6 +83,8 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
 
   // Offline sync indicator
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [screeningConsentGiven, setScreeningConsentGiven] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   // Hidden Canvas for image evaluation
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -89,12 +94,16 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
   const dentalFileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestIdRef = useRef(0);
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isCameraLoading, setIsCameraLoading] = useState<boolean>(false);
+  const [isCameraReady, setIsCameraReady] = useState<boolean>(false);
   const [cameraTarget, setCameraTarget] = useState<'mucosal' | 'dental'>('mucosal');
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   // Stop active camera
   const stopCamera = () => {
+    cameraRequestIdRef.current += 1;
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -103,6 +112,19 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
       videoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
+    setIsCameraLoading(false);
+    setIsCameraReady(false);
+  };
+
+  const attachCameraVideo = (video: HTMLVideoElement | null) => {
+    videoRef.current = video;
+    const stream = mediaStreamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    video.srcObject = stream;
+    void video.play().catch(() => {
+      stopCamera();
+      setCameraError('Camera preview could not start. Close it and try again.');
+    });
   };
 
   // Start live webcam / mobile camera with automatic desktop/mobile fallback
@@ -110,45 +132,62 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
     stopCamera();
     setCameraError(null);
     setCameraTarget(type);
+    setIsCameraLoading(true);
+    setIsCameraReady(false);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCameraError('Camera API is not supported on this browser. Please use the Choose Photo button.');
+      setIsCameraLoading(false);
       return;
     }
 
+    const requestId = ++cameraRequestIdRef.current;
     try {
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 640, max: 1280 },
+            height: { ideal: 480, max: 720 },
+            frameRate: { ideal: 24, max: 30 },
+          },
           audio: false,
         });
       } catch {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false,
         });
       }
 
+      if (requestId !== cameraRequestIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       mediaStreamRef.current = stream;
       setIsCameraActive(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
-      }
     } catch (err: any) {
       console.warn('Camera access error:', err);
       setCameraError('Could not open camera. Please grant camera permission or use the Choose Photo button.');
+      setIsCameraLoading(false);
     }
   };
 
   // Snap photo from live video viewfinder
   const captureCameraSnapshot = (type: 'mucosal' | 'dental') => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !isCameraReady) return;
     const video = videoRef.current;
+    const sourceWidth = video.videoWidth || 0;
+    const sourceHeight = video.videoHeight || 0;
+    if (sourceWidth < 1 || sourceHeight < 1) {
+      setCameraError('Camera is still starting. Wait for the preview, then capture.');
+      return;
+    }
     const canvas = canvasRef.current || document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    const scale = Math.min(1, 1280 / sourceWidth);
+    canvas.width = Math.round(sourceWidth * scale);
+    canvas.height = Math.round(sourceHeight * scale);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -161,10 +200,12 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
       setMucosalImageSrc(dataUrl);
       setMucosalQuality(quality);
       setMucosalResult(null);
+      setMucosalAnalysisError(null);
     } else {
       setDentalImageSrc(dataUrl);
       setDentalQuality(quality);
       setDentalResult(null);
+      setDentalAnalysisError(null);
     }
   };
 
@@ -241,24 +282,33 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
       const img = new Image();
       img.onload = () => {
         const canvas = canvasRef.current || document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
+        const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
         const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         const quality = evaluateImageQualityClient(canvas, ctx);
+        const optimizedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
 
         if (type === 'mucosal') {
-          setMucosalImageSrc(dataUrl);
+          setMucosalImageSrc(optimizedDataUrl);
           setMucosalQuality(quality);
           setMucosalResult(null);
+          setMucosalAnalysisError(null);
         } else {
-          setDentalImageSrc(dataUrl);
+          setDentalImageSrc(optimizedDataUrl);
           setDentalQuality(quality);
           setDentalResult(null);
         }
       };
+      img.onerror = () => {
+        if (type === 'mucosal') setMucosalAnalysisError('The selected photo could not be opened. Please choose another image.');
+      };
       img.src = dataUrl;
+    };
+    reader.onerror = () => {
+      if (type === 'mucosal') setMucosalAnalysisError('The selected photo could not be read. Please choose another image.');
     };
     reader.readAsDataURL(file);
   };
@@ -266,23 +316,32 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
   // Execute Module A Analysis
   const runModuleA = async () => {
     if (!mucosalImageSrc) return;
+    if (!selectedPatientId.trim()) { setMucosalAnalysisError('Select a saved patient record before screening.'); return; }
+    if (!screeningConsentGiven) { setMucosalAnalysisError('Record the patient’s screening consent before analysis.'); return; }
     setIsAnalyzingMucosal(true);
+    setMucosalAnalysisError(null);
 
     try {
       const img = new Image();
-      img.src = mucosalImageSrc;
-      await new Promise((r) => (img.onload = r));
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('The captured image could not be decoded. Please retake it.'));
+        img.src = mucosalImageSrc;
+      });
 
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
       const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      const res = await analyzeMucosalLesion(canvas, selectedPatientId, hospitalId, token);
+      await recordScreeningConsent(selectedPatientId, token, langKey);
+      const res = await analyzeMucosalLesion(canvas, selectedPatientId, hospitalId, token, true);
       setMucosalResult(res);
     } catch (err: any) {
       console.error('Module A analysis error:', err);
+      setMucosalAnalysisError(err instanceof Error ? err.message : 'AI screening could not complete. Please retry.');
     } finally {
       setIsAnalyzingMucosal(false);
     }
@@ -293,23 +352,32 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
     // If dental image not supplied, user can reuse mucosal image
     const src = dentalImageSrc || mucosalImageSrc;
     if (!src) return;
+    if (!selectedPatientId.trim()) { setDentalAnalysisError('Select a saved patient record before screening.'); return; }
+    if (!screeningConsentGiven) { setDentalAnalysisError('Record the patient’s screening consent before analysis.'); return; }
 
     setIsAnalyzingDental(true);
+    setDentalAnalysisError(null);
     try {
       const img = new Image();
-      img.src = src;
-      await new Promise((r) => (img.onload = r));
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('The captured image could not be decoded. Please retake it.'));
+        img.src = src;
+      });
 
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
       const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      const res = await analyzeDentalFindings(canvas, selectedPatientId, hospitalId, token);
+      await recordScreeningConsent(selectedPatientId, token, langKey);
+      const res = await analyzeDentalFindings(canvas, selectedPatientId, hospitalId, token, true);
       setDentalResult(res);
     } catch (err: any) {
       console.error('Module B analysis error:', err);
+      setDentalAnalysisError(err instanceof Error ? err.message : 'Dental screening could not complete. Please retry.');
     } finally {
       setIsAnalyzingDental(false);
     }
@@ -317,46 +385,31 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
 
   // Generate Final Combined Report (A + B + C)
   const handleGenerateFinalReport = async () => {
+    if (!selectedPatientId.trim()) { setReportError('Select a saved patient record before saving a report.'); return; }
+    if (!screeningConsentGiven) { setReportError('Record the patient’s screening consent before saving a report.'); return; }
     setIsSubmittingReport(true);
-    const report = await generateCombinedReport(
-      selectedPatientId,
-      hospitalId,
-      mucosalResult || undefined,
-      dentalResult || undefined,
-      riskResult || undefined,
-      token,
-      mucosalImageSrc || undefined,
-      dentalImageSrc || undefined
-    );
-
-    // Save into real-time screening cases for live clinical review
     try {
-      const existingCasesStr = localStorage.getItem('aarogya_realtime_cases');
-      const existingCases = existingCasesStr ? JSON.parse(existingCasesStr) : [];
-      const newLiveCase = {
-        id: report.screeningId || report.clientId || `SC-LIVE-${Date.now().toString().slice(-6)}`,
-        name: selectedPatientName,
-        age: 42,
-        gender: 'Patient',
-        village: 'Paderu Agency Catchment',
-        mandal: 'Paderu Agency',
-        lesionSite: mucosalResult?.label || 'Oral Cavity',
-        durationWeeks: 2,
-        aiTriageFlag: report.combinedRecommendation?.advice || 'Live Screening Photo Uploaded',
-        riskCategory: (report.combinedRecommendation?.triageCategory === 'URGENT_SPECIALIST' ? 'HIGH' : report.combinedRecommendation?.triageCategory === 'DENTAL_MONITOR' ? 'MODERATE' : 'LOW') as 'HIGH' | 'MODERATE' | 'LOW',
-        sha256Hash: report.clientId || `sha_${Date.now()}`,
-        photoUrl: mucosalImageSrc || undefined,
-        status: 'PENDING_REVIEW' as const,
-        createdAt: report.createdAt || new Date().toISOString(),
-      };
-      existingCases.unshift(newLiveCase);
-      localStorage.setItem('aarogya_realtime_cases', JSON.stringify(existingCases));
-    } catch {}
-
-    setCombinedReport(report);
-    setIsSubmittingReport(false);
-    setActiveStep(4);
-    if (onReportGenerated) onReportGenerated(report);
+      await recordScreeningConsent(selectedPatientId, token, langKey);
+      const report = await generateCombinedReport(
+        selectedPatientId,
+        hospitalId,
+        mucosalResult || undefined,
+        dentalResult || undefined,
+        riskResult || undefined,
+        token,
+        undefined,
+        undefined,
+        true
+      );
+      setCombinedReport(report);
+      setReportError(null);
+      setActiveStep(4);
+      onReportGenerated?.(report);
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : 'The report could not be saved. Please retry.');
+    } finally {
+      setIsSubmittingReport(false);
+    }
   };
 
   // Clinician Review Submission (Confirm/Override)
@@ -467,6 +520,12 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
         )}
       </div>
 
+      <label style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', margin: '0 0 16px', padding: '12px 14px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface)' }}>
+        <input type="checkbox" checked={screeningConsentGiven} onChange={(event) => setScreeningConsentGiven(event.target.checked)} />
+        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>The patient has agreed to oral photo analysis and secure storage of this screening record.</span>
+      </label>
+      {reportError && <div role="alert" style={{ marginBottom: '12px', color: 'var(--danger-text)' }}>{reportError}</div>}
+
       {syncNotice && (
         <div style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-text)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.78rem', marginBottom: '12px' }}>
           ✓ {syncNotice}
@@ -558,6 +617,7 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                 <button
                   type="button"
                   onClick={() => startCamera('mucosal')}
+                  disabled={isCameraLoading}
                   style={{
                     padding: '16px 12px',
                     borderRadius: '12px',
@@ -575,7 +635,7 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                   }}
                 >
                   <span style={{ fontSize: '1.6rem' }}>📸</span>
-                  <span>Use Live Camera</span>
+                  <span>{isCameraLoading && cameraTarget === 'mucosal' ? 'Opening camera…' : 'Use Live Camera'}</span>
                   <span style={{ fontSize: '0.68rem', color: isCameraActive && cameraTarget === 'mucosal' ? '#e2e8f0' : 'var(--text-muted)' }}>
                     Webcam or Phone Lens
                   </span>
@@ -589,17 +649,25 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                 </div>
               )}
 
+              {isCameraLoading && cameraTarget === 'mucosal' && (
+                <div role="status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--info-bg)', color: 'var(--info-text)', borderRadius: '8px', fontSize: '0.78rem', marginBottom: '12px' }}>
+                  <span>{isCameraActive ? 'Camera opened; starting preview…' : 'Opening camera…'}</span>
+                  <button type="button" onClick={stopCamera} style={{ border: 0, background: 'transparent', color: 'inherit', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                </div>
+              )}
+
               {/* Live Video Viewfinder */}
               {isCameraActive && cameraTarget === 'mucosal' && (
                 <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#000', marginBottom: '14px', border: '2px solid #10b981' }}>
-                  <video ref={videoRef} playsInline autoPlay muted style={{ width: '100%', maxHeight: '280px', display: 'block', objectFit: 'cover' }} />
+                  <video ref={attachCameraVideo} onCanPlay={() => { setIsCameraReady(true); setIsCameraLoading(false); }} playsInline autoPlay muted style={{ width: '100%', maxHeight: '280px', display: 'block', objectFit: 'cover' }} />
                   <div style={{ padding: '10px', background: 'rgba(0,0,0,0.7)', display: 'flex', gap: '8px', justifyContent: 'center' }}>
                     <button
                       type="button"
                       onClick={() => captureCameraSnapshot('mucosal')}
+                      disabled={!isCameraReady}
                       style={{ background: '#10b981', color: '#022c22', border: 'none', borderRadius: '20px', padding: '8px 20px', fontWeight: 800, fontSize: '0.86rem', cursor: 'pointer' }}
                     >
-                      📸 Snap Mucosal Photo
+                      {isCameraReady ? '📸 Snap Mucosal Photo' : 'Starting camera…'}
                     </button>
                     <button
                       type="button"
@@ -637,6 +705,12 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                       ) : (
                         <span>⚠️ {mucosalQuality.reason}</span>
                       )}
+                    </div>
+                  )}
+
+                  {mucosalAnalysisError && (
+                    <div role="alert" style={{ padding: '9px 11px', borderRadius: '8px', background: 'var(--danger-bg)', color: 'var(--danger-text)', fontSize: '0.78rem', marginBottom: '10px' }}>
+                      {mucosalAnalysisError}
                     </div>
                   )}
 
@@ -679,8 +753,8 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                 }}
               >
                 {mucosalResult?.is_placeholder
-                  ? 'ℹ️ MODEL NOT TRAINED - DEMO ONLY — PRELIMINARY SCREENING'
-                  : '✓ EFFICIENTNET-B0 CALIBRATED AI MODEL (v2.0.0) — SCREENING SUPPORT'}
+                  ? 'DEMO AI · model unavailable · screening support only'
+                  : 'DEMO AI · oral image screening support'}
               </div>
 
               {mucosalResult ? (
@@ -830,6 +904,7 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                 <button
                   type="button"
                   onClick={() => startCamera('dental')}
+                  disabled={isCameraLoading}
                   style={{
                     padding: '14px 10px',
                     borderRadius: '12px',
@@ -847,7 +922,7 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                   }}
                 >
                   <span style={{ fontSize: '1.4rem' }}>🦷</span>
-                  <span>Live Dental Camera</span>
+                  <span>{isCameraLoading && cameraTarget === 'dental' ? 'Opening camera…' : 'Live Dental Camera'}</span>
                 </button>
               </div>
 
@@ -858,17 +933,25 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                 </div>
               )}
 
+              {isCameraLoading && cameraTarget === 'dental' && (
+                <div role="status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--info-bg)', color: 'var(--info-text)', borderRadius: '8px', fontSize: '0.78rem', marginBottom: '12px' }}>
+                  <span>{isCameraActive ? 'Camera opened; starting preview…' : 'Opening camera…'}</span>
+                  <button type="button" onClick={stopCamera} style={{ border: 0, background: 'transparent', color: 'inherit', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                </div>
+              )}
+
               {/* Live Video Viewfinder for Dental */}
               {isCameraActive && cameraTarget === 'dental' && (
                 <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#000', marginBottom: '14px', border: '2px solid #10b981' }}>
-                  <video ref={videoRef} playsInline autoPlay muted style={{ width: '100%', maxHeight: '280px', display: 'block', objectFit: 'cover' }} />
+                  <video ref={attachCameraVideo} onCanPlay={() => { setIsCameraReady(true); setIsCameraLoading(false); }} playsInline autoPlay muted style={{ width: '100%', maxHeight: '280px', display: 'block', objectFit: 'cover' }} />
                   <div style={{ padding: '10px', background: 'rgba(0,0,0,0.7)', display: 'flex', gap: '8px', justifyContent: 'center' }}>
                     <button
                       type="button"
                       onClick={() => captureCameraSnapshot('dental')}
+                      disabled={!isCameraReady}
                       style={{ background: '#10b981', color: '#022c22', border: 'none', borderRadius: '20px', padding: '8px 20px', fontWeight: 800, fontSize: '0.86rem', cursor: 'pointer' }}
                     >
-                      📸 Snap Dental View
+                      {isCameraReady ? '📸 Snap Dental View' : 'Starting camera…'}
                     </button>
                     <button
                       type="button"
@@ -925,6 +1008,12 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                     </div>
                   )}
 
+                  {dentalAnalysisError && (
+                    <div role="alert" style={{ padding: '9px 11px', borderRadius: '8px', background: 'var(--danger-bg)', color: 'var(--danger-text)', fontSize: '0.78rem', marginBottom: '10px' }}>
+                      {dentalAnalysisError}
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     disabled={isAnalyzingDental}
@@ -960,7 +1049,7 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
                   border: '1px solid var(--success-text)',
                 }}
               >
-                ✓ EFFICIENTNET-B0 MULTI-LABEL CALIBRATED (v2.0.0) — DENTAL SCREENING
+                DEMO AI · dental image screening support
               </div>
               <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
                 Multi-label model evaluates Caries, Gingivitis, Calculus, Plaque, and Discoloration independently with thresholding.

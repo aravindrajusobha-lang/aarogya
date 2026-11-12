@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { AuthUser } from './AuthPanel';
 
+const createNotificationMutationId = (): string => typeof crypto !== 'undefined' && 'randomUUID' in crypto
+  ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const value = Math.random() * 16 | 0;
+    return (char === 'x' ? value : (value & 0x3 | 0x8)).toString(16);
+  });
+
 export interface ChannelDeliveryStatus {
   channel: 'in_app' | 'sms' | 'email';
   delivered: boolean;
@@ -237,7 +244,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify(preferences),
+        body: JSON.stringify({ ...preferences, mutationId: createNotificationMutationId() }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error?.message || 'Failed to update preferences');
@@ -641,6 +648,22 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   <p style={{ margin: '0 0 0.75rem 0', color: '#cbd5e1', fontSize: '0.9rem', lineHeight: 1.5 }}>
                     {notif.body}
                   </p>
+                  {notif.link && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          const destination = new URL(notif.link!, window.location.origin);
+                          if (destination.origin !== window.location.origin) return;
+                          void markAsRead(notif.notificationId);
+                          window.location.hash = destination.hash;
+                        } catch { /* Ignore malformed or non-local notification destinations. */ }
+                      }}
+                      style={{ marginBottom: '0.75rem', cursor: 'pointer' }}
+                    >
+                      Open consultation
+                    </button>
+                  )}
 
                   {/* Channel Delivery Status Badges */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>

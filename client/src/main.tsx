@@ -3,9 +3,11 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeProvider } from './context/ThemeContext';
+import { GlobalNavigationShell } from './components/BackButton';
 import 'leaflet/dist/leaflet.css';
 import './styles/index.css';
 import './styles/cinematicBackdrop.css';
+import './styles/avengersVfx.css';
 import './styles/theme.css';
 
 // Register Service Worker for PWA Offline Caching (Production only)
@@ -42,7 +44,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <ThemeProvider>
-        <App />
+          <GlobalNavigationShell>
+            <App />
+          </GlobalNavigationShell>
       </ThemeProvider>
     </ErrorBoundary>
   </React.StrictMode>

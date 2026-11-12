@@ -133,7 +133,32 @@
     "staffDiscussionTitle": "ಆರೋಗ್ಯ ರಕ್ಷಣೆ ಒದಗಿಸುವವರ ಚರ್ಚೆ",
     "notesTitle": "ಕ್ಲಿನಿಕಲ್ ಸಮಾಲೋಚನೆ ಟಿಪ್ಪಣಿಗಳು",
     "notReleased": "ಟಿಪ್ಪಣಿಗಳನ್ನು ರೋಗಿಯ ವೀಕ್ಷಣೆಗೆ ಬಿಡುಗಡೆ ಮಾಡಲಾಗಿಲ್ಲ.",
-    "onlyAssignedClinician": "ನಿಯೋಜಿತ ಕ್ಲಿನಿಕಲ್ ತಜ್ಞರು ಮಾತ್ರ ಟಿಪ್ಪಣಿಗಳನ್ನು ತಿದ್ದುಪಡಿ ಮಾಡಬಹುದು."
+    "onlyAssignedClinician": "ನಿಯೋಜಿತ ಕ್ಲಿನಿಕಲ್ ತಜ್ಞರು ಮಾತ್ರ ಟಿಪ್ಪಣಿಗಳನ್ನು ತಿದ್ದುಪಡಿ ಮಾಡಬಹುದು.",
+    "directCallTitle": "ವೈದ್ಯರು-ರೋಗಿಯ ನೇರ ವೀಡಿಯೊ ಕರೆ",
+    "liveVideoChecking": "ಲೈವ್ ವೀಡಿಯೊ ಲಭ್ಯತೆಯನ್ನು ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...",
+    "liveVideoReady": "ಲೈವ್ ವೀಡಿಯೊ ಪೂರೈಕೆದಾರರನ್ನು ಸಂರಚಿಸಲಾಗಿದೆ.",
+    "liveVideoBlocked": "ಲೈವ್ ವೀಡಿಯೊ ಲಭ್ಯವಿಲ್ಲ. ನಿರ್ವಾಹಕರು Daily ಪೂರೈಕೆದಾರರನ್ನು ಸಂರಚಿಸಬೇಕು.",
+    "liveVideoUnavailable": "ಲೈವ್ ವೀಡಿಯೊ ಲಭ್ಯತೆಯನ್ನು ಪರಿಶೀಲಿಸಲಾಗಲಿಲ್ಲ. ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+    "directCallPatient": "ರೋಗಿ",
+    "directCallChoosePatient": "ರೋಗಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ",
+    "directCallNoPatients": "ನಿಮ್ಮ ಆಸ್ಪತ್ರೆಗೆ ಇನ್ನೂ ಪರಿಶೀಲಿತ ರೋಗಿ ಖಾತೆಗಳನ್ನು ನಿಯೋಜಿಸಲಾಗಿಲ್ಲ.",
+    "directCallCalling": "ಕರೆ ಮಾಡಲಾಗುತ್ತಿದೆ...",
+    "directCallStart": "ರೋಗಿಗೆ ಕರೆ ಮಾಡಿ",
+    "directCallOutgoing": "ಹೊರಹೋಗುವ ಕರೆಗಳು",
+    "directCallIncoming": "ಒಳಬರುವ ಕರೆ",
+    "directCallNoOutgoing": "ಸಕ್ರಿಯ ಹೊರಹೋಗುವ ಕರೆಗಳಿಲ್ಲ.",
+    "directCallNoIncoming": "ಒಳಬರುವ ಕರೆಗಳಿಲ್ಲ.",
+    "directCallWaiting": "ರೋಗಿಯ ಉತ್ತರಕ್ಕಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ",
+    "directCallPatientReady": "ರೋಗಿ ಸಿದ್ಧರಾಗಿದ್ದಾರೆ",
+    "directCallConnected": "ಸಂಪರ್ಕಿಸಲಾಗಿದೆ",
+    "directCallOpen": "ಕರೆ ತೆರೆಯಿರಿ",
+    "directCallAnswer": "ವೀಡಿಯೊ ಕರೆಗೆ ಉತ್ತರಿಸಿ",
+    "directCallReject": "ನಿರಾಕರಿಸಿ",
+    "directCallRejected": "ಕರೆಯನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ.",
+    "directCallSent": "ಕರೆ ವಿನಂತಿ ಕಳುಹಿಸಲಾಗಿದೆ. ರೋಗಿ ತಮ್ಮ ಡ್ಯಾಶ್‌ಬೋರ್ಡ್‌ನಿಂದ ಉತ್ತರಿಸಬಹುದು.",
+    "directCallSessionExpired": "ನಿಮ್ಮ ಸೆಷನ್ ಅವಧಿ ಮುಗಿದಿದೆ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+    "directCallSignIn": "ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ",
+    "directCallDemoLogin": "ನೀವು ಡೆಮೋ ಮೋಡ್‌ನಲ್ಲಿದ್ದೀರಿ. ಲೈವ್ ವೀಡಿಯೊ ಕರೆಗಳಿಗೆ ಸರ್ವರ್ ಪರಿಶೀಲಿಸಿದ ವೈದ್ಯರು ಅಥವಾ ರೋಗಿ ಖಾತೆಯಿಂದ ಸೈನ್ ಇನ್ ಮಾಡಿ."
   },
   "aadhaarMock": {
     "title": "ಮಾಕ್ - ಆಧಾರ್ ಸಿಮ್ಯುಲೇಶನ್ ಅಡಾಪ್ಟರ್",
@@ -156,6 +181,22 @@
     "deviceRevokedWipe": "ಸಾಧನ ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ. ಸ್ಥಳೀಯ ದಾಖಲೆಗಳನ್ನು ಅಳಿಸಲಾಗಿದೆ.",
     "queueLimitReached": "ಗರಿಷ್ಠ ಸಾಮರ್ಥ್ಯ ತಲುಪಿದೆ (500 ಕ್ರಮಗಳು). ದಯವಿಟ್ಟು ಸಿಂಕ್ ಮಾಡಿ.",
     "photoLimitNotice": "ಫೋಟೋ ಗಾತ್ರದ ಮಿತಿ 5 MB ವರೆಗೆ ಮಾತ್ರ."
+  },
+  "patientOcr": {
+    "title": "Identity Card OCR",
+    "privacyNote": "OCR runs in this browser. Card images and full ID numbers are not uploaded. DEMO / MOCK only; this does not verify Aadhaar or ABHA.",
+    "aadhaarCard": "Aadhaar Card (MOCK)",
+    "abhaCard": "ABHA Health Card (MOCK)",
+    "frontImage": "Front Side Image",
+    "backImage": "Back Side Image",
+    "scanning": "Scanning on this device...",
+    "extractButton": "Extract Details on Device",
+    "maskedAadhaar": "Masked Aadhaar",
+    "maskedAbha": "Masked ABHA",
+    "consentRequired": "Obtain informed consent before scanning an identity card.",
+    "selectImage": "Select at least one card image first.",
+    "noFields": "No readable identity details were found. Try a clearer image or enter details manually.",
+    "reviewExtracted": "Details were read on this device. Review and correct every field before registering. OCR is not identity verification.",
+    "ocrFailed": "On-device OCR could not read this image. Try a clearer image or enter details manually."
   }
 }
-

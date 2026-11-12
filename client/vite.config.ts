@@ -46,6 +46,7 @@ export default defineConfig({
     headers: {
       'Cross-Origin-Embedder-Policy': 'credentialless',
       'Cross-Origin-Opener-Policy': 'same-origin',
+      'Permissions-Policy': 'camera=(self "https://*.daily.co")',
     },
     watch: {
       ignored: ['**/assets/videos/**', '**/*.mp4'],
@@ -55,6 +56,16 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
+  preview: {
+    headers: {
+      'Permissions-Policy': 'camera=(self "https://*.daily.co")',
     },
   },
 });

@@ -3,14 +3,19 @@ import multer from 'multer';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/authGuard.js';
 import { auditTag } from '../../middleware/auditTag.js';
-import { authorizeCapability } from '../auth/authorizationEngine.js';
+import { authorizeCapability, hasCapability } from '../auth/authorizationEngine.js';
 import { validate } from '../../middleware/validate.js';
 import { ScreeningService } from './screeningService.js';
+import { User } from '../auth/userModel.js';
 import { ScreeningPhoto } from './screeningPhotoModel.js';
 import { ScreeningCase } from './screeningCaseModel.js';
 import { ClinicalAssessment } from './clinicalAssessmentModel.js';
 import { ReportService } from '../report/reportService.js';
-import { isGeminiConfigured, analyzeOralPhotoWithGemini } from '../assistant/geminiService.js';
+import { getAuthorizedFile } from '../storage/storageService.js';
+import { Consent } from '../consent/consentModel.js';
+import { analyzeOralScreeningImage, AiProviderUnavailableError, InvalidScreeningImageError } from '../ai/aiAnalysisService.js';
+import { AuditLog } from '../audit/auditModel.js';
+import crypto from 'crypto';
 
 export const screeningRouter = Router();
 
@@ -66,6 +71,13 @@ const ReferralCaseSchema = z.object({
   referralNotes: z.string().min(1, 'Referral notes required'),
 });
 
+const AnalyzePhotoSchema = z.object({
+  photoId: z.string().min(1),
+  photoSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  patientNote: z.string().max(1000).optional(),
+  language: z.enum(['en', 'te', 'hi', 'ta', 'kn', 'ml']).optional(),
+});
+
 // ==========================================
 // 1. Photo Upload (Demo or Consented Images Only)
 // ==========================================
@@ -88,7 +100,16 @@ screeningRouter.post(
         return;
       }
 
-      const hospitalId = req.body.hospitalId || req.user!.hospitalId || 'hosp_default';
+      const requestedHospitalId = typeof req.body.hospitalId === 'string' ? req.body.hospitalId.trim() : '';
+      const hospitalId = req.user!.role === 'system_admin' ? requestedHospitalId : req.user!.hospitalId;
+      if (!hospitalId) {
+        res.envelopeError('HOSPITAL_REQUIRED', 'Assign this account to a facility before uploading screening photos.', undefined, 400);
+        return;
+      }
+      if (req.user!.role !== 'system_admin' && requestedHospitalId && requestedHospitalId !== hospitalId) {
+        res.envelopeError('FORBIDDEN', 'Photos may only be attached to your assigned facility.', undefined, 403);
+        return;
+      }
       const isDemo = req.body.isDemo === 'true' || req.body.isDemo === true;
 
       const photoRecord = await ScreeningService.uploadPhoto({
@@ -176,43 +197,98 @@ screeningRouter.get(
 screeningRouter.post(
   '/ai/analyze',
   requireAuth,
-  authorizeCapability('screening:read'),
+  validate({ body: AnalyzePhotoSchema }),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { photoId, photoSha256, imageBase64, mimeType, patientNote, language } = req.body;
-      let sha = photoSha256;
-
-      if (photoId && !sha) {
-        const photo = await ScreeningPhoto.findOne({ photoId });
-        sha = photo?.currentSha256;
+      const isAuthorized = req.user!.role === 'patient' || (await hasCapability(req.user!, 'screening:read')) || (await hasCapability(req.user!, 'screening:read_own'));
+      if (!isAuthorized) {
+        res.envelopeError('FORBIDDEN', 'Access denied. You do not have permission to run screening analysis.', undefined, 403);
+        return;
       }
 
-      if (imageBase64 && isGeminiConfigured()) {
-        try {
-          const gemini = await analyzeOralPhotoWithGemini({
-            imageBase64,
-            mimeType: mimeType || 'image/jpeg',
-            patientNote: patientNote || 'Screening queue photo analysis',
-            language: language || 'en',
-          });
-          res.status(200).envelope({
-            riskTier: gemini.riskTier,
-            confidence: gemini.confidenceScore,
-            recommendedSpecialist: gemini.recommendedDoctor?.specialty || 'Dental Surgeon',
-            observations: gemini.visualFindings,
-            geminiAnalysis: gemini,
-            simulationBanner: '⚠️ SIMULATION SYSTEM - DEMO DATA ONLY - NOT FOR CLINICAL USE',
-          });
+      const { photoId, photoSha256, patientNote, language } = req.body;
+      const photo = await ScreeningPhoto.findOne({ photoId });
+      if (!photo) {
+        res.envelopeError('PHOTO_NOT_FOUND', 'The saved oral photo was not found.', undefined, 404);
+        return;
+      }
+      if (photo.isDemo || photo.currentSha256 !== photoSha256) {
+        res.envelopeError('PHOTO_NOT_AVAILABLE', 'Only the current, consented patient photo can be analyzed.', undefined, 409);
+        return;
+      }
+      if (req.user!.role === 'patient') {
+        if (req.user!.patientId !== photo.patientId) {
+          res.envelopeError('FORBIDDEN', 'Patients may only analyze their own saved photos.', undefined, 403);
           return;
-        } catch {
-          // Fall back to calibrated demo AI
         }
+      } else if (req.user!.role !== 'system_admin' && req.user!.hospitalId !== photo.hospitalId) {
+        res.envelopeError('FORBIDDEN', 'Photos outside your assigned facility are not accessible.', undefined, 403);
+        return;
       }
 
-      const aiResult = ScreeningService.runDemoAi(sha);
+      const consent = await Consent.findOne({
+        consentId: photo.consentId,
+        patientId: photo.patientId,
+        purpose: 'screening_ai_analysis',
+        status: 'granted',
+        validUntil: { $gt: new Date() },
+      });
+      if (!consent) {
+        res.envelopeError('CONSENT_REQUIRED', 'Current patient consent for oral photo analysis is required.', undefined, 403);
+        return;
+      }
 
-      res.status(200).envelope(aiResult);
-    } catch (err) {
+      const stored = await getAuthorizedFile(photo.currentFileId, req.user!);
+      if (stored.fileRecord.patientId !== photo.patientId || stored.fileRecord.hospitalId !== photo.hospitalId) {
+        res.envelopeError('PHOTO_SCOPE_MISMATCH', 'The saved photo does not match this patient record.', undefined, 403);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of stored.stream as AsyncIterable<Buffer | string>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const imageBuffer = Buffer.concat(chunks);
+      const actualSha256 = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+      if (actualSha256 !== photo.currentSha256) {
+        res.envelopeError('PHOTO_HASH_MISMATCH', 'The saved photo integrity check failed.', undefined, 409);
+        return;
+      }
+
+      const analysis = await analyzeOralScreeningImage({
+        buffer: imageBuffer,
+        filename: stored.fileRecord.originalFilename,
+        mimeType: stored.fileRecord.mimeType,
+        patientNote,
+        language,
+      });
+      if (AuditLog.db.readyState === 1) {
+        await AuditLog.create({
+          action: 'AI_SCREENING_ANALYSIS_MODULE_A',
+          actorId: req.user!.id,
+          actorRole: req.user!.role,
+          resourceType: 'screening_photo',
+          resourceId: photo.photoId,
+          ip: req.ip || '127.0.0.1',
+          statusCode: 200,
+          metadata: { patientId: photo.patientId, modelVersion: analysis.modelVersion },
+          simulation: true,
+        });
+      }
+      res.envelope({
+        riskSupportLabel: analysis.label,
+        confidenceScore: analysis.confidence,
+        referToSpecialist: analysis.referToSpecialist,
+        imageQuality: analysis.imageQuality,
+        modelVersion: analysis.modelVersion,
+        geminiAnalysis: analysis.geminiAnalysis,
+        disclaimer: 'DEMO AI screening support only. A qualified clinician must review the result.',
+        simulationBanner: '\u26a0\ufe0f SIMULATION SYSTEM \u2014 DEMO DATA ONLY \u2014 NOT FOR CLINICAL USE',
+      }, 'DEMO AI screening support analysis completed.');
+    } catch (err: any) {
+      if (err instanceof AiProviderUnavailableError || err instanceof InvalidScreeningImageError) {
+        res.envelopeError(err.code, err.message, undefined, err.statusCode);
+        return;
+      }
       next(err);
     }
   }
@@ -229,12 +305,23 @@ screeningRouter.post(
   auditTag('SCREENING_CASE_CREATE', 'screening_case'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const requestedHospitalId = req.body.hospitalId;
+      const hospitalId = req.user!.role === 'system_admin' ? requestedHospitalId : req.user!.hospitalId;
+      if (!hospitalId) {
+        res.envelopeError('HOSPITAL_REQUIRED', 'Assign this account to a facility before creating a screening case.', undefined, 400);
+        return;
+      }
+      if (req.user!.role !== 'system_admin' && requestedHospitalId && requestedHospitalId !== hospitalId) {
+        res.envelopeError('FORBIDDEN', 'Cases may only be created for your assigned facility.', undefined, 403);
+        return;
+      }
+
       const caseRecord = await ScreeningService.createCase({
         patientId: req.body.patientId,
         patientName: req.body.patientName,
         villageId: req.body.villageId,
         villageName: req.body.villageName,
-        hospitalId: req.body.hospitalId || req.user!.hospitalId || 'hosp_default',
+        hospitalId,
         priority: req.body.priority,
         photoIds: req.body.photoIds,
         user: req.user!,
@@ -259,9 +346,23 @@ screeningRouter.get(
   authorizeCapability('screening:read'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const hospitalId = (req.query.hospitalId as string) || (req.user?.role !== 'system_admin' ? req.user?.hospitalId : undefined);
+      const user = req.user!;
+      const clinician = ['medical_officer', 'specialist_doctor'].includes(user.role);
+      const dbUser = clinician ? await User.findOne({ userId: user.userId || user.id }) : null;
+      const effectiveHospitalId = user.hospitalId || dbUser?.hospitalId;
+      const requestedHospitalId = req.query.hospitalId as string | undefined;
+      if (clinician && requestedHospitalId && requestedHospitalId !== effectiveHospitalId) {
+        res.envelopeError('FORBIDDEN', 'Cases outside your assigned facility are not accessible.', undefined, 403);
+        return;
+      }
+      const hospitalId = user.role === 'system_admin' ? requestedHospitalId : effectiveHospitalId;
       const status = req.query.status as string | undefined;
-      const assignedMoId = req.query.assignedMoId as string | undefined;
+      const requestedAssignee = req.query.assignedMoId as string | undefined;
+      if (clinician && requestedAssignee && requestedAssignee !== (user.userId || user.id)) {
+        res.envelopeError('FORBIDDEN', 'Cases assigned to another clinician are not accessible.', undefined, 403);
+        return;
+      }
+      const assignedMoId = clinician ? (user.userId || user.id) : requestedAssignee;
 
       const cases = await ScreeningService.listCases({
         hospitalId,
@@ -289,7 +390,7 @@ screeningRouter.get(
   authorizeCapability('screening:read'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const caseRecord = await ScreeningService.getCaseById(req.params.id);
+      const caseRecord = await ScreeningService.getAuthorizedCaseById(req.params.id, req.user!);
       if (!caseRecord) {
         res.status(404).envelope(null, 'Screening case not found', 404);
         return;
@@ -634,17 +735,17 @@ screeningRouter.get(
         `Created Timestamp   : ${new Date(screeningCase.createdAt).toISOString()}`,
         '',
         '--- DEMO AI SCREENING SUPPORT OBSERVATIONS ---',
-        `Preliminary Risk    : ${screeningCase.demoAiResult?.riskSupportLabel?.toUpperCase() || 'LOW_RISK_SUPPORT'}`,
-        `Model Confidence    : ${Math.round((screeningCase.demoAiResult?.confidenceScore || 0.88) * 100)}%`,
-        `Visual Findings     : ${screeningCase.demoAiResult?.observedCondition || 'Benign Mucosa / Low-Risk Variant'}`,
-        `Triage Specialty    : ${screeningCase.demoAiResult?.recommendedDoctor?.specialty || 'Dental Outpost Review'}`,
-        `Recommended Window  : Within ${screeningCase.demoAiResult?.recommendedDoctor?.timelineDays || 14} days`,
+        `Preliminary Risk    : ${screeningCase.demoAiResult?.riskSupportLabel?.toUpperCase() || 'Not available'}`,
+        `Model Confidence    : ${typeof screeningCase.demoAiResult?.confidenceScore === 'number' ? `${Math.round(screeningCase.demoAiResult.confidenceScore * 100)}%` : 'Not available'}`,
+        `Visual Findings     : ${screeningCase.demoAiResult?.observedCondition || 'Not available'}`,
+        `Triage Specialty    : ${screeningCase.demoAiResult?.recommendedDoctor?.specialty || 'Not available'}`,
+        `Recommended Window  : ${typeof screeningCase.demoAiResult?.recommendedDoctor?.timelineDays === 'number' ? `Within ${screeningCase.demoAiResult.recommendedDoctor.timelineDays} days` : 'Not available'}`,
         '',
         '--- HUMAN CLINICIAN ASSESSMENT NOTES ---',
-        `Reviewing Clinician : ${screeningCase.assignedMoName || 'Primary Health Centre Medical Officer'}`,
-        `Clinical Impression : ${assessment ? (assessment as any).clinicalImpression : 'Visual review completed. Follow-up recommended.'}`,
-        `Risk Categorization : ${assessment ? (assessment as any).riskCategorization?.toUpperCase() : (screeningCase.demoAiResult?.riskSupportLabel?.toUpperCase() || 'LOW_RISK_SUPPORT')}`,
-        `Recommended Action  : ${assessment ? ((assessment as any).clinicalNotes || 'Schedule in-person clinic consultation') : 'Attend Community Health Centre OPD for clinical review.'}`,
+        `Reviewing Clinician : ${screeningCase.assignedMoName || 'Not assigned'}`,
+        `Clinical Impression : ${assessment ? (assessment as any).clinicalImpression : 'Not recorded'}`,
+        `Risk Categorization : ${assessment ? (assessment as any).riskCategorization?.toUpperCase() : 'Not recorded'}`,
+        `Recommended Action  : ${assessment ? ((assessment as any).clinicalNotes || 'Not recorded') : 'Not recorded'}`,
         '',
         '--- MANDATORY CLINICAL SAFETY DISCLAIMER ---',
         'WARNING: This report provides DEMO AI screening support and visual triage assistance only.',

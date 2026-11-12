@@ -27,6 +27,12 @@ export interface IUser extends Document {
   isActive?: boolean;
   phone?: string;
   patientId?: string;
+  yearOfBirth?: number;
+  gender?: 'male' | 'female' | 'transgender' | 'other';
+  address?: string;
+  village?: string;
+  mandal?: string;
+  pincode?: string;
   hospitalId?: string;
   passwordHash: string;
   mfaEnabled: boolean;
@@ -39,7 +45,7 @@ export interface IUser extends Document {
     lastFailedAt?: Date | null;
   };
   mustChangePassword?: boolean;
-  verificationStatus?: 'pending_verification' | 'verified' | 'rejected';
+  verificationStatus?: 'pending_verification' | 'verified' | 'rejected' | 'UNVERIFIED' | 'VERIFIED';
   verificationDetails?: {
     verifiedBy?: string;
     verifiedAt?: Date;
@@ -55,6 +61,30 @@ export interface IUser extends Document {
     experienceYears?: number;
     rejectionReason?: string;
   };
+  // Extended Patient Profile Fields (Module 3)
+  medicalHistory?: string;
+  allergies?: string[];
+  currentMedications?: string[];
+  habits?: {
+    tobacco?: boolean;
+    alcohol?: boolean;
+    arecaNut?: boolean;
+    smoking?: boolean;
+    other?: string;
+  };
+  emergencyContact?: {
+    name?: string;
+    phone?: string;
+    relationship?: string;
+  };
+  insurance?: {
+    provider?: string;
+    policyNumber?: string;
+    validUntil?: Date;
+  };
+  preferredLanguage?: 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml';
+  profileCompleteness?: number;
+  profileConsentAt?: Date;
   status: 'active' | 'suspended' | 'locked';
   simulation: true;
   createdAt: Date;
@@ -95,6 +125,12 @@ const UserSchema = new Schema<IUser>(
     isActive: { type: Boolean, default: true },
     phone: { type: String },
     patientId: { type: String, index: true },
+    yearOfBirth: { type: Number, min: 1900, max: new Date().getFullYear() },
+    gender: { type: String, enum: ['male', 'female', 'transgender', 'other'] },
+    address: { type: String, trim: true },
+    village: { type: String, trim: true },
+    mandal: { type: String, trim: true },
+    pincode: { type: String, match: /^[1-9]\d{5}$/ },
     hospitalId: { type: String, index: true },
     passwordHash: { type: String, required: true },
     mfaEnabled: { type: Boolean, default: false },
@@ -109,7 +145,7 @@ const UserSchema = new Schema<IUser>(
     mustChangePassword: { type: Boolean, default: false },
     verificationStatus: {
       type: String,
-      enum: ['pending_verification', 'verified', 'rejected'],
+      enum: ['pending_verification', 'verified', 'rejected', 'UNVERIFIED', 'VERIFIED'],
       default: 'verified',
     },
     verificationDetails: {
@@ -129,6 +165,30 @@ const UserSchema = new Schema<IUser>(
       experienceYears: { type: Number },
       rejectionReason: { type: String },
     },
+    // Extended Patient Profile Fields (Module 3)
+    medicalHistory: { type: String, default: '' },
+    allergies: { type: [String], default: [] },
+    currentMedications: { type: [String], default: [] },
+    habits: {
+      tobacco: { type: Boolean, default: false },
+      alcohol: { type: Boolean, default: false },
+      arecaNut: { type: Boolean, default: false },
+      smoking: { type: Boolean, default: false },
+      other: { type: String, default: '' },
+    },
+    emergencyContact: {
+      name: { type: String, default: '' },
+      phone: { type: String, default: '' },
+      relationship: { type: String, default: '' },
+    },
+    insurance: {
+      provider: { type: String, default: '' },
+      policyNumber: { type: String, default: '' },
+      validUntil: { type: Date },
+    },
+    preferredLanguage: { type: String, enum: ['en', 'te', 'hi', 'ta', 'kn', 'ml'], default: 'te' },
+    profileCompleteness: { type: Number, default: 0, min: 0, max: 100 },
+    profileConsentAt: { type: Date },
     status: {
       type: String,
       enum: ['active', 'suspended', 'locked'],

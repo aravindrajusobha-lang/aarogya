@@ -69,11 +69,13 @@ describe('Central Authorization Engine: Full Matrix & CI Route Coverage', () => 
 
       describe(`${endpoint.method} ${endpoint.path} [Requires: ${endpoint.requiredCapability}]`, () => {
         for (const role of ALL_ROLES) {
-          const isAllowed =
-            role === 'system_admin' ||
-            (ROLE_CAPABILITY_MATRIX[role] &&
-              (ROLE_CAPABILITY_MATRIX[role].includes('*') ||
-                ROLE_CAPABILITY_MATRIX[role].includes(endpoint.requiredCapability)));
+          const isPatientVerification = endpoint.path === '/api/v1/patients/:id/verify';
+          const isAllowed = isPatientVerification
+            ? role === 'medical_officer' || role === 'anm' || role === 'asha'
+            : role === 'system_admin' ||
+              (ROLE_CAPABILITY_MATRIX[role] &&
+                (ROLE_CAPABILITY_MATRIX[role].includes('*') ||
+                  ROLE_CAPABILITY_MATRIX[role].includes(endpoint.requiredCapability)));
 
           it(`Role "${role}": ${isAllowed ? 'ALLOWED (not 403)' : 'FORBIDDEN (403)'}`, async () => {
             const token = roleTokens[role];
@@ -95,6 +97,8 @@ describe('Central Authorization Engine: Full Matrix & CI Route Coverage', () => 
               reqBuilder = request(app).post(testPath);
             } else if (endpoint.method === 'PUT') {
               reqBuilder = request(app).put(testPath);
+            } else if (endpoint.method === 'PATCH') {
+              reqBuilder = request(app).patch(testPath);
             } else if (endpoint.method === 'DELETE') {
               reqBuilder = request(app).delete(testPath);
             } else {

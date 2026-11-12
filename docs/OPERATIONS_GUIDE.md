@@ -62,6 +62,16 @@ docker exec -it aarogya-mongodb mongosh --eval 'rs.initiate({ _id: "rs0", member
 
 ---
 
+### 2.3 Daily Video Provider Setup
+Live calls use a private Daily room. Configure one of these server-side options:
+
+1. **Admin settings:** set a persistent 64-character hex `VIDEO_CONFIG_ENCRYPTION_KEY` in the server environment and restart the API. Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Keep this key in the deployment secret store and preserve it across restarts; losing it makes the encrypted Daily credential unreadable.
+2. Sign in as `system_admin`, open **Video Provider Settings**, enter the Daily API key and account domain, then choose **Test connection and save**. The API verifies the key with Daily before storing it encrypted with AES-256-GCM. The API key is never returned to the browser or written to audit records.
+3. Alternatively, set `DAILY_API_KEY` and `DAILY_DOMAIN` in the server environment. Environment credentials are used when no admin-stored configuration exists.
+4. Set `CLIENT_ORIGIN` to the deployed frontend origin so in-app patient links open the correct application URL. Confirm the provider state is **CONNECTED** before placing calls. Daily credentials must remain server-side, and production traffic must use HTTPS. Patient/doctor room access still requires a valid application login and facility-scoped assignment.
+
+The provider test can fail if the API key is invalid, the domain is not a hostname, or the API server cannot reach `api.daily.co`. The admin screen shows the provider response without exposing the key.
+
 ## 3. Database Backup & Disaster Recovery Procedures
 
 ### 3.1 On-Demand Backup Execution

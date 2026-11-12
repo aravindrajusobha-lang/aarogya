@@ -1,0 +1,49 @@
+.global-navigation-shell.has-back-button {
+  min-height: 100vh;
+  padding-bottom: 78px;
+}
+
+.global-back-button {
+  position: fixed;
+  z-index: 10010;
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 92px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid #0b5f58;
+  border-radius: 999px;
+  background: #0b5f58;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(10, 41, 38, .22);
+  font: inherit;
+  font-size: .88rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.global-back-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.global-back-button:hover { background: #084e49; border-color: #084e49; }
+.global-back-button:focus-visible { outline: 3px solid #fbbf24; outline-offset: 3px; }
+
+.patient-camera-photo-review { display: grid; grid-template-columns: minmax(120px, 220px) minmax(0, 1fr); gap: 18px; align-items: center; max-width: 720px; margin: 0 auto 18px; padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--text-primary); }
+.patient-camera-photo-review > img { display: block; width: 100%; max-height: 240px; object-fit: contain; border-radius: 10px; background: #111; }
+.patient-camera-photo-review h4 { margin: 0 0 6px; }
+.patient-camera-photo-review p, .patient-camera-fallback p { margin: 0 0 12px; color: var(--text-secondary); line-height: 1.45; }
+.patient-camera-photo-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.patient-camera-fallback { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 0 0 16px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.patient-camera-fallback p { margin: 0; }
+.patient-camera-fallback-input { display: grid; gap: 5px; color: var(--text-primary); font-size: .8rem; font-weight: 750; }
+.patient-camera-fallback-input input { max-width: min(100%, 360px); min-height: 42px; color: var(--text-primary); font: inherit; }
+.patient-camera-fallback-input input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 820px) {
+  .global-navigation-shell.has-back-button.patient-route { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+  .global-back-button { bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .patient-camera-photo-review { grid-template-columns: minmax(0, 1fr); }
+  .patient-camera-photo-review > img { max-height: 280px; }
+}

@@ -304,6 +304,7 @@ describe('Comprehensive QA: Recently Updated Features & Invariants Verification'
         submittedBy: ashaId,
         createdBy: ashaId,
         hospitalId: hospId,
+        assignedMoId: doctorId,
         riskTier: 'Tier 2',
         workflowStatus: 'submitted',
         lesionObserved: true,

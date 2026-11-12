@@ -9,6 +9,8 @@ export interface IMedicineItem {
 }
 
 export interface IPrescriptionDocument extends Document {
+  mutationId?: string;
+  sha256?: string;
   prescriptionId: string;
   patientId: string;
   patientName: string;
@@ -45,6 +47,8 @@ const MedicineItemSchema = new Schema<IMedicineItem>(
 
 const PrescriptionSchema = new Schema<IPrescriptionDocument>(
   {
+    mutationId: { type: String, unique: true, sparse: true, immutable: true },
+    sha256: { type: String, immutable: true },
     prescriptionId: { type: String, required: true, unique: true, index: true },
     patientId: { type: String, required: true, index: true },
     patientName: { type: String, required: true, trim: true },

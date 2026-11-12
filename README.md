@@ -156,3 +156,18 @@ npm test
 
 ## ⚖️ License & Tribal Health Program Attribution
 Developed for the **AAROHAN Hackathon 2026** under the Tribal Health Initiative for ITDA Paderu. Released under the Apache 2.0 Open Source License for public healthcare demonstration.
+# Daily.co Video Consultation setup
+
+The appointment-linked consultation feature uses Daily.co's server REST API and browser SDK. Video remains blocked until credentials are configured on the backend; the app never embeds the API key in browser code.
+
+1. Create/sign into a Daily account at [dashboard.daily.co](https://dashboard.daily.co/).
+2. Create an API key in the Daily developer/API settings. Keep it private.
+3. Copy `server/.env.example` to `server/.env` and set `DAILY_API_KEY`, `DAILY_DOMAIN` (the account subdomain such as `your-team.daily.co`), `MONGO_URI`, and `CLIENT_ORIGIN`.
+4. Run the backend and frontend using the repository's existing scripts. Use HTTPS for deployed use and set `CLIENT_ORIGIN` to the deployed frontend origin.
+5. Confirm a patient appointment and assign it to a doctor. At the appointment time, the patient enters the waiting room. The assigned doctor sends the link; the patient opens it from in-app notifications and both participants sign in.
+
+Daily rooms are private, limited to two participants, and expired by the provider at the server-set deadline. Starting a call sets the deadline to 30 minutes; reconnecting does not reset it. The UI shows a warning in the final five minutes. The app's SMS/email adapters remain simulation-blocked, so link delivery currently uses the in-app inbox. Do not put Daily credentials in `client/.env` or any `VITE_*` variable.
+
+Provider references: [Create a Daily room](https://docs.daily.co/reference/rest-api/rooms/create-room), [Create a Daily meeting token](https://docs.daily.co/reference/rest-api/meeting-tokens/create-meeting-token), [Daily dashboard](https://dashboard.daily.co/).
+
+Checklist: book and confirm an appointment; enter waiting room; send/open the link; reject an unrelated account; join with assigned patient and doctor; verify camera/microphone toggles and reconnect; confirm the 25-minute warning; verify provider auto-expiry and server completion at 30 minutes; verify unused link expiry after 60 minutes; save notes and confirm a new note version preserves prior content.

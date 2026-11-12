@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { AuthUser } from './AuthPanel';
 import { ThemeToggle } from './ThemeToggle';
+import { getMenuItemsForRole, normalizeUserRole } from '../config/roleNavigation';
+import { getClientTranslation, LanguageCode, translations } from '../i18n';
 import '../styles/Dashboard.css';
 
 export interface NavItem {
@@ -18,6 +20,7 @@ export interface DashboardLayoutProps {
   onLogout: () => void;
   onToggleAIAssistant?: () => void;
   title?: string;
+  currentLang?: LanguageCode;
 }
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
@@ -28,51 +31,25 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onLogout,
   onToggleAIAssistant,
   title = 'Command Dashboard',
+  currentLang = 'en',
 }) => {
   const [isMobileOpen, setIsMobileOpen] = useState<boolean>(false);
 
-  const role = (currentUser?.role || 'PATIENT').toUpperCase();
-  const isAdmin = role.includes('ADMIN') || role.includes('OFFICER');
-  const isDoctor = role.includes('DOCTOR') || role.includes('MEDICAL') || role.includes('MANAGER');
+  const normRole = normalizeUserRole(currentUser?.role);
+  const isPatientPortal = normRole === 'patient';
+  const isAdmin = normRole === 'admin';
+  const isDoctor = normRole === 'doctor';
 
-  // Navigation Items by Role
-  const navItems: NavItem[] = isAdmin
-    ? [
-        { id: 'overview', label: 'Admin Overview', icon: '📊' },
-        { id: 'hospitals', label: 'Hospital Registry', icon: '🏥' },
-        { id: 'doctors', label: 'Doctor Provisioning', icon: '👨‍⚕️' },
-        { id: 'reports', label: 'Mandal GIS Reports', icon: '📈' },
-        { id: 'audit', label: 'Audit Log & Security', icon: '🛡️' },
-      ]
-    : isDoctor
-    ? [
-        { id: 'queue', label: 'Clinical Review Queue', icon: '🩺', badge: '14 New' },
-        { id: 'high-risk', label: 'High-Risk Triage', icon: '🚨', badge: '3 Alerts' },
-        { id: 'referrals', label: 'Patient Referrals', icon: '📋' },
-        { id: 'teleconsult', label: 'Teleconsult Discussions', icon: '💬' },
-        { id: 'biopsy', label: 'Biopsy Lab Status', icon: '🔬' },
-      ]
-    : [
-        { id: 'dashboard', label: 'Patient Dashboard', icon: '🏠' },
-        { id: 'screening', label: 'My Medical Cases', icon: '🩺' },
-        { id: 'specialists', label: 'Specialist Directory', icon: '👨‍⚕️' },
-        { id: 'hospitals', label: 'Hospitals and Network', icon: '🏥' },
-        { id: 'notifications', label: 'My Notifications', icon: '🔔' },
-        { id: 'consent', label: 'Patient Consent', icon: '📋' },
-        { id: 'auth', label: 'My Profile', icon: '👤' },
-        { id: 'appointments', label: 'My Appointments', icon: '📅' },
-        { id: 'patients', label: 'Medical Records', icon: '📂' },
-        { id: 'reports', label: 'Medical Reports', icon: '📄' },
-        { id: 'help', label: 'Help and Support', icon: '❓' },
-      ];
-
-  const primaryPatientNavIds = new Set(['dashboard', 'hospitals', 'patients', 'reports']);
-  const primaryNavItems = isAdmin || isDoctor
-    ? navItems
-    : navItems.filter((item) => primaryPatientNavIds.has(item.id));
-  const secondaryNavItems = isAdmin || isDoctor
-    ? []
-    : navItems.filter((item) => !primaryPatientNavIds.has(item.id));
+  // Single Role-to-Menu Configuration (Part B Implementation)
+  const primaryNavItems = isPatientPortal ? [] : getMenuItemsForRole(currentUser?.role);
+  const secondaryNavItems: NavItem[] = [];
+  const showSidebar = !isPatientPortal;
+  const patientName = currentUser?.fullName || currentUser?.username || 'Patient';
+  const patientInitials = patientName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+  const confirmPatientLogout = () => {
+    const confirmText = getClientTranslation(translations[currentLang] || translations.en, 'patientActions.signOutConfirm');
+    if (window.confirm(confirmText === 'patientActions.signOutConfirm' ? 'Sign out of your patient account?' : confirmText)) onLogout();
+  };
 
   const getRoleClass = () => {
     if (isAdmin) return 'role-badge-admin';
@@ -81,14 +58,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   };
 
   const getRoleDisplay = () => {
-    if (isAdmin) return 'Super Admin';
+    if (isAdmin) return 'System Administrator';
     if (isDoctor) return 'Medical Officer / Doctor';
     return 'Patient / Frontline Citizen';
   };
 
   return (
-    <div className="dashboard-layout-root">
-      {/* 1. Collapsible Sidebar */}
+    <div className={`dashboard-layout-root${isPatientPortal ? ' patient-portal-layout' : ''}`}>
+      {/* 1. Collapsible Sidebar (hidden from patient portal UI; backend/features unchanged) */}
+      {showSidebar && (
       <aside className={`dash-sidebar ${isMobileOpen ? 'mobile-open' : ''}`}>
         {/* Brand */}
         <div className="dash-sidebar-brand">
@@ -99,16 +77,13 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           </div>
         </div>
 
-        {/* User Card */}
-        <div className="dash-user-card">
-          <div className="dash-user-avatar">
-            {currentUser?.fullName?.charAt(0) || currentUser?.username?.charAt(0) || 'U'}
-          </div>
-          <div className="dash-user-meta">
-            <div className="dash-user-name" title={currentUser?.fullName || currentUser?.username || 'User'}>
-              {currentUser?.fullName || currentUser?.username || 'Demo User'}
+        {/* User Card (simplified) */}
+        <div className="dash-user-card" style={{ padding: '10px 12px', gap: '8px' }}>
+          <div className="dash-user-meta" style={{ minWidth: 0 }}>
+            <div className="dash-user-name" style={{ fontSize: '0.84rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={currentUser?.fullName || currentUser?.username || 'User'}>
+              {currentUser?.fullName || currentUser?.username || 'User'}
             </div>
-            <span className={`dash-user-role-badge ${getRoleClass()}`}>
+            <span className={`dash-user-role-badge ${getRoleClass()}`} style={{ fontSize: '0.68rem' }}>
               {getRoleDisplay()}
             </span>
           </div>
@@ -176,7 +151,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
         {/* Footer with Logout */}
         <div className="dash-sidebar-footer">
-          {/* AI Assistant Chatbot Button in Sidebar */}
           {onToggleAIAssistant && (
             <button
               type="button"
@@ -208,12 +182,14 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           </button>
         </div>
       </aside>
+      )}
 
       {/* 2. Main Content Wrapper */}
       <div className="dash-main-wrapper">
         {/* Top Header Bar */}
         <header className="dash-topbar">
           <div className="dash-topbar-left">
+            {showSidebar && (
             <button
               type="button"
               className="dash-mobile-toggle"
@@ -222,6 +198,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             >
               ☰
             </button>
+            )}
             <h1 className="dash-page-title">{title}</h1>
           </div>
 
@@ -259,17 +236,14 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               <span>⚠️</span>
               <span>SIMULATION SYSTEM • DEMO DATA ONLY</span>
             </div>
-
-            {/* Admin Command button: Hidden from Patients and Doctors, visible only to Super Admins */}
-            {isAdmin && (
-              <button
-                type="button"
-                className="dash-btn dash-btn-outline"
-                style={{ padding: '6px 12px', fontSize: '0.78rem' }}
-                onClick={() => (window.location.hash = '#/admin')}
-              >
-                🛡️ Admin Command
-              </button>
+            {isPatientPortal && (
+              <div className="patient-topbar-account">
+                <span className="patient-topbar-avatar" aria-hidden="true">{patientInitials || 'P'}</span>
+                <span className="patient-topbar-name" title={patientName}>{patientName}</span>
+                <button type="button" className="patient-signout-button" onClick={confirmPatientLogout}>
+                  {getClientTranslation(translations[currentLang] || translations.en, 'auth.logout')}
+                </button>
+              </div>
             )}
           </div>
         </header>

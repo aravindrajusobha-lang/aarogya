@@ -71,7 +71,7 @@ The 252 deduplicated endpoints are structured across 24 core service modules:
 | **20** | Teleconsultation Management (Blocked Stubs) | 11 | `teleconsult:schedule`, `teleconsult:notes` |
 | **21** | Spatial Habitation GIS Map (13 Endpoints) | 13 | `map:read`, Cell suppression (<5) |
 | **22** | Reports & Small-Count Dashboards | 8 | `reports:read`, `reports:export` |
-| **23** | Aadhaar Verification Mock Service | 4 | `mock:aadhaar:read`, `mock:aadhaar:verify` |
+| **23** | Aadhaar Verification Mock Service | 5 | `mock:aadhaar:read`, `mock:aadhaar:verify` |
 | **24** | Encrypted Storage & Binary Uploads | 3 | `storage:upload`, `storage:download` |
 | **RBAC** | Matrix Role-Method Permutations | 108 | Comprehensive role access checks |
 | **Total** | **Deduplicated API Route Endpoints** | **252** | **Full System Surface** |
@@ -88,9 +88,18 @@ The 252 deduplicated endpoints are structured across 24 core service modules:
 
 ### Module 02: Core Authentication & Sessions
 - `POST /api/v1/auth/login`
-  - **Auth:** Public (Rate limit: 5 req/min per IP)
+  - **Auth:** Public (Rate limit: 15 req/min per IP)
   - **Body:** `{ username, password, deviceId }`
   - **Description:** Authenticates user via Argon2id; issues short-lived JWT (15m) and rotating refresh token (7d).
+- `POST /api/v1/auth/register-aadhaar-photo`
+  - **Auth:** Public; rate-limited.
+  - **Body:** `{ consent: true, name, yearOfBirth, gender, address?, village, mandal, pincode?, mobile? }`.
+  - **Privacy:** Browser decodes the Aadhaar QR/OCR locally. Full Aadhaar digits, QR payloads, and card images are rejected as unknown body fields and never reach this endpoint. Only the consented profile fields and optional contact mobile are submitted; no PIN is collected or stored.
+  - **Response:** `201 { patientId: "PAD-XXXXXX", user: { ..., verificationStatus: "UNVERIFIED" }, accessToken, refreshToken, deviceSessionId }`.
+  - **Returning sign-in:** Uses the existing `POST /api/v1/auth/patient/send-otp` and `POST /api/v1/auth/patient/verify-otp` endpoints with `purpose: "LOGIN"` when a contact mobile was provided. Photo registration itself does not send an OTP.
+- `POST /api/v1/mock/aadhaar/ocr-extract`
+  - **Auth:** Required; legacy capability check retained.
+  - **Behavior:** Compatibility path returns `410 AADHAAR_OCR_BLOCKED`. OCR and QR decoding run in the browser; callers must not send card images, QR payloads, or Aadhaar digits. Submit only consented profile fields to registration.
 - `POST /api/v1/auth/refresh`
   - **Auth:** Public
   - **Body:** `{ refreshToken }`
@@ -168,6 +177,7 @@ The 252 deduplicated endpoints are structured across 24 core service modules:
 
 ### Module 10: Patient Intake, Demographics & Deduplication
 - `POST /api/v1/patients` — Register new patient (records verbatim address landmarks, flags duplicates).
+- `PATCH /api/v1/patients/:id/verify` — Mark a self-registered patient account `VERIFIED` after in-person confirmation; only assigned ASHA/ANM workers or a Medical Officer with hospital scope may verify.
 - `GET /api/v1/patients` — Search and list patients (scoped to worker's assigned villages).
 - `GET /api/v1/patients/:patientId` — Retrieve patient profile and screening timeline.
 - `PUT /api/v1/patients/:patientId` — Update patient demographics (appends to immutable patient history).
@@ -233,6 +243,9 @@ The 252 deduplicated endpoints are structured across 24 core service modules:
 - `GET /api/v1/appointments/:id` — Appointment details.
 - `PUT /api/v1/appointments/:id` — Update or reschedule appointment.
 - `POST /api/v1/appointments/:id/confirm` — Hospital confirms slot.
+- `POST /api/v1/appointments/:id/video-invite` — Confirmed-appointment doctor creates a patient-bound demo video link expiring after 30 minutes; plaintext token is returned once.
+- `POST /api/v1/appointments/:id/video-invite/verify` — Patient verifies their appointment invite before entering its demo room.
+- Appointment room signaling (`/api/v1/teleconsultation/rooms/:id/*`) checks appointment confirmation, patient identity, invite token, facility, and invite expiry for appointment-linked rooms.
 - `POST /api/v1/appointments/:id/cancel` — Cancel appointment with reason.
 - `GET /api/v1/appointments/slots/available` — Query available slots by facility and specialty.
 - `POST /api/v1/appointments/:id/attend` — Mark appointment attended.
@@ -480,3 +493,88 @@ The AI Engine provides comprehensive community-level screening combining mucosal
   - **Params:** `id: string` (consultationId)
   - **Response (200):** `{ status: "success", data: { consultationId: string, urgentStatus: "ACKNOWLEDGED", acknowledgedBy: string, acknowledgedAt: Date, simulation: true } }`
   - **Description:** On-duty medical officer acknowledges urgent consultation triage request.
+## Appointment Video Consultation (Daily.co)
+
+All endpoints are under `/api/v1/consultations`; JWT and capability authorization are required.
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/provider-status` | Authenticated user, `appointment:read` | Test Daily connectivity and report status without returning credential values |
+| GET | `/admin/video-provider` | System admin, `users:manage` | Read Daily connection state, source, and encryption readiness (never the key) |
+| PUT | `/admin/video-provider` | System admin, `users:manage` | Test and encrypt Daily credentials at rest before saving settings |
+| GET | `/direct-calls/patients` | Doctor, `appointment:read` | List verified patient accounts associated with the doctor's hospital |
+| GET | `/direct-calls/incoming` | Patient, `appointment:read` | List active direct-call invitations for the signed-in patient |
+| GET | `/direct-calls/outgoing` | Doctor, `appointment:read` | List active direct calls initiated by the signed-in doctor |
+| POST | `/direct-calls` | Doctor, `appointment:confirm` | Create a private Daily room and notify the selected facility patient |
+| POST | `/direct-calls/:callId/join` | Calling doctor or invited patient, `appointment:read` | Issue a room-scoped Daily participant token after identity checks |
+| POST | `/direct-calls/:callId/reject` | Invited patient, `appointment:read` | Decline an incoming call and close its room |
+| GET | `/direct-calls/:callId/status` | Calling doctor or invited patient, `appointment:read` | Read direct-call status and timer |
+| POST | `/direct-calls/:callId/start` | Calling doctor, `appointment:confirm` | Start the 30-minute timer after the patient answers |
+| POST | `/direct-calls/:callId/end` | Calling doctor, `appointment:confirm` | End the call and optionally save versioned clinical notes |
+| POST | `/direct-calls/:callId/leave` | Calling doctor or invited patient, `appointment:read` | Leave and close a direct call |
+| PUT | `/direct-calls/:callId/notes` | Calling doctor, `telemedicine:notes` | Save SHA-256 hashed, versioned clinical notes |
+| GET | `/appointments/my` | Patient, `appointment:read` | List own appointments and consultation state |
+| GET | `/availability?date=YYYY-MM-DD` | Patient, `appointment:read` | List verified doctors with free slot counts; hospital selection is not required |
+| GET | `/doctor/appointments?date=YYYY-MM-DD` | Assigned doctor, `appointment:read` | List own hospital-scoped appointments and patient waiting state |
+| POST | `/:appointmentId/waiting` | Patient, `appointment:read` | Enter waiting room at/after the confirmed appointment time |
+| POST | `/:appointmentId/send-link` | Assigned doctor, `appointment:confirm` | After appointment confirmation, create a private Daily room and deliver a patient inbox link; patient waiting room is optional |
+| POST | `/join/:token` | Patient or assigned doctor, `appointment:read` | Validate the random link and issue a Daily participant token |
+| POST | `/:appointmentId/doctor-join` | Assigned doctor, `appointment:read` | Issue a scoped Daily token after the patient opens the link; supports doctor rejoin after dashboard reload |
+| POST | `/:appointmentId/doctor-join` | Assigned doctor, `appointment:read` | Issue a room-scoped Daily token after the invited patient opens the link; supports doctor rejoin after dashboard reload |
+| GET | `/:appointmentId/status` | Assigned patient or doctor, `appointment:read` | Poll consultation state and remaining time |
+| POST | `/:appointmentId/start` | Assigned doctor, `appointment:confirm` | Start the one-time 30-minute server timer and shorten Daily room expiry |
+| POST | `/:appointmentId/end` | Assigned doctor, `appointment:confirm` | End provider room and complete appointment |
+| PUT | `/:appointmentId/notes` | Assigned doctor, `telemedicine:notes` | Save SHA-256 hashed, versioned clinician notes |
+
+Daily credentials may be supplied by server environment variables (`DAILY_API_KEY`, `DAILY_DOMAIN`) or configured by a `system_admin` in Admin > Video Provider Settings. Admin-entered keys are verified against Daily before saving and encrypted with AES-256-GCM; only the domain and connection state are returned to clients. Admin storage requires a persistent 32-byte hex `VIDEO_CONFIG_ENCRYPTION_KEY`. Set `CLIENT_ORIGIN` to the public frontend origin in deployed environments so patient notifications contain the correct URL; local development can use the requesting localhost origin. With no valid provider configuration, issuing/joining video returns `VIDEO_PROVIDER_BLOCKED`; the dashboard reports the provider error and disables live-call controls. Direct-call mutation bodies include a UUID `clientMutationId` for sync-ledger replay protection. Direct calls are restricted to the signed-in doctor and a verified patient account associated with that doctor's hospital. The patient can accept or reject an incoming call; the doctor can start only after acceptance. For appointment calls, assigned future requests remain in the doctor queue; the doctor accepts the request, sends the private link, and joins after the patient opens it. The patient waiting-room endpoint remains available. Existing appointment-linked consultation and text teleconsultation flows remain available. SMS and email dispatch remain blocked by the simulation notification adapters and are not represented as delivered.
+
+## Patient Dashboard Portal (Additive)
+
+All new routes use `requireAuth`, patient role and patient ownership checks. Mutations use UUID mutation IDs and `SyncLedger` where applicable. The full route and ownership map is in `PATIENT_DASHBOARD_PORTAL.md`.
+
+| Method | Path | Capability | Purpose |
+|---|---|---|---|
+| GET | `/api/patient/profile` | `patient:read_own` | Read safe fields for the signed-in patient |
+| PUT | `/api/patient/profile` | `patient:profile_own` | Update only allowlisted profile fields with `consentGiven: true` and UUID `mutationId` |
+| GET / POST | `/api/patient/screenings/:screeningId/chat` | `patient:read_own` / `patient:chat_own` | Read or append a screening-scoped, patient-owned AI chat |
+| GET / POST | `/api/patient/support-tickets` | `patient:read_own` / `patient:support_own` | Read or idempotently create patient-owned support tickets |
+| GET | `/api/v1/notifications/preferences` | `notification:read_own` | Read the signed-in user’s reminder channels, topics, and language |
+| PUT | `/api/v1/notifications/preferences` | `notification:manage_own` | Update reminder preferences; UUID `mutationId` writes are replay-safe through `SyncLedger` |
+| GET | `/api/patient/treatment-plans` | `patient:read_own` | List the signed-in patient’s treatment plans |
+| POST | `/api/patient/treatment-plans/from-prescription` | `patient:treatment_own` | Create an additive tracking plan from an owned prescription |
+| GET | `/api/patient/treatment-plans/:treatmentPlanId` | `patient:read_own` | Read an owned plan |
+| GET | `/api/patient/treatment-plans/:treatmentPlanId/logs` | `patient:read_own` | Read up to 90 logs for an owned plan |
+| POST | `/api/patient/treatment-logs` | `patient:treatment_own` | Idempotently save a daily medicine check-in and optional patient note |
+| POST | `/api/patient/treatment-plans/:treatmentPlanId/photos` | `patient:treatment_own` | Upload a consented progress photo to private storage with SHA-256 and UUID replay protection |
+| GET | `/api/v1/storage/files/:fileId` | Patient owner or `storage:read_clinical` | Stream a private file after ownership/scope checks; no public file URLs |
+
+Patient auth remains on the existing `/api/v1/auth/patient/*` and `/api/v1/patient/auth/*` routes. Existing screening, prescription, appointment, notification, and referral endpoints are reused without route renames. The appointment creation endpoint now requires explicit consent when report/profile sharing fields are requested and records consent scope/time in the existing `visitDetails` field.
+
+### Appointment requests and live room transport (additive)
+
+| Method | Path / event | Access | Request / behavior |
+|---|---|---|---|
+| POST | `/api/v1/appointments/:id/doctor-response` | Assigned `medical_officer` or `specialist_doctor`, `appointment:confirm` | `{ mutationId: UUID, decision: "accept" | "decline", declineReason?: string }`; records the response, and a decline sends an in-app patient update. Replays use `sync_ledgers`. |
+| POST | `/api/v1/appointments/:id/cancel` | Appointment owner or in-scope staff, `appointment:cancel` | `{ reason: string, mutationId?: UUID }`; UUID mutations are replay-safe and ownership / facility scope is checked. |
+| PATCH | `/api/v1/appointments/:id/respond-new-time` | Patient owner or in-scope staff, `appointment:reschedule` | `{ accept: boolean, mutationId?: UUID }`; accepts or declines the pending proposed time. |
+| Socket.IO connect | `/socket.io` | Signed access token in handshake auth | `{ auth: { token } }`; simulation tokens are denied. |
+| Socket.IO `consultation:join` | Client → server | Patient on their own appointment, or its assigned doctor | `{ appointmentId }`; online mode, confirmation, ownership, facility assignment, and appointment time window are checked. |
+| Socket.IO `consultation:joined` | Server → client | Authorized room participant | `{ appointmentId, role, peerPresent, iceServers }`; ICE config is returned only after authorization. |
+| Socket.IO `consultation:participant-ready` | Server → room peer | Authorized room participant | Indicates the opposite-role participant entered the room. |
+| Socket.IO `webrtc:signal` | Both directions | Room member only | Relays only SDP offer/answer and ICE candidates. Application servers do not relay or store media bytes. |
+| Socket.IO `consultation:leave` | Client → server | Current room participant | Leaves the room and notifies its peer. |
+
+ICE configuration is server-only: `STUN_URLS` (comma-separated), `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL`. The sample STUN service is a development default; production deployments should configure a managed STUN/TURN service or Coturn. Existing Daily.co consultation routes remain available.
+
+
+### Doctor workflow extension (2026-11-12)
+
+Doctor sidebar destinations now remain under `/doctor/:section` (queue, appointments, high-risk, referrals, biopsy, patients, availability). Admin doctor provisioning uses the existing hospital doctor API and private storage; approval requires qualification documents and council registration.
+
+- `GET/POST /api/v1/consultations/doctor/availability`: authenticated approved doctor publishes future 20-minute slots in India time; POST accepts `{startTime: ISO, mutationId: UUID}` and returns `{slot}`. GET returns own `{slots}`.
+- `GET /api/v1/consultations/availability/:doctorId?date=YYYY-MM-DD`: authenticated appointment reader receives published slots and availability. Existing patient availability listing now counts doctor-published slots. Booking validates the doctor, facility and exact published slot. Existing facility conflict protection remains in place.
+- `GET /api/v1/consultations/doctor/patients/:patientId/records`: approved doctor with patient-read capability; facility-scoped, audited patient, screenings, clinical cases, prescriptions, appointments, consultations and versioned notes. No cross-facility search.
+- Additive `doctorslots` collection: doctorId, hospitalId, startTime, endTime, mutationId; unique doctor/start and mutation indexes.
+- Additive `consultationchats` collection: messageId (unique), appointmentId, senderId, role, text (immutable), SHA-256 (immutable), timestamps. Socket chat uses authenticated appointment rooms, bounded messages and idempotent message IDs. History is returned only after room authorization. Doctor starts the room before patient joins.
+- Prescriptions add optional immutable SHA-256 and sparse unique mutationId fields. Existing documents remain valid. New prescriptions resolve doctor/patient/facility names server-side and require approved treating doctor access. UI starts with empty clinician-authored medicine fields.
+- Verification: consultationSocket tests cover doctor-first room access, signaling and saved chat replay; appointmentsManagement tests cover slot publication, publication authorization and replay; module smoke, backup/restore and secret-scanner checks. Real camera/audio testing across two devices and network TURN relay remains an operational acceptance check.

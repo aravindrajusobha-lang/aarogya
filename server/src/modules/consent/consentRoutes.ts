@@ -47,6 +47,30 @@ router.post(
     try {
       const { patientId, purpose, validUntil, witnessName, language, termsVersion } = req.body;
 
+      if (req.user!.role === 'patient' && req.user!.patientId !== patientId) {
+        res.envelopeError('FORBIDDEN', 'Patients may only grant consent for their own record.', undefined, 403);
+        return;
+      }
+
+      const activeConsent = await Consent.findOne({
+        patientId,
+        purpose,
+        status: 'granted',
+        validUntil: { $gt: new Date() },
+      });
+      if (activeConsent) {
+        res.status(200).envelope({
+          consentId: activeConsent.consentId,
+          patientId: activeConsent.patientId,
+          purpose: activeConsent.purpose,
+          status: activeConsent.status,
+          validUntil: activeConsent.validUntil,
+          grantedAt: activeConsent.grantedAt,
+          simulation: true,
+        }, 'Existing patient consent remains active');
+        return;
+      }
+
       // If existing active consent for this patient & purpose, supersede it
       await Consent.updateMany(
         { patientId, purpose, status: 'granted' },

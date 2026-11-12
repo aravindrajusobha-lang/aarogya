@@ -125,17 +125,18 @@ export async function savePrivateFile(input: SaveFileInput): Promise<IStoredFile
 function verifyFileAccess(record: IStoredFile, user: AuthenticatedUser): void {
   // 1. Role / Scope Check
   const hasScope = record.accessScopes.some((scope: string) => user.scopes.includes(scope));
-  if (!hasScope && user.role !== 'admin') {
+  const isOwnPatientFile = user.role === 'patient' && Boolean(user.patientId) && record.patientId === user.patientId;
+  if (!hasScope && !isOwnPatientFile && user.role !== 'admin' && user.role !== 'system_admin') {
     const error = new Error('Insufficient permissions to access this clinical file');
     (error as any).statusCode = 403;
-    (error as any).code = 'FORBIDDEN_FILE_ACCESS';
+    (error as any).code = 'FORBIDDEN';
     throw error;
   }
 
   // 2. Cross-Hospital Denial (Invariant 7)
   const userHospitalId = (user as any).hospitalId;
   if (
-    user.role !== 'admin' &&
+    user.role !== 'admin' && user.role !== 'system_admin' &&
     record.hospitalId &&
     userHospitalId &&
     record.hospitalId !== userHospitalId

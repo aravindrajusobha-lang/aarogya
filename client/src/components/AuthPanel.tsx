@@ -9,6 +9,13 @@ export interface AuthUser {
   patientId?: string;
   phone?: string;
   abhaNumber?: string;
+  verificationStatus?: string;
+  yearOfBirth?: number;
+  gender?: 'male' | 'female' | 'transgender' | 'other';
+  address?: string;
+  village?: string;
+  mandal?: string;
+  pincode?: string;
   capabilities: string[];
 }
 

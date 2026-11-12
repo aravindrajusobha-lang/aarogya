@@ -3,6 +3,7 @@ import { UserRole } from '../modules/auth/userModel.js';
 import { verifyAccessToken } from '../modules/auth/tokenService.js';
 import { isDeviceSessionActive } from '../modules/auth/deviceService.js';
 import { getRoleCapabilities, hasCapability } from '../modules/auth/authorizationEngine.js';
+import { User } from '../modules/auth/userModel.js';
 
 export interface AuthenticatedUser {
   id: string;
@@ -80,12 +81,21 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       }
     }
 
+    const dbUser: any = await User.findOne({ userId: payload.sub })
+      .select('userId fullName username role hospitalId patientId')
+      .lean();
+
     req.user = {
       id: payload.sub,
+      userId: dbUser?.userId || payload.sub,
       role: payload.role,
       scopes: payload.scopes || getRoleCapabilities(payload.role),
       deviceSessionId: payload.deviceSessionId,
       deviceId: payload.deviceId,
+      hospitalId: dbUser?.hospitalId,
+      fullName: dbUser?.fullName,
+      username: dbUser?.username,
+      patientId: dbUser?.patientId,
     };
 
     next();
@@ -131,12 +141,20 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
       }
     }
 
+    const dbUser: any = await User.findOne({ userId: payload.sub })
+      .select('userId fullName username role hospitalId patientId')
+      .lean();
     req.user = {
       id: payload.sub,
+      userId: dbUser?.userId || payload.sub,
       role: payload.role,
       scopes: payload.scopes || getRoleCapabilities(payload.role),
       deviceSessionId: payload.deviceSessionId,
       deviceId: payload.deviceId,
+      hospitalId: dbUser?.hospitalId,
+      fullName: dbUser?.fullName,
+      username: dbUser?.username,
+      patientId: dbUser?.patientId,
     };
     return next();
   } catch {

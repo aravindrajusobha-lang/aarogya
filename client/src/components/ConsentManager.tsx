@@ -17,18 +17,19 @@ interface ConsentManagerProps {
 }
 
 export const ConsentManager: React.FC<ConsentManagerProps> = ({ patientId, accessToken }) => {
+  const [targetPatientId, setTargetPatientId] = useState(patientId);
   const [consents, setConsents] = useState<ConsentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [selectedPurpose, setSelectedPurpose] = useState<'screening_ai_analysis' | 'telemedicine_share' | 'data_storage'>('screening_ai_analysis');
-  const [witnessName, setWitnessName] = useState('Village Health Leader (Sarpanch)');
+  const [witnessName, setWitnessName] = useState('');
   const [consentLang, setConsentLang] = useState('te'); // Default Telugu for ITDA Paderu
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   const fetchConsents = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/consent/patient/${patientId}`, {
+      const res = await fetch(`/api/v1/consent/patient/${encodeURIComponent(targetPatientId)}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const env = await res.json();
@@ -43,10 +44,12 @@ export const ConsentManager: React.FC<ConsentManagerProps> = ({ patientId, acces
   };
 
   useEffect(() => {
-    if (patientId && accessToken) {
+    if (targetPatientId && accessToken) {
       fetchConsents();
     }
-  }, [patientId, accessToken]);
+  }, [targetPatientId, accessToken]);
+
+  useEffect(() => setTargetPatientId(patientId), [patientId]);
 
   const handleGrantConsent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +61,7 @@ export const ConsentManager: React.FC<ConsentManagerProps> = ({ patientId, acces
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          patientId,
+          patientId: targetPatientId,
           purpose: selectedPurpose,
           witnessName,
           language: consentLang,
@@ -118,8 +121,10 @@ export const ConsentManager: React.FC<ConsentManagerProps> = ({ patientId, acces
         <div>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>📋 DPDP Act Consent Management</h3>
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-            Informed patient consent tracking for Patient ID: <code>{patientId}</code>
+            Informed patient consent tracking for a saved patient record.
           </p>
+          <label className="form-label" htmlFor="consent-patient-id">Patient ID</label>
+          <input id="consent-patient-id" className="form-input" value={targetPatientId} onChange={(event) => setTargetPatientId(event.target.value)} required />
         </div>
         <button
           type="button"

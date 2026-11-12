@@ -45,7 +45,7 @@ patientSchema.pre("validate", function (next) {
   if (!this.ageEstimated && this.age) {
     this.ageEstimated = this.age;
   }
-  next();
+  if (typeof next === 'function') next();
 });
 
 const Patient = mongoose.models.Patient || mongoose.model("Patient", patientSchema);

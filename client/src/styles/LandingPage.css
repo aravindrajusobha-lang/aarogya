@@ -512,23 +512,23 @@
 
 /* Highlighted Dental / Oral Screening Card (Mediax Style) */
 .service-card.highlighted {
-  background: linear-gradient(135deg, #091a32 0%, #032d42 100%);
-  color: #ffffff;
-  border: 2px solid #38bdf8;
-  box-shadow: 0 12px 32px rgba(2, 132, 199, 0.3);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 2px solid var(--accent);
+  box-shadow: 0 10px 24px rgba(18, 60, 48, 0.12);
 }
 
 .service-card.highlighted .service-title {
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
 .service-card.highlighted .service-desc {
-  color: #cbd5e1;
+  color: var(--text-secondary);
 }
 
 .service-card.highlighted .service-icon-wrap {
-  background: rgba(56, 189, 248, 0.2);
-  border-color: #38bdf8;
+  background: var(--success-bg);
+  border-color: var(--accent);
 }
 
 .service-icon-wrap {
@@ -574,7 +574,7 @@
 }
 
 .service-card.highlighted .service-action-link {
-  color: #38bdf8;
+  color: var(--accent);
 }
 
 /* --------------------------------------------------------------------------
@@ -633,17 +633,17 @@
    7. STATISTICS RIBBON BAR
    -------------------------------------------------------------------------- */
 .stats-ribbon-bar {
-  background: linear-gradient(90deg, #07152b 0%, #0c2340 100%);
-  color: #ffffff;
-  border-radius: 20px;
+  background: #173F35;
+  color: #F7F1DF;
+  border-radius: 8px;
   padding: 36px 32px;
   margin: 40px auto;
   max-width: 1240px;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 24px;
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(247, 241, 223, 0.18);
+  box-shadow: 0 12px 30px rgba(18, 60, 48, 0.12);
 }
 
 .stats-ribbon-item {
@@ -664,7 +664,7 @@
 .stats-num {
   font-size: 2.3rem;
   font-weight: 800;
-  color: #38bdf8;
+  color: #F7F1DF;
   line-height: 1.1;
   margin-bottom: 6px;
 }

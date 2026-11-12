@@ -30,6 +30,8 @@ export interface OfflineAiScreening {
   moduleB?: any;
   moduleC?: any;
   combinedRecommendation?: any;
+  consentGiven?: boolean;
+  consentTimestamp?: string;
   photoDataUrl?: string;
   dentalPhotoDataUrl?: string;
   syncStatus: 'PENDING_SYNC' | 'SYNCED' | 'FAILED';

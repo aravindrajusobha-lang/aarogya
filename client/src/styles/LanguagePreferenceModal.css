@@ -1,0 +1,11 @@
+.language-preference-card button:focus-visible {
+  outline: 3px solid rgba(23, 107, 91, .38);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .language-preference-card {
+    padding: 18px !important;
+    border-radius: 16px !important;
+  }
+}

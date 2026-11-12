@@ -40,9 +40,11 @@ Aarogya-Drishti is a community-based oral mucosal screening and healthcare navig
 - Every client mutation must include a unique `mutationId` (UUID v4).
 - The backend checks `sync_ledgers` before executing business logic. Replays of identical mutations return the cached status code and payload without creating duplicates.
 
-### Invariant 5: Zero Real Patient Data & Zero Raw Aadhaar Storage
-- No real patient PII is ever loaded. All seed data consists of synthetic demo personas.
-- Raw 12-digit Aadhaar numbers MUST NEVER be stored, transmitted, or logged. Only masked fragments (e.g. `XXXX-XXXX-1234`) or synthetic tokens are permitted.
+### Invariant 5: Aadhaar-Minimized Patient Data
+- All seed data consists of synthetic demo personas. Real Aadhaar card processing is limited to the consented patient self-registration flow.
+- Aadhaar QR decoding and OCR MUST run in the browser. Card images, QR payloads, and full 12-digit Aadhaar numbers MUST NEVER be transmitted, persisted, or logged. Full Aadhaar digits may exist only transiently in browser memory for local Verhoeff validation, then MUST be cleared after registration or tab exit.
+- With explicit consent, only the registration profile fields `name`, `yearOfBirth`, `gender`, `address`, `village`, `mandal`, `pincode`, and optional contact `mobile` may be transmitted and stored for the patient account. Aadhaar suffixes and Aadhaar-derived hashes are not sent or stored. Returning patients may use the existing Mobile OTP login; registration itself never requires OTP.
+- Offline registration payloads, when queued, MUST use the existing encrypted IndexedDB queue and MUST exclude Aadhaar digits and card images.
 - Verbatim address landmarks (e.g. "Near Old Mango Tree, Dumbriguda") must be preserved unmutated to respect tribal geography.
 
 ### Invariant 6: Cryptographic Immutability of Clinical Artefacts

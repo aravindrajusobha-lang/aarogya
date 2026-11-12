@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthUser } from './AuthPanel';
+import { clearStoredAuth, readStoredAuth, validateAccessToken } from '../utils/session';
 
 export interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -16,20 +17,42 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   onRedirectToLogin,
   onRedirectToDashboard,
 }) => {
-  // Check user authentication from props or localStorage
-  const activeUser: AuthUser | null = currentUser || (() => {
-    try {
-      const saved = localStorage.getItem('aarogya_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  })();
+  const [checkedUser, setCheckedUser] = useState<AuthUser | null | undefined>(undefined);
 
-  const token = localStorage.getItem('aarogya_token') || localStorage.getItem('aarogya_tokens');
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (currentUser) {
+        if (!cancelled) setCheckedUser(currentUser);
+        return;
+      }
+      const stored = readStoredAuth();
+      if (!stored.user || !stored.tokens?.accessToken) {
+        if (!cancelled) setCheckedUser(null);
+        return;
+      }
+      const validated = await validateAccessToken(stored.tokens.accessToken);
+      if (!cancelled) setCheckedUser((validated as AuthUser | null) || null);
+      if (!validated) clearStoredAuth();
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
-  // If unauthenticated, redirect to login
-  if (!activeUser || !token) {
+  if (checkedUser === undefined) {
+    return (
+      <div className="login-page-root" aria-live="polite">
+        <div className="login-card" style={{ textAlign: 'center' }}>
+          <div className="login-logo">??</div>
+          <h2 className="login-title">Checking session�</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (!checkedUser) {
     if (onRedirectToLogin) {
       onRedirectToLogin();
     } else {
@@ -38,7 +61,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return (
       <div className="login-page-root">
         <div className="login-card" style={{ textAlign: 'center' }}>
-          <div className="login-logo">🔒</div>
+          <div className="login-logo">??</div>
           <h2 className="login-title">Authentication Required</h2>
           <p className="login-sub">Please log in to access this clinical dashboard.</p>
           <button
@@ -49,65 +72,29 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           >
             Go to Login
           </button>
-          <div style={{ marginTop: '12px' }}>
-            <button
-              type="button"
-              className="dash-btn dash-btn-outline"
-              style={{ fontSize: '0.82rem', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
-              onClick={() => {
-                if (window.history.length > 1) {
-                  window.history.back();
-                } else {
-                  window.location.hash = '#/';
-                }
-              }}
-            >
-              ← Go Back
-            </button>
-          </div>
         </div>
       </div>
     );
   }
 
-  // Role validation
   if (allowedRoles && allowedRoles.length > 0) {
-    const userRole = (activeUser.role || '').toUpperCase();
+    const userRole = (checkedUser.role || '').toUpperCase();
     const isAuthorized = allowedRoles.some((role) => {
       const targetRole = role.toUpperCase();
-      if (targetRole === 'ADMIN' && (userRole === 'SYSTEM_ADMIN' || userRole === 'ADMIN' || userRole === 'DISTRICT_OFFICER')) {
-        return true;
-      }
-      if (
-        targetRole === 'DOCTOR' &&
-        (userRole === 'DOCTOR' ||
-          userRole === 'SPECIALIST_DOCTOR' ||
-          userRole === 'MEDICAL_OFFICER' ||
-          userRole === 'CHIEF_MEDICAL_OFFICER' ||
-          userRole === 'HOSPITAL_MANAGER')
-      ) {
-        return true;
-      }
-      if (targetRole === 'PATIENT' && (userRole === 'PATIENT' || userRole === 'COMMUNITY_VOLUNTEER')) {
-        return true;
-      }
+      if (targetRole === 'ADMIN' && (userRole === 'SYSTEM_ADMIN' || userRole === 'ADMIN' || userRole === 'DISTRICT_OFFICER')) return true;
+      if (targetRole === 'DOCTOR' && (userRole === 'DOCTOR' || userRole === 'SPECIALIST_DOCTOR' || userRole === 'MEDICAL_OFFICER' || userRole === 'CHIEF_MEDICAL_OFFICER' || userRole === 'HOSPITAL_MANAGER')) return true;
+      if (targetRole === 'PATIENT' && (userRole === 'PATIENT' || userRole === 'COMMUNITY_VOLUNTEER')) return true;
       return userRole === targetRole;
     });
 
     if (!isAuthorized) {
-      if (onRedirectToDashboard) {
-        onRedirectToDashboard(userRole);
-      }
+      if (onRedirectToDashboard) onRedirectToDashboard(userRole);
       return (
         <div className="login-page-root">
           <div className="login-card" style={{ textAlign: 'center' }}>
-            <div className="login-logo" style={{ background: 'linear-gradient(135deg, #f43f5e, #be123c)' }}>
-              ⚠️
-            </div>
+            <div className="login-logo" style={{ background: 'linear-gradient(135deg, #f43f5e, #be123c)' }}>??</div>
             <h2 className="login-title">Access Restricted</h2>
-            <p className="login-sub">
-              Your account role (<strong>{userRole}</strong>) does not have permission for this portal.
-            </p>
+            <p className="login-sub">Your account role (<strong>{userRole}</strong>) does not have permission for this portal.</p>
             <button
               type="button"
               className="login-submit-btn"
@@ -115,61 +102,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
                 if (userRole.includes('ADMIN')) window.location.hash = '#/admin';
                 else if (userRole.includes('DOCTOR') || userRole.includes('MEDICAL')) window.location.hash = '#/doctor';
                 else if (userRole.includes('PATIENT')) window.location.hash = '#/patient';
-                else window.location.hash = '#/';
+                else window.location.hash = '#/login';
               }}
               style={{ marginTop: '20px' }}
             >
               Return to Your Authorized Dashboard
             </button>
-
-            <div style={{ display: 'flex', gap: '10px', marginTop: '12px', justifyContent: 'center' }}>
-              <button
-                type="button"
-                className="dash-btn dash-btn-outline"
-                style={{
-                  fontSize: '0.82rem',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  flex: 1,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                }}
-                onClick={() => {
-                  if (window.history.length > 1) {
-                    window.history.back();
-                  } else {
-                    window.location.hash = '#/';
-                  }
-                }}
-              >
-                <span>←</span>
-                <span>Go Back</span>
-              </button>
-              <button
-                type="button"
-                className="dash-btn dash-btn-outline"
-                style={{
-                  fontSize: '0.82rem',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  flex: 1,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                }}
-                onClick={() => {
-                  window.location.hash = '#/login';
-                }}
-              >
-                <span>🔑</span>
-                <span>Switch Account</span>
-              </button>
-            </div>
           </div>
         </div>
       );
@@ -180,4 +118,3 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 };
 
 export default ProtectedRoute;
-

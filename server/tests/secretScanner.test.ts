@@ -53,7 +53,14 @@ describe('Phase 20: Repository Secret Scanner & Hygiene Verification', () => {
     const violations: { file: string; line: number }[] = [];
 
     for (const file of allFiles) {
-      if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.ico') || file.endsWith('.dat')) {
+      if (
+        file.endsWith('.png') ||
+        file.endsWith('.jpg') ||
+        file.endsWith('.ico') ||
+        file.endsWith('.dat') ||
+        file.endsWith('.onnx') ||
+        file.endsWith('.onnx.data')
+      ) {
         continue;
       }
 
@@ -77,7 +84,14 @@ describe('Phase 20: Repository Secret Scanner & Hygiene Verification', () => {
     const violations: { file: string; match: string }[] = [];
 
     for (const file of allFiles) {
-      if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.ico') || file.endsWith('.dat')) {
+      if (
+        file.endsWith('.png') ||
+        file.endsWith('.jpg') ||
+        file.endsWith('.ico') ||
+        file.endsWith('.dat') ||
+        file.endsWith('.onnx') ||
+        file.endsWith('.onnx.data')
+      ) {
         continue;
       }
 

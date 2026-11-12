@@ -18,6 +18,26 @@ export interface ImageQualityCheckResult {
   brightness: number;
 }
 
+export interface IGeminiPatientEducation {
+  anatomicalSite?: string;
+  conditionCategory?: string;
+  recommendedDoctor?: { specialty?: string; facility?: string };
+  patientExplanation?: string;
+  imageObservation?: string;
+  possibleConditions?: string[];
+  riskFactors?: string[];
+  possibleCauses?: string[];
+  thingsToAvoid?: string[];
+  whatToTellClinician?: string[];
+  whenToConsult?: string[];
+  whenToSeekReview?: string[];
+  riskCategory?: 'low' | 'moderate' | 'high';
+  informationSources?: Array<{ label: string; url: string }>;
+  analyzedByModel?: string;
+  answerText?: string;
+  observedCondition?: string;
+}
+
 export interface IMucosalLesionResult {
   label: string | null;
   confidence: number;
@@ -27,9 +47,10 @@ export interface IMucosalLesionResult {
   source: 'server' | 'on-device';
   imageQuality: ImageQualityCheckResult;
   imageRef?: string;
+  screeningId?: string;
   classes?: string[];
   is_placeholder?: boolean;
-  geminiAnalysis?: any;
+  geminiAnalysis?: IGeminiPatientEducation & Record<string, unknown>;
 }
 
 export interface IDentalFinding {
@@ -204,52 +225,7 @@ function preprocessCanvasToCHW(canvas: HTMLCanvasElement): Float32Array {
   return floatArray;
 }
 
-// Helper: Client-side visual feature extractor fallback (for high-accuracy analysis if ONNX WASM is blocked)
-export function analyzeVisualFeaturesClient(canvas: HTMLCanvasElement): {
-  erythemaRatio: number;
-  yellowRatio: number;
-  whiteRatio: number;
-  darkRatio: number;
-} {
-  const w = Math.min(canvas.width, 224);
-  const h = Math.min(canvas.height, 224);
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = w;
-  tempCanvas.height = h;
-  const tempCtx = tempCanvas.getContext('2d')!;
-  tempCtx.drawImage(canvas, 0, 0, w, h);
-  const data = tempCtx.getImageData(0, 0, w, h).data;
-
-  let redCount = 0;
-  let yellowCount = 0;
-  let whiteCount = 0;
-  let darkCount = 0;
-  const totalPixels = w * h;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const sumGB = g + b + 0.001;
-    // Inflamed erythematous mucosal tissue
-    if (r / sumGB > 1.25 && r > 110) redCount++;
-    // Yellow staining / calculus / plaque
-    if ((r + g) / (2 * b + 0.001) > 1.30 && r > 120 && g > 95) yellowCount++;
-    // Keratotic white plaque (leukoplakia)
-    if (r > 215 && g > 210 && b > 200) whiteCount++;
-    // Dark cavitations or necrotic tissue
-    if (r < 55 && g < 40 && b < 40) darkCount++;
-  }
-
-  return {
-    erythemaRatio: redCount / totalPixels,
-    yellowRatio: yellowCount / totalPixels,
-    whiteRatio: whiteCount / totalPixels,
-    darkRatio: darkCount / totalPixels,
-  };
-}
-
-// Helper: Ensure valid demo authentication token so server API calls succeed seamlessly
+// Read the token from the existing login session. Screening never creates a session.
 export async function getEffectiveToken(token?: string): Promise<string | null> {
   if (token && token.length > 10) return token;
   try {
@@ -263,49 +239,47 @@ export async function getEffectiveToken(token?: string): Promise<string | null> 
     }
   } catch {}
 
-  // Auto-acquire demo frontline worker session if unauthenticated
-  const credentials = [
-    { username: 'asha.pad01', password: 'AarogyaDemo@2026' },
-    { username: 'asha.pad01', password: 'Asha@2026' },
-  ];
-
-  for (const cred of credentials) {
-    try {
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cred),
-      });
-      const json = await res.json();
-      if (json.success && json.data) {
-        const authTokens = {
-          accessToken: json.data.accessToken || json.data.tokens?.accessToken,
-          refreshToken: json.data.refreshToken || json.data.tokens?.refreshToken,
-          deviceSessionId: json.data.deviceSessionId || json.data.tokens?.deviceSessionId || '',
-        };
-        localStorage.setItem('aarogya_token', authTokens.accessToken);
-        localStorage.setItem('aarogya_tokens', JSON.stringify(authTokens));
-        localStorage.setItem('aarogya_user', JSON.stringify(json.data.user));
-        return authTokens.accessToken;
-      }
-    } catch {}
-  }
-
   return null;
+}
+
+export async function recordScreeningConsent(
+  patientId: string,
+  token: string | undefined,
+  language: string = 'en',
+  witnessName?: string
+): Promise<void> {
+  if (!patientId) throw new Error('A valid patient record is required before screening.');
+  if (!navigator.onLine) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(`aarogya_screening_consent_${patientId}`) || 'null');
+      if (cached?.status === 'granted' && new Date(cached.validUntil).getTime() > Date.now()) return;
+    } catch {}
+    throw new Error('Connect once to record screening consent before using offline screening.');
+  }
+  const effectiveToken = await getEffectiveToken(token);
+  if (!effectiveToken) throw new Error('Sign in to record consent and save screening results.');
+
+  const response = await fetch('/api/v1/consent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${effectiveToken}` },
+    body: JSON.stringify({ patientId, purpose: 'screening_ai_analysis', language, witnessName, termsVersion: '1.0.0' }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.error?.message || 'Patient screening consent could not be recorded.');
+  }
+  try {
+    localStorage.setItem(`aarogya_screening_consent_${patientId}`, JSON.stringify({ status: 'granted', validUntil: payload.data?.validUntil }));
+  } catch {}
 }
 
 // =============================================================================
 // 3. Module A: On-Device Mucosal Inference (WASM with Feature Fallback)
 // =============================================================================
-async function runOnDeviceMucosalInference(canvas: HTMLCanvasElement): Promise<IMucosalLesionResult> {
+async function runOnDeviceMucosalInference(canvas: HTMLCanvasElement, imageQuality: ImageQualityCheckResult): Promise<IMucosalLesionResult> {
   try {
     if (!oralSession) {
-      oralSession = await ort.InferenceSession.create('/models/oral_model.onnx', {
-        executionProviders: ['wasm'],
-      }).catch((err) => {
-        console.warn('ONNX WASM session load skipped, using calibrated visual analyzer:', err);
-        return null;
-      });
+      oralSession = await ort.InferenceSession.create('/models/oral_model.onnx', { executionProviders: ['wasm'] });
     }
 
     if (!oralSession) {
@@ -355,62 +329,22 @@ async function runOnDeviceMucosalInference(canvas: HTMLCanvasElement): Promise<I
       referToSpecialist,
       modelVersion: 'v2.0.0-onnx-on-device',
       source: 'on-device',
-      imageQuality: { ok: true, reason: null, blurScore: 100, brightness: 120 },
+      imageQuality,
+      is_placeholder: false,
       classes: activeClasses,
     };
   } catch (wasmErr) {
-    console.warn('WASM inference fallback to calibrated visual features:', wasmErr);
-    const vf = analyzeVisualFeaturesClient(canvas);
-    let label = 'normal';
-    let conf = 0.88;
-    const probs: Record<string, number> = {
-      normal: 0.88,
-      benign_inflammatory: 0.08,
-      opmd: 0.03,
-      suspected_malignant: 0.01,
-    };
-
-    if (vf.erythemaRatio > 0.20) {
-      label = 'benign_inflammatory';
-      conf = Math.min(0.96, Math.max(0.78, 0.70 + vf.erythemaRatio * 0.4));
-      probs.benign_inflammatory = conf;
-      probs.normal = Math.round((1 - conf) * 0.7 * 100) / 100;
-      probs.opmd = Math.round((1 - conf) * 0.2 * 100) / 100;
-      probs.suspected_malignant = Math.round((1 - conf) * 0.1 * 100) / 100;
-    } else if (vf.whiteRatio > 0.12) {
-      label = 'opmd';
-      conf = 0.84;
-      probs.opmd = 0.84;
-      probs.normal = 0.10;
-      probs.benign_inflammatory = 0.04;
-      probs.suspected_malignant = 0.02;
-    }
-
-    return {
-      label,
-      confidence: conf,
-      probabilities: probs,
-      referToSpecialist: ['opmd', 'suspected_malignant'].includes(label) || conf < 0.60,
-      modelVersion: 'v2.0.0-client-calibrated',
-      source: 'on-device',
-      imageQuality: { ok: true, reason: null, blurScore: 95, brightness: 120 },
-      classes: DEFAULT_LESION_CLASSES,
-    };
+    throw new Error(`On-device oral screening model could not run: ${wasmErr instanceof Error ? wasmErr.message : 'model unavailable'}`);
   }
 }
 
 // =============================================================================
 // 4. Module B: On-Device Dental Inference (WASM with Feature Fallback)
 // =============================================================================
-async function runOnDeviceDentalInference(canvas: HTMLCanvasElement): Promise<IDentalResult> {
+async function runOnDeviceDentalInference(canvas: HTMLCanvasElement, imageQuality: ImageQualityCheckResult): Promise<IDentalResult> {
   try {
     if (!dentalSession) {
-      dentalSession = await ort.InferenceSession.create('/models/dental_model.onnx', {
-        executionProviders: ['wasm'],
-      }).catch((err) => {
-        console.warn('Dental ONNX WASM session load skipped, using calibrated visual analyzer:', err);
-        return null;
-      });
+      dentalSession = await ort.InferenceSession.create('/models/dental_model.onnx', { executionProviders: ['wasm'] });
     }
 
     if (!dentalSession) {
@@ -452,44 +386,11 @@ async function runOnDeviceDentalInference(canvas: HTMLCanvasElement): Promise<ID
       seeDentistRecommended: anyFlagged,
       modelVersion: 'v2.0.0-dental-onnx-on-device',
       source: 'on-device',
-      imageQuality: { ok: true, reason: null, blurScore: 100, brightness: 120 },
+      imageQuality,
+      is_placeholder: false,
     };
   } catch (wasmErr) {
-    console.warn('WASM dental inference fallback to calibrated visual features:', wasmErr);
-    const vf = analyzeVisualFeaturesClient(canvas);
-    const findings: IDentalFinding[] = [];
-    let seeDentist = false;
-
-    DEFAULT_DENTAL_LABELS.forEach((lbl) => {
-      let prob = 0.15;
-      const threshold = DEFAULT_DENTAL_THRESHOLDS[lbl] || 0.50;
-
-      if (lbl === 'gingivitis') {
-        prob = vf.erythemaRatio > 0.15 ? Math.min(0.96, 0.70 + vf.erythemaRatio * 0.45) : 0.22;
-      } else if (lbl === 'discoloration') {
-        prob = vf.yellowRatio > 0.25 ? Math.min(0.94, 0.65 + vf.yellowRatio * 0.35) : 0.25;
-      } else if (lbl === 'calculus') {
-        prob = vf.yellowRatio > 0.30 ? Math.min(0.91, 0.60 + vf.yellowRatio * 0.35) : 0.20;
-      } else if (lbl === 'plaque_soft_deposit') {
-        prob = vf.yellowRatio > 0.20 ? Math.min(0.88, 0.55 + vf.yellowRatio * 0.30) : 0.25;
-      } else if (lbl === 'caries') {
-        prob = vf.darkRatio > 0.05 ? Math.min(0.85, 0.50 + vf.darkRatio * 3.0) : 0.18;
-      }
-
-      prob = Math.round(prob * 10000) / 10000;
-      const flagged = prob >= threshold;
-      if (flagged && lbl !== 'discoloration') seeDentist = true;
-
-      findings.push({ label: lbl, probability: prob, threshold, flagged });
-    });
-
-    return {
-      findings,
-      seeDentistRecommended: seeDentist,
-      modelVersion: 'v2.0.0-dental-calibrated',
-      source: 'on-device',
-      imageQuality: { ok: true, reason: null, blurScore: 95, brightness: 120 },
-    };
+    throw new Error(`On-device dental screening model could not run: ${wasmErr instanceof Error ? wasmErr.message : 'model unavailable'}`);
   }
 }
 
@@ -503,81 +404,65 @@ async function runOnDeviceDentalInference(canvas: HTMLCanvasElement): Promise<ID
 export async function analyzeMucosalLesion(
   canvas: HTMLCanvasElement,
   patientId: string,
-  hospitalId = 'HOSP-PADERU-01',
-  token?: string
+  hospitalId?: string,
+  token?: string,
+  consentGiven = false,
+  language: 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml' = 'en'
 ): Promise<IMucosalLesionResult> {
   const ctx = canvas.getContext('2d')!;
   const quality = evaluateImageQualityClient(canvas, ctx);
 
-  if (!quality.ok && (quality.brightness < 10 || quality.blurScore < 5)) {
-    return {
-      label: null,
-      confidence: 0,
-      probabilities: {},
-      referToSpecialist: true,
-      modelVersion: 'v1.0.0-quality-guard',
-      source: 'on-device',
-      imageQuality: quality,
-    };
-  }
+  if (!patientId) throw new Error('A valid patient record is required before screening.');
+  if (!consentGiven) throw new Error('Record patient consent before analyzing a screening photo.');
+  if (!quality.ok) throw new Error(quality.reason || 'Retake the photo before screening.');
 
   // 1. Try online server analysis
   const effectiveToken = await getEffectiveToken(token);
+  if (navigator.onLine && !effectiveToken) throw new Error('Sign in again to analyze and save this screening.');
   if (navigator.onLine && effectiveToken) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 65000);
     try {
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-      if (blob) {
-        const formData = new FormData();
-        formData.append('image', blob, 'mucosal.jpg');
-        formData.append('patientId', patientId);
-        formData.append('hospitalId', hospitalId);
-        formData.append('consentGiven', 'true');
+      if (!blob) throw new Error('The screening image could not be prepared. Please choose it again.');
+      const formData = new FormData();
+      formData.append('image', blob, 'mucosal.jpg');
+      formData.append('patientId', patientId);
+      if (hospitalId) formData.append('hospitalId', hospitalId);
+      formData.append('consentGiven', 'true');
+      formData.append('clientId', uuidv4());
+      formData.append('language', language);
 
-        let res = await fetch('/api/ai/analyze', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${effectiveToken}`,
-          },
-          body: formData,
-        });
-
-        // If expired 401, refresh token once
-        if (res.status === 401) {
-          const freshToken = await getEffectiveToken();
-          if (freshToken) {
-            res = await fetch('/api/ai/analyze', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${freshToken}` },
-              body: formData,
-            });
-          }
-        }
-
-        if (res.ok) {
-          const json = await res.json();
-          const d = json.data || json;
-          return {
-            label: d.label,
-            confidence: d.confidence,
-            probabilities: d.probabilities || {},
-            referToSpecialist: d.referToSpecialist,
-            modelVersion: d.modelVersion,
-            source: 'server',
-            imageQuality: d.imageQuality || quality,
-            imageRef: d.imageRef,
-            geminiAnalysis: d.geminiAnalysis,
-          };
-        }
+      const response = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${effectiveToken}` },
+        signal: controller.signal,
+        body: formData,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || 'Server screening analysis failed.');
       }
-    } catch {
-      // Fall through to on-device inference
+      const d = payload?.data || payload;
+      if (d?.isPlaceholder || d?.is_placeholder) throw new Error('The configured screening model is not available for analysis.');
+      return {
+        label: d.label,
+        confidence: d.confidence,
+        probabilities: d.probabilities || {},
+        referToSpecialist: d.referToSpecialist,
+        modelVersion: d.modelVersion,
+        source: 'server',
+        imageQuality: d.imageQuality || quality,
+        imageRef: d.imageRef,
+        screeningId: d.screeningId,
+        geminiAnalysis: d.geminiAnalysis,
+      };
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
-  // 2. Fallback to on-device WASM
-  const onDevice = await runOnDeviceMucosalInference(canvas);
-  onDevice.imageQuality = quality;
-  return onDevice;
+  return runOnDeviceMucosalInference(canvas, quality);
 }
 
 /**
@@ -586,79 +471,56 @@ export async function analyzeMucosalLesion(
 export async function analyzeDentalFindings(
   canvas: HTMLCanvasElement,
   patientId: string,
-  hospitalId = 'HOSP-PADERU-01',
-  token?: string
+  hospitalId?: string,
+  token?: string,
+  consentGiven = false
 ): Promise<IDentalResult> {
   const ctx = canvas.getContext('2d')!;
   const quality = evaluateImageQualityClient(canvas, ctx);
 
-  if (!quality.ok) {
-    return {
-      findings: DEFAULT_DENTAL_LABELS.map((lbl) => ({
-        label: lbl,
-        probability: 0,
-        threshold: DEFAULT_DENTAL_THRESHOLDS[lbl] || 0.5,
-        flagged: false,
-      })),
-      seeDentistRecommended: false,
-      modelVersion: 'v1.0.0-quality-guard',
-      source: 'on-device',
-      imageQuality: quality,
-    };
-  }
+  if (!patientId) throw new Error('A valid patient record is required before screening.');
+  if (!consentGiven) throw new Error('Record patient consent before analyzing a screening photo.');
+  if (!quality.ok) throw new Error(quality.reason || 'Retake the photo before screening.');
 
   const effectiveToken = await getEffectiveToken(token);
+  if (navigator.onLine && !effectiveToken) throw new Error('Sign in again to analyze and save this screening.');
   if (navigator.onLine && effectiveToken) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 65000);
     try {
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-      if (blob) {
-        const formData = new FormData();
-        formData.append('image', blob, 'dental.jpg');
-        formData.append('patientId', patientId);
-        formData.append('hospitalId', hospitalId);
+      if (!blob) throw new Error('The dental image could not be prepared. Please choose it again.');
+      const formData = new FormData();
+      formData.append('image', blob, 'dental.jpg');
+      formData.append('patientId', patientId);
+      if (hospitalId) formData.append('hospitalId', hospitalId);
+      formData.append('consentGiven', 'true');
 
-        let res = await fetch('/api/ai/analyze-dental', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${effectiveToken}`,
-          },
-          body: formData,
-        });
-
-        // If expired 401, refresh token once
-        if (res.status === 401) {
-          const freshToken = await getEffectiveToken();
-          if (freshToken) {
-            res = await fetch('/api/ai/analyze-dental', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${freshToken}` },
-              body: formData,
-            });
-          }
-        }
-
-        if (res.ok) {
-          const json = await res.json();
-          const d = json.data || json;
-          return {
-            findings: d.findings || [],
-            seeDentistRecommended: d.seeDentistRecommended,
-            modelVersion: d.modelVersion,
-            source: 'server',
-            imageQuality: d.imageQuality || quality,
-            imageRef: d.imageRef,
-            geminiAnalysis: d.geminiAnalysis,
-          };
-        }
-      }
-    } catch {
-      // Fall through to on-device inference
+      const response = await fetch('/api/ai/analyze-dental', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${effectiveToken}` },
+        signal: controller.signal,
+        body: formData,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error?.message || 'Dental screening analysis failed.');
+      const d = payload?.data || payload;
+      if (d?.isPlaceholder || d?.is_placeholder) throw new Error('The configured dental screening model is not available for analysis.');
+      return {
+        findings: d.findings || [],
+        seeDentistRecommended: d.seeDentistRecommended,
+        modelVersion: d.modelVersion,
+        source: 'server',
+        imageQuality: d.imageQuality || quality,
+        imageRef: d.imageRef,
+        geminiAnalysis: d.geminiAnalysis,
+      };
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
-  const onDevice = await runOnDeviceDentalInference(canvas);
-  onDevice.imageQuality = quality;
-  return onDevice;
+  return runOnDeviceDentalInference(canvas, quality);
 }
 
 /**
@@ -673,21 +535,24 @@ export function evaluateRiskHistoryClient(answers: IRiskQuestionnaireAnswers): I
  */
 export async function generateCombinedReport(
   patientId: string,
-  hospitalId: string,
+  hospitalId: string | undefined,
   moduleA?: IMucosalLesionResult,
   moduleB?: IDentalResult,
   moduleC?: IRiskScoreResult,
   token?: string,
-  mucosalPhotoDataUrl?: string,
-  dentalPhotoDataUrl?: string
+  _mucosalPhotoDataUrl?: string,
+  _dentalPhotoDataUrl?: string,
+  consentGiven = false
 ): Promise<ICombinedReportResult> {
+  if (!patientId) throw new Error('A valid patient record is required before saving a screening report.');
+  if (!consentGiven) throw new Error('Patient consent is required before saving a screening report.');
   const clientId = uuidv4();
   const triggerModules: string[] = [];
 
   // Module A rules
   const labelA = moduleA?.label || '';
   const confA = moduleA?.confidence ?? 1.0;
-  const isHighRiskLesion = ['opmd', 'suspected_malignant', 'osmf', 'non_healing_ulcer'].includes(labelA);
+  const isHighRiskLesion = Boolean(moduleA?.referToSpecialist) || ['opmd', 'suspected_malignant', 'osmf', 'non_healing_ulcer'].includes(labelA);
   const isLowConfidence = labelA ? confA < 0.60 : false;
 
   if (isHighRiskLesion) {
@@ -757,27 +622,21 @@ export async function generateCombinedReport(
 
   // Try online submission
   const effectiveToken = await getEffectiveToken(token);
+  if (navigator.onLine && !effectiveToken) throw new Error('Sign in again to save this screening report.');
   if (navigator.onLine && effectiveToken) {
-    try {
-      const res = await fetch('/api/ai/screenings/combined', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${effectiveToken}`,
-        },
-        body: JSON.stringify(reportPayload),
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        const data = json.data || json;
-        reportPayload.screeningId = data.screeningId;
-        reportPayload.syncStatus = 'SYNCED';
-        return reportPayload;
-      }
-    } catch {
-      // Fallback to local Dexie storage
+    const response = await fetch('/api/ai/screenings/combined', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${effectiveToken}` },
+      body: JSON.stringify({ ...reportPayload, consentGiven: true }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) {
+      throw new Error(payload?.error?.message || 'The screening report could not be saved to the patient record.');
     }
+    const data = payload.data || payload;
+    reportPayload.screeningId = data.screeningId;
+    reportPayload.syncStatus = 'SYNCED';
+    return reportPayload;
   }
 
   // Save to Dexie offline queue
@@ -785,6 +644,8 @@ export async function generateCombinedReport(
     clientId,
     patientId,
     hospitalId,
+    consentGiven: true,
+    consentTimestamp: new Date().toISOString(),
     label: moduleA?.label,
     confidence: moduleA?.confidence,
     probabilities: moduleA?.probabilities,
@@ -793,8 +654,6 @@ export async function generateCombinedReport(
     moduleB,
     moduleC,
     combinedRecommendation,
-    photoDataUrl: mucosalPhotoDataUrl,
-    dentalPhotoDataUrl,
     syncStatus: 'PENDING_SYNC',
     createdAt: Date.now(),
   };
@@ -828,9 +687,10 @@ export async function syncPendingAiScreenings(token?: string): Promise<{ synced:
       const json = await res.json();
       const syncedCount = json.data?.syncedCount || 0;
       const dupCount = json.data?.duplicateCount || 0;
-
-      // Mark local items as SYNCED
-      await db.offlineAiScreenings.where({ syncStatus: 'PENDING_SYNC' }).modify({ syncStatus: 'SYNCED' });
+      const acceptedIds = new Set<string>((json.data?.screenings || []).map((record: { clientId?: string }) => record.clientId).filter(Boolean));
+      if (acceptedIds.size > 0) {
+        await db.offlineAiScreenings.where('clientId').anyOf([...acceptedIds]).modify({ syncStatus: 'SYNCED' });
+      }
       return { synced: syncedCount, skipped: dupCount };
     }
   } catch {
@@ -839,252 +699,3 @@ export async function syncPendingAiScreenings(token?: string): Promise<{ synced:
 
   return { synced: 0, skipped: 0 };
 }
-
-// =============================================================================
-// 7. Multi-Tier Intelligent Verification (Gemini 1.5 Multimodal Visual Correction)
-// =============================================================================
-
-export interface IGeminiRefinementResult {
-  verified: boolean;
-  source: 'gemini-direct' | 'gemini-backend' | 'calibrated-expert-rules' | string;
-  refinedCondition: string;
-  conditionCategory: string;
-  riskTier: 'low_risk_support' | 'moderate_risk_support' | 'high_risk_support';
-  confidenceScore: number;
-  anatomicalSite: string;
-  visualFindings: string[];
-  recommendedDoctor: {
-    specialty: string;
-    facility: string;
-    urgency: string;
-    timelineDays: number;
-    consultationReason: string;
-  };
-  lifestyleAdvice: string[];
-  medications: string[];
-  answerText: string;
-  speechText: string;
-  isCorrected: boolean;
-  correctionNote?: string;
-}
-
-export async function verifyAndRefineWithGemini(
-  canvas: HTMLCanvasElement,
-  primaryResult: IMucosalLesionResult,
-  language: string = 'te',
-  customApiKey?: string
-): Promise<IGeminiRefinementResult> {
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-  const cleanBase64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-  const activeKey = customApiKey || localStorage.getItem('aarogya_gemini_api_key') || '';
-
-  // 1. Try Direct Browser Client Call to Gemini if API Key is configured
-  if (activeKey.trim().length > 10) {
-    try {
-      const candidateModels = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.8-flash'];
-      const prompt = `You are a Senior Stomatologist and Oral Medicine Specialist for the Aarogya-Drishti tribal health platform in ITDA Paderu, AP.
-The primary neural screening model predicted: "${primaryResult.label}" with confidence: ${(primaryResult.confidence * 100).toFixed(1)}%.
-Examine this oral photo with expert clinical visual reasoning.
-Identify whether the primary model was accurate or if this is a different condition (such as Oral Thrush/Candidiasis, Aphthous Stomatitis, Oral Lichen Planus, Cheilitis, or Carcinoma).
-Specify:
-1. Exact refined clinical condition name
-2. Risk Tier (low_risk_support, moderate_risk_support, high_risk_support)
-3. Specific home remedies & needed medications (e.g. Clotrimazole oral rinse, warm saline gargle, Vitamin B-complex)
-4. Specific doctor/specialist to consult at CHC Paderu
-Respond ONLY with a valid JSON object matching:
-{
-  "observedCondition": "precise condition name",
-  "conditionCategory": "white_lesion | red_lesion | ulcerative | pigmented | dental_caries | benign_mucosa | other",
-  "riskTier": "low_risk_support | moderate_risk_support | high_risk_support",
-  "confidenceScore": 0.90,
-  "anatomicalSite": "e.g. Lower Labial Mucosa / Lip",
-  "visualFindings": ["visual observation 1", "visual observation 2"],
-  "recommendedDoctor": {
-    "specialty": "Dental Surgeon / Oral Medicine Specialist",
-    "facility": "CHC Paderu Dental Outpost",
-    "urgency": "priority",
-    "timelineDays": 3,
-    "consultationReason": "Clinical confirmation and antifungal/topical treatment"
-  },
-  "lifestyleAdvice": ["Warm saline rinse 3 times daily", "100% tobacco and gutka cessation"],
-  "medications": ["Clotrimazole 1% oral rinse / paint", "Vitamin B-complex supplements"],
-  "answerText": "Detailed explanation of findings and medical guidance in ${language === 'te' ? 'Telugu' : language === 'hi' ? 'Hindi' : 'English'}.",
-  "speechText": "Natural spoken audio response without markdown or symbols."
-}`;
-
-      for (const m of candidateModels) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${activeKey.trim()}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } }
-              ]
-            }]
-          }),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          const match = rawText.match(/\{[\s\S]*\}/);
-          if (match) {
-            const parsed = JSON.parse(match[0]);
-            const isCorrected = parsed.observedCondition?.toLowerCase() !== primaryResult.label?.toLowerCase();
-            return {
-              verified: true,
-              source: `gemini-direct (${m})`,
-              refinedCondition: parsed.observedCondition || 'Refined Oral Condition',
-              conditionCategory: parsed.conditionCategory || 'white_lesion',
-              riskTier: parsed.riskTier || 'moderate_risk_support',
-              confidenceScore: parsed.confidenceScore || 0.92,
-              anatomicalSite: parsed.anatomicalSite || 'Oral Mucosa',
-              visualFindings: parsed.visualFindings || [],
-              recommendedDoctor: parsed.recommendedDoctor || {
-                specialty: 'Dental Officer',
-                facility: 'CHC Paderu Dental Outpost',
-                urgency: 'priority',
-                timelineDays: 3,
-                consultationReason: 'Clinical review',
-              },
-              lifestyleAdvice: parsed.lifestyleAdvice || ['Warm salt-water mouth gargle', 'Strict tobacco cessation'],
-              medications: parsed.medications || ['Oral soothing gel', 'Vitamin B-complex'],
-              answerText: parsed.answerText || '',
-              speechText: parsed.speechText || '',
-              isCorrected,
-              correctionNote: isCorrected
-                ? `Primary model predicted ${primaryResult.label} (${(primaryResult.confidence * 100).toFixed(1)}%). Gemini Multimodal Vision refined finding to ${parsed.observedCondition}.`
-                : `Gemini verified primary model prediction of ${primaryResult.label}.`,
-            };
-          }
-        }
-      }
-    } catch (directErr) {
-      console.warn('Direct Gemini API call failed, attempting backend route:', directErr);
-    }
-  }
-
-  // 2. Try Backend Assistant Route (/api/v1/assistant/analyze-photo)
-  try {
-    const res = await fetch('/api/v1/assistant/analyze-photo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageBase64: dataUrl,
-        language,
-        patientNote: `Primary model screening predicted: ${primaryResult.label} (confidence: ${(primaryResult.confidence * 100).toFixed(1)}%). Please verify and refine.`,
-      }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      const data = json.data || json;
-      if (data && data.observedCondition) {
-        const isCorrected = data.observedCondition?.toLowerCase() !== primaryResult.label?.toLowerCase();
-        return {
-          verified: true,
-          source: 'gemini-backend',
-          refinedCondition: data.observedCondition,
-          conditionCategory: data.conditionCategory || 'white_lesion',
-          riskTier: data.riskTier || 'moderate_risk_support',
-          confidenceScore: data.confidenceScore || 0.88,
-          anatomicalSite: data.anatomicalSite || 'Oral Mucosa',
-          visualFindings: data.visualFindings || [],
-          recommendedDoctor: data.recommendedDoctor || {
-            specialty: 'Dental Surgeon',
-            facility: 'CHC Paderu Dental Outpost',
-            urgency: 'priority',
-            timelineDays: 3,
-            consultationReason: 'Clinical review',
-          },
-          lifestyleAdvice: data.lifestyleAdvice || ['Warm salt-water mouth gargle', 'Strict tobacco cessation'],
-          medications: ['Clotrimazole oral rinse / paint (if fungal)', 'Warm saline mouthwash', 'Vitamin B-complex'],
-          answerText: data.answerText || '',
-          speechText: data.speechText || '',
-          isCorrected,
-          correctionNote: isCorrected
-            ? `Primary model predicted ${primaryResult.label}. Gemini refined this finding to ${data.observedCondition}.`
-            : `Gemini verified primary model prediction of ${primaryResult.label}.`,
-        };
-      }
-    }
-  } catch (backendErr) {
-    console.warn('Backend Gemini assistant route failed, applying clinical rule refinement:', backendErr);
-  }
-
-  // 3. Fallback: Calibrated Clinical Stomatology Rules
-  // E.g. If primary model flagged 'suspected_malignant' with low confidence (< 60%)
-  // but image shows widespread curd-like plaques over eroded mucosa (typical of Candidal Thrush)
-  const isFalsePositiveMalignancy = primaryResult.label === 'suspected_malignant' && primaryResult.confidence < 0.60;
-  
-  if (isFalsePositiveMalignancy) {
-    return {
-      verified: true,
-      source: 'calibrated-expert-rules',
-      refinedCondition: 'Pseudomembranous Candidiasis (Oral Thrush) / Severe Erosive Cheilitis',
-      conditionCategory: 'white_lesion',
-      riskTier: 'moderate_risk_support',
-      confidenceScore: 0.85,
-      anatomicalSite: 'Labial Mucosa & Vermilion Border',
-      visualFindings: [
-        'Superficial creamy white curd-like plaques across eroded mucosal base',
-        'Intense erythematous background inflammation without localized indurated solitary ulcer',
-        'Widespread symmetrical mucosal presentation typical of fungal/inflammatory stomatitis',
-      ],
-      recommendedDoctor: {
-        specialty: 'Dental Surgeon / Oral Medicine Specialist',
-        facility: 'CHC Paderu Dental Outpost',
-        urgency: 'priority',
-        timelineDays: 3,
-        consultationReason: 'Evaluate for candidal hyphae, prescribe oral antifungal suspension and verify mucosal healing within 10 days.',
-      },
-      lifestyleAdvice: [
-        'Warm salt-water mouth gargle 3 times daily after meals to soothe burning',
-        'Strictly avoid spicy, acidic, crunchy, or hot foods',
-        '100% cessation of betel nut, tobacco, gutka, and alcohol',
-        'Do not scrape or peel the white plaques with fingernails',
-      ],
-      medications: [
-        'Clotrimazole 1% mouth paint or Nystatin oral rinse (swish & swallow/spit 4x daily)',
-        'Oral soothing protective paste (e.g. Choline Salicylate or Triamcinolone 0.1%)',
-        'High-potency Vitamin B-complex and Vitamin C supplements',
-      ],
-      answerText: language === 'te'
-        ? 'జెమినీ క్లినికల్ విజన్ విశ్లేషణ: ప్రాథమిక మోడల్ అనుమానించినట్లు ఇది క్యాన్సర్ పుండు కాదు. ఇది తీవ్రమైన నోటి ఫంగల్ ఇన్ఫెక్షన్ (నోటి పూత / కాండిడియాసిస్ థ్రష్). గోరువెచ్చని ఉప్పునీటి పుక్కిలింత మరియు క్లోట్రిమజోల్ ఓరల్ డ్రాప్స్ వాడాలి. CHC పాడేరు దంత వైద్యుని సంప్రదించండి.'
-        : 'Gemini Clinical Vision Analysis: The primary model flagged this due to intense red/white contrast, but visual presentation confirms superficial Pseudomembranous Candidiasis (Oral Thrush) with acute erosive cheilitis rather than an invasive carcinoma. Responsive to antifungal therapy and warm saline gargles.',
-      speechText: language === 'te'
-        ? 'ఇది ప్రమాదకరమైన క్యాన్సర్ కాదు. తీవ్రమైన నోటి పూత లేదా ఫంగల్ ఇన్ఫెక్షన్. గోరువెచ్చని ఉప్పునీటి పుక్కిలింత చేసి పాడేరు ఆసుపత్రి దంత వైద్యుని కలవండి.'
-        : 'This is severe oral thrush or mucosal inflammation rather than cancer. Warm salt-water rinses and antifungal therapy are advised.',
-      isCorrected: true,
-      correctionNote: `Primary model flagged suspected_malignant with low confidence (${(primaryResult.confidence * 100).toFixed(1)}%). Clinical Vision refined this to Pseudomembranous Candidiasis (Oral Thrush) / Severe Cheilitis.`,
-    };
-  }
-
-  // Default passthrough if verified as consistent
-  return {
-    verified: true,
-    source: 'calibrated-expert-rules',
-    refinedCondition: primaryResult.label || 'Oral Mucosal Condition',
-    conditionCategory: 'benign_mucosa',
-    riskTier: primaryResult.referToSpecialist ? 'high_risk_support' : 'low_risk_support',
-    confidenceScore: primaryResult.confidence,
-    anatomicalSite: 'Oral Mucosa',
-    visualFindings: ['Consistent with primary screening pattern'],
-    recommendedDoctor: {
-      specialty: 'Dental Officer',
-      facility: 'CHC Paderu Dental Outpost',
-      urgency: primaryResult.referToSpecialist ? 'priority' : 'routine',
-      timelineDays: primaryResult.referToSpecialist ? 3 : 14,
-      consultationReason: 'Clinical follow-up',
-    },
-    lifestyleAdvice: ['Maintain daily oral hygiene', 'Warm water rinsing'],
-    medications: ['Warm saline rinse', 'Fluoride toothpaste'],
-    answerText: 'Visual findings verified with primary model triage.',
-    speechText: 'Screening verified.',
-    isCorrected: false,
-  };
-}
-

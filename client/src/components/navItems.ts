@@ -1,4 +1,4 @@
-export interface NavItem {
+﻿export interface NavItem {
   id: string;
   label: string;
   labelTe?: string;
@@ -26,6 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'camps', label: 'Outreach Camps', labelTe: 'గ్రామీణ శిబిరాలు', labelHi: 'आउटरीच कैंप', labelTa: 'கள முகாம்கள்', labelKn: 'ಹೊರಸಂಪರ್ಕ ಶಿಬಿರಗಳು', labelMl: 'ക്യാമ്പുകൾ', category: 'clinical', icon: '🏕️' },
 
   // Tribal Field Operations
+  { id: 'staff-field-management', label: 'Staff & Field Worker Management', labelTe: 'సిబ్బంది & ఫీల్డ్ వర్కర్ నిర్వహణ', labelHi: 'स्टाफ और फील्ड वर्कर प्रबंधन', category: 'field', icon: '👥' },
   { id: 'camp-planning', label: 'Medical Camp Planning', labelTe: 'మెడికల్ క్యాంప్ ప్లానింగ్', labelHi: 'मेडिकल कैंप योजना', labelTa: 'மருத்துவ முகாம் திட்டம்', labelKn: 'ಶಿಬಿರದ ಯೋಜನೆ', labelMl: 'ക്യാമ്പ് ആസൂത്രണം', category: 'field', icon: '🏕️', badge: 'AI Priority' },
   { id: 'assignments', label: 'Worker Jurisdiction', labelTe: 'ఆరోగ్య కార్యకర్తల విధులు', labelHi: 'कार्यकर्ता क्षेत्राधिकार', labelTa: 'பணியாளர் எல்லை', labelKn: 'ಕಾರ್ಯಕರ್ತರ ವ್ಯಾಪ್ತಿ', labelMl: 'പ്രവർത്തകരുടെ அதிகாரപരിധി', category: 'field', icon: '📍' },
   { id: 'village-groups', label: 'Village Groups', labelTe: 'గ్రామ సమూహాలు', labelHi: 'ग्राम समूह', labelTa: 'கிராமக் குழுக்கள்', labelKn: 'ಗ್ರಾಮ ಗುಂಪುಗಳು', labelMl: 'വില്ലേജ് ഗ്രൂപ്പുകൾ', category: 'field', icon: '🏘️' },

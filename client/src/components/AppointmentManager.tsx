@@ -57,6 +57,8 @@ export interface AppointmentRecord {
   }>;
   idempotencyKey?: string;
   offlineQueued?: boolean;
+  assignedDoctorId?: string;
+  videoInvite?: { issuedAt?: string; expiresAt?: string; revokedAt?: string };
 }
 
 export interface SlotView {
@@ -76,6 +78,10 @@ export const AppointmentManager: React.FC<AppointmentManagerProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [videoLinks, setVideoLinks] = useState<Record<string, string>>({});
+  const isPatient = currentUser?.role === 'patient';
+  const isDoctor = ['doctor', 'medical_officer', 'specialist_doctor'].includes(currentUser?.role || '');
+  const canRespond = ['doctor', 'medical_officer', 'specialist_doctor', 'hospital_manager', 'admin', 'system_admin'].includes(currentUser?.role || '');
 
   // Slot query state
   const [selectedHospitalId, setSelectedHospitalId] = useState<string>(
@@ -180,8 +186,8 @@ export const AppointmentManager: React.FC<AppointmentManagerProps> = ({
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          patientId,
-          patientName,
+          patientId: isPatient ? (currentUser?.patientId || currentUser?.userId || patientId) : patientId,
+          patientName: isPatient ? currentUser?.fullName : patientName,
           destinationHospitalId: selectedHospitalId,
           slotStartTime: selectedSlotTime,
           type: consultType,
@@ -209,6 +215,51 @@ export const AppointmentManager: React.FC<AppointmentManagerProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCreateVideoInvite = async (appointment: AppointmentRecord) => {
+    if (!accessToken) return;
+    try {
+      const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointment.appointmentId)}/video-invite`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error?.message || 'Could not create consultation link.');
+      const url = payload.data.link || `${window.location.origin}/#/appointment-consultation/${encodeURIComponent(appointment.appointmentId)}?invite=${encodeURIComponent(payload.data.token)}`;
+      setVideoLinks((prev) => ({ ...prev, [appointment.appointmentId]: url }));
+      const inboxDelivered = payload.data.notification?.deliveryStatus?.some((delivery: { channel: string; delivered: boolean }) => delivery.channel === 'in_app' && delivery.delivered);
+      setMessage({
+        text: inboxDelivered
+          ? `Demo consultation link sent to the patient's in-app inbox. It expires at ${new Date(payload.data.expiresAt).toLocaleTimeString()}. You can also share or copy it below.`
+          : `Consultation link created, but in-app delivery was skipped. Share or copy it for the patient. It expires at ${new Date(payload.data.expiresAt).toLocaleTimeString()}.`,
+        type: 'success',
+      });
+      await fetchAppointments();
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'Could not create consultation link.', type: 'error' });
+    }
+  };
+
+  const copyVideoLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage({ text: 'Consultation link copied. Send it to the patient directly.', type: 'success' });
+    } catch {
+      setMessage({ text: 'Select and copy the consultation link shown below.', type: 'error' });
+    }
+  };
+
+  const shareVideoLink = async (url: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Demo video consultation', text: 'Your doctor shared this appointment consultation link. It expires within 30 minutes.', url });
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+      }
+    }
+    await copyVideoLink(url);
   };
 
   const handleConfirm = async (aptId: string) => {
@@ -707,29 +758,39 @@ export const AppointmentManager: React.FC<AppointmentManagerProps> = ({
                 )}
               </div>
 
-              {/* Phase 5 Simulation Notification Status Bar */}
-              <div
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  backgroundColor: 'rgba(0,0,0,0.02)',
-                  border: '1px solid var(--color-border)',
-                  fontSize: '0.75rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span style={{ fontWeight: 600 }}>Multi-Channel Dispatch:</span>
-                <span>📱 In-App: <strong style={{ color: '#10b981' }}>Delivered</strong></span>
-                <span>✉️ SMS: <strong style={{ color: '#d97706' }}>BLOCKED STUB (Simulation)</strong></span>
-                <span>📧 Email: <strong style={{ color: '#d97706' }}>BLOCKED STUB (Simulation)</strong></span>
-              </div>
+              {isPatient && ['requested', 'rescheduled'].includes(apt.status) && (
+                <div role="status" style={{ padding: '8px 10px', borderRadius: 6, background: '#fffbeb', color: '#92400e' }}>
+                  Waiting for the doctor to respond. Consultation access is available only after the doctor confirms and shares a link.
+                </div>
+              )}
+              {isPatient && apt.status === 'confirmed' && (
+                <div role="status" style={{ padding: '8px 10px', borderRadius: 6, background: '#eff6ff', color: '#1e40af' }}>
+                  Appointment confirmed. Wait for the doctor to send your time-limited consultation link.
+                </div>
+              )}
+              {isPatient && apt.videoInvite?.expiresAt && new Date(apt.videoInvite.expiresAt).getTime() > Date.now() && (
+                <div role="status" style={{ padding: '8px 10px', borderRadius: 6, background: '#eff6ff', color: '#1e40af' }}>
+                  The doctor sent a consultation link to your in-app notification inbox. Open the “Video consultation link” notification before {new Date(apt.videoInvite.expiresAt).toLocaleTimeString()}.
+                </div>
+              )}
+              {isDoctor && ['confirmed', 'rescheduled'].includes(apt.status) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button type="button" className="btn btn-primary" style={{ alignSelf: 'flex-end', fontSize: '0.8rem' }} onClick={() => handleCreateVideoInvite(apt)}>
+                    Send 30-minute DEMO video link
+                  </button>
+                  {videoLinks[apt.appointmentId] && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <input readOnly aria-label="Patient consultation URL" value={videoLinks[apt.appointmentId]} style={{ flex: '1 1 320px', padding: 8 }} />
+                      <button type="button" className="btn btn-primary" onClick={() => shareVideoLink(videoLinks[apt.appointmentId])}>Share link</button>
+                      <button type="button" className="btn btn-outline" onClick={() => copyVideoLink(videoLinks[apt.appointmentId])}>Copy patient link</button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Actions Toolbar */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
-                {(apt.status === 'requested' || apt.status === 'rescheduled') && (
+                {canRespond && (apt.status === 'requested' || apt.status === 'rescheduled') && (
                   <button
                     type="button"
                     className="btn btn-primary"

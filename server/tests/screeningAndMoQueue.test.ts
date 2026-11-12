@@ -200,7 +200,7 @@ describe('Phase 8: Screening, Demo AI, MO Case Queue & Clinical Governance', () 
       expect(res.body.error.message).toContain('active patient informed consent');
     });
 
-    it('allows photo upload when tagged with isDemo: true (simulation bypass)', async () => {
+    it('rejects simulation photos from patient screening records', async () => {
       const res = await request(app)
         .post('/api/v1/screening/photos/upload')
         .set('Authorization', `Bearer ${ashaToken}`)
@@ -209,10 +209,8 @@ describe('Phase 8: Screening, Demo AI, MO Case Queue & Clinical Governance', () 
         .field('isDemo', 'true')
         .attach('photo', originalImageBuffer, 'demo_lesion.jpg');
 
-      expect(res.status).toBe(201);
-      expect(res.body.data.photo.isDemo).toBe(true);
-      expect(res.body.data.photo.originalSha256).toBe(originalSha256);
-      expect(res.body.data.simulationBanner).toBeDefined();
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toContain('Simulation photos cannot be attached');
     });
 
     it('allows photo upload when active informed consent is granted for the patient', async () => {
@@ -279,39 +277,16 @@ describe('Phase 8: Screening, Demo AI, MO Case Queue & Clinical Governance', () 
     });
   });
 
-  describe('2. DEMO AI that returns a risk-support label with no diagnosis or stage, and quality checks "unavailable"', () => {
-    it('returns risk-support label, quality checks as "unavailable", and SIMULATION banner', async () => {
+  describe('2. Screening analysis rejects requests without a saved consented photo', () => {
+    it('does not return a fabricated result for a hash-only request', async () => {
       const res = await request(app)
         .post('/api/v1/screening/ai/analyze')
         .set('Authorization', `Bearer ${moPaderuToken}`)
         .send({ photoSha256: 'abcd1234ef5678' });
 
-      expect(res.status).toBe(200);
-      const aiData = res.body.data;
-
-      // 1. Risk-support label present
-      expect([
-        'low_risk_support',
-        'moderate_risk_support',
-        'high_risk_support',
-        'indeterminate_risk_support',
-      ]).toContain(aiData.riskSupportLabel);
-
-      // 2. Positioning, obstruction and missing-area checks return strictly "unavailable"
-      expect(aiData.qualityChecks).toBeDefined();
-      expect(aiData.qualityChecks.positioning).toBe('unavailable');
-      expect(aiData.qualityChecks.obstruction).toBe('unavailable');
-      expect(aiData.qualityChecks.missingArea).toBe('unavailable');
-
-      // 3. SIMULATION banner present on AI output
-      expect(aiData.simulationBanner).toContain('SIMULATION');
-      expect(aiData.disclaimer).toBeDefined();
-
-      // 4. Clinical wording guard: Zero staging assertions or diagnostic terms in AI output
-      const jsonString = JSON.stringify(aiData).toLowerCase();
-      expect(jsonString).not.toMatch(/\bstage\s+[1-4ivx]+\b/);
-      expect(jsonString).not.toMatch(/\bcancer[- ]free\b/);
-      expect(jsonString).not.toMatch(/\bcurative\b/);
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.data).toBeNull();
     });
   });
 
@@ -396,6 +371,13 @@ describe('Phase 8: Screening, Demo AI, MO Case Queue & Clinical Governance', () 
           priority: 'urgent',
         });
       reviewCaseId = caseRes.body.data.case.caseId;
+
+      // Clinician review is available only after the hospital assigns the case.
+      const assignmentRes = await request(app)
+        .post(`/api/v1/screening/cases/${reviewCaseId}/assign`)
+        .set('Authorization', `Bearer ${adminPaderuToken}`)
+        .send({ targetMoId: moPaderuId });
+      expect(assignmentRes.status).toBe(200);
     });
 
     it('records clinical assessment as a separate entity and leaves results unreleased', async () => {

@@ -7,6 +7,7 @@ export type AppointmentStatus =
   | 'checked_in'
   | 'completed'
   | 'cancelled'
+  | 'declined'
   | 'no_show';
 
 export type AppointmentType =
@@ -45,30 +46,73 @@ export interface IReschedulingRecord {
   reason?: string;
 }
 
+export interface IStatusHistoryEntry {
+  status: string;
+  changedBy: string;
+  time: Date;
+  note?: string;
+}
+
 export interface IAppointmentDocument extends Document {
   appointmentId: string;
+  appointmentCode?: string;
+  consultationMode?: 'online' | 'offline';
   patientId: string;
   patientName?: string;
   destinationHospitalId: string;
   destinationHospitalName?: string;
+  hospitalId?: string;
   department: string;
   assignedDoctorId?: string;
   assignedDoctorName?: string;
+  preferredDoctorId?: string;
+  screeningId?: string;
+  riskLevel?: 'low' | 'medium' | 'high';
+  conditionCategory?: string;
+  suggestedDoctorType?: string;
   slotStartTime: Date;
   slotEndTime: Date;
+  scheduledAt?: Date;
   durationMinutes: number;
-  status: AppointmentStatus;
-  type: AppointmentType;
+  status: AppointmentStatus | string;
+  type: AppointmentType | string;
   reason?: string;
+  patientNote?: string;
+  declineReason?: string;
   requestedBy: IAppointmentRequester;
   confirmedBy?: IAppointmentConfirmation;
   cancellation?: IAppointmentCancellation;
   reschedulingHistory: IReschedulingRecord[];
+  statusHistory: IStatusHistoryEntry[];
+  proposedReschedule?: {
+    newSlotStart: Date;
+    newSlotEnd?: Date;
+    proposedBy: string;
+    proposedAt: Date;
+    reason?: string;
+    status?: 'pending' | 'accepted' | 'declined';
+  };
   idempotencyKey?: string;
   clientRequestId?: string;
   offlineQueued: boolean;
   notificationId?: string;
   notes?: string;
+  consultationSummary?: string;
+  visitDetails?: Record<string, any>;
+  videoInvite?: {
+    tokenHash: string;
+    issuedBy: string;
+    issuedAt: Date;
+    expiresAt: Date;
+    revokedAt?: Date;
+  };
+  video?: {
+    url?: string;
+    validFrom?: Date;
+    validUntil?: Date;
+    roomId?: string;
+    provider?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,6 +125,8 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
       unique: true,
       index: true,
     },
+    appointmentCode: { type: String, index: true },
+    consultationMode: { type: String, enum: ['online', 'offline'] },
     patientId: {
       type: String,
       required: true,
@@ -97,6 +143,7 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
     destinationHospitalName: {
       type: String,
     },
+    hospitalId: { type: String },
     department: {
       type: String,
       default: 'Oral Health OPD',
@@ -108,6 +155,11 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
     assignedDoctorName: {
       type: String,
     },
+    preferredDoctorId: { type: String },
+    screeningId: { type: String },
+    riskLevel: { type: String, enum: ['low', 'medium', 'high'] },
+    conditionCategory: { type: String },
+    suggestedDoctorType: { type: String },
     slotStartTime: {
       type: Date,
       required: true,
@@ -118,6 +170,7 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
       required: true,
       index: true,
     },
+    scheduledAt: { type: Date },
     durationMinutes: {
       type: Number,
       required: true,
@@ -125,32 +178,18 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
     },
     status: {
       type: String,
-      enum: [
-        'requested',
-        'confirmed',
-        'rescheduled',
-        'checked_in',
-        'completed',
-        'cancelled',
-        'no_show',
-      ],
       default: 'requested',
       index: true,
     },
     type: {
       type: String,
-      enum: [
-        'screening_review',
-        'clinical_consultation',
-        'specialist_referral',
-        'routine_follow_up',
-        'biopsy_procedure',
-      ],
       default: 'clinical_consultation',
     },
     reason: {
       type: String,
     },
+    patientNote: { type: String, maxlength: 2000 },
+    declineReason: { type: String, maxlength: 1000 },
     requestedBy: {
       userId: { type: String, required: true },
       role: { type: String, required: true },
@@ -178,6 +217,22 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
         reason: { type: String },
       },
     ],
+    statusHistory: [
+      {
+        status: { type: String, required: true },
+        changedBy: { type: String, required: true },
+        time: { type: Date, default: Date.now },
+        note: { type: String },
+      },
+    ],
+    proposedReschedule: {
+      newSlotStart: { type: Date },
+      newSlotEnd: { type: Date },
+      proposedBy: { type: String },
+      proposedAt: { type: Date },
+      reason: { type: String },
+      status: { type: String },
+    },
     idempotencyKey: {
       type: String,
       sparse: true,
@@ -197,6 +252,22 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
     },
     notes: {
       type: String,
+    },
+    consultationSummary: { type: String },
+    visitDetails: { type: Schema.Types.Mixed },
+    videoInvite: {
+      tokenHash: { type: String },
+      issuedBy: { type: String },
+      issuedAt: { type: Date },
+      expiresAt: { type: Date },
+      revokedAt: { type: Date },
+    },
+    video: {
+      url: { type: String },
+      validFrom: { type: Date },
+      validUntil: { type: Date },
+      roomId: { type: String },
+      provider: { type: String },
     },
   },
   {

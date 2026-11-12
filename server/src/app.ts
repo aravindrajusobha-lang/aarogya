@@ -7,6 +7,7 @@ import { healthRouter } from './modules/health/healthRoutes.js';
 import { storageRouter } from './modules/storage/storageRoutes.js';
 import { authRouter } from './modules/auth/authRoutes.js';
 import { otpRouter } from './modules/auth/otpRoutes.js';
+import { patientAuthRouter } from './modules/patient/patientAuthRoutes.js';
 import { auditRouter } from './modules/audit/auditRoutes.js';
 import { consentRouter } from './modules/consent/consentRoutes.js';
 import { hospitalRouter } from './modules/hospital/hospitalRoutes.js';
@@ -24,6 +25,7 @@ import { appointmentRouter } from './modules/appointment/appointmentRoutes.js';
 import { biopsyRouter } from './modules/biopsy/biopsyRoutes.js';
 import { referralRouter } from './modules/referral/referralRoutes.js';
 import { teleconsultationRouter } from './modules/teleconsultation/teleconsultationRoutes.js';
+import { consultationRouter } from './modules/consultation/consultationRoutes.js';
 import { mapRouter } from './modules/map/mapRoutes.js';
 import { reportRouter } from './modules/report/reportRoutes.js';
 import { aadhaarMockRouter } from './modules/aadhaar/aadhaarMockRoutes.js';
@@ -31,6 +33,10 @@ import { syncRouter } from './modules/sync/syncRoutes.js';
 import { assistantRouter } from './modules/assistant/assistantRoutes.js';
 import { aiRouter } from './modules/ai/aiRoutes.js';
 import { prescriptionRouter } from './modules/prescription/prescriptionRoutes.js';
+import { patientReportChatRouter } from './modules/patient/patientReportChatRoutes.js';
+import { patientSupportRouter } from './modules/patient/patientSupportRoutes.js';
+import { patientTreatmentRouter } from './modules/treatment/patientTreatmentRoutes.js';
+import { patientProfileRouter } from './modules/patient/patientProfileRoutes.js';
 
 
 
@@ -53,6 +59,12 @@ export function createApp(): Express {
       crossOriginResourcePolicy: { policy: 'same-site' },
     })
   );
+
+  // Allow camera access for this same-origin application while keeping other origins blocked.
+  app.use((_req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(self "https://*.daily.co")');
+    next();
+  });
 
   // CORS
   app.use(
@@ -84,11 +96,24 @@ export function createApp(): Express {
 
   // Global Sliding-Window Rate Limiter
   app.use('/api/v1', apiGlobalRateLimiter);
+  app.use('/api/patient', apiGlobalRateLimiter);
+  app.use('/api/patient', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
 
   // Mount API Routes
+  app.use('/api/health', healthRouter);
   app.use('/api/v1/health', healthRouter);
   app.use('/api/v1/storage', storageRouter);
   app.use('/api/v1/auth', authRouter);
+  app.use('/api/v1/patient/auth', patientAuthRouter);
+  app.use('/api/patient', patientReportChatRouter);
+  app.use('/api/patient', patientSupportRouter);
+  app.use('/api/patient', patientTreatmentRouter);
+  app.use('/api/patient', patientProfileRouter);
   app.use('/api/v1/audit', auditRouter);
   app.use('/api/v1/consent', consentRouter);
 
@@ -131,6 +156,7 @@ export function createApp(): Express {
 
   // Phase 13 Teleconsultation Workflow
   app.use('/api/v1/teleconsultation', teleconsultationRouter);
+  app.use('/api/v1/consultations', consultationRouter);
 
   // Phase 14 Village Data Map
   app.use('/api/v1/map', mapRouter);

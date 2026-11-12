@@ -1,14 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AuthUser } from '../../components/AuthPanel';
 import {
   analyzeMucosalLesion,
+  generateCombinedReport,
   IMucosalLesionResult,
-  verifyAndRefineWithGemini,
-  IGeminiRefinementResult,
 } from '../../services/aiEngineService';
-import { LanguageCode } from '../../i18n';
+import { getClientTranslation, LanguageCode, translations } from '../../i18n';
 import { PrescriptionCardView } from '../../components/PrescriptionCardView';
-import { ThemeToggle } from '../../components/ThemeToggle';
+import { ConsultationPortalPanel } from '../../components/VideoConsultation';
+import { PatientProfilePage } from '../patient/PatientProfilePage';
+import { PatientHomeOverview } from '../../components/PatientHomeOverview';
+import { HealthCardButton } from '../../components/HealthCardButton';
 import '../../styles/Dashboard.css';
 
 export interface PatientDashboardProps {
@@ -17,364 +19,403 @@ export interface PatientDashboardProps {
   currentLang?: LanguageCode;
   onOpenLanguageModal?: () => void;
   onToggleAIAssistant?: () => void;
-  initialTab?: 'overview' | 'appointments' | 'referrals' | 'prescriptions' | 'history' | 'hospitals' | 'education' | 'care-team' | 'reports';
+  initialTab?: 'home' | 'profile' | 'screening' | 'assessment' | 'consultation' | 'appointments' | 'referrals' | 'prescriptions' | 'history' | 'hospitals' | 'education' | 'care-team' | 'reports' | 'treatment' | 'reminders' | 'help' | 'report-detail';
+  initialResourceId?: string;
 }
+
+type PatientDashboardTab = NonNullable<PatientDashboardProps['initialTab']>;
+
+function getPatientAccessToken(): string {
+  try {
+    const tokens = JSON.parse(localStorage.getItem('aarogya_tokens') || '{}');
+    return tokens.accessToken || localStorage.getItem('aarogya_token') || '';
+  } catch { return localStorage.getItem('aarogya_token') || ''; }
+}
+
+function createPatientMutationId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+      const value = Math.random() * 16 | 0;
+      return (char === 'x' ? value : (value & 0x3 | 0x8)).toString(16);
+    });
+}
+
+const PATIENT_SCREENING_LABEL = 'DEMO AI screening support';
+const PATIENT_SCREENING_NOTE = 'Automated screening observation recorded for clinician review.';
+const PATIENT_ORAL_EDUCATION_FALLBACK = {
+  explanation: 'This is an automated description of an image, not a diagnosis. Different causes can look similar in a photo, so a qualified health worker needs to examine the area and consider your symptoms and health history.',
+  possibleCauses: [
+    'Similar-looking mouth sores can follow accidental cheek biting or irritation from a rough tooth or dental appliance.',
+    'A burn from hot food or drink, some foods, or certain medicines can also irritate the mouth.',
+    'A photo cannot show which cause applies to you; an in-person examination is needed.',
+  ],
+  whatToTellClinician: [
+    'When you first noticed it and whether it is changing or returning.',
+    'Any pain, bleeding, difficulty eating or swallowing, or other symptoms.',
+    'Medicines you take and any tobacco or alcohol use, if relevant.',
+  ],
+  whenToSeekReview: [
+    'Arrange a health-worker or dental review if it lasts longer than 3 weeks, gets worse, keeps returning, or bleeds.',
+    'Seek prompt in-person care for rapidly worsening swelling or difficulty breathing or swallowing.',
+  ],
+  sources: [
+    { label: 'NHS: Mouth ulcers', url: 'https://www.nhs.uk/conditions/mouth-ulcers/' },
+    { label: 'WHO: Oral health', url: 'https://www.who.int/news-room/fact-sheets/detail/oral-health' },
+  ],
+};
+
+function sanitizePatientScreeningRecord(record: any): any {
+  return {
+    ...record,
+    label: PATIENT_SCREENING_LABEL,
+    notes: record.advice || record.notes || PATIENT_SCREENING_NOTE,
+    riskLevel: record.triageCategory || record.riskLevel || 'Pending clinician review',
+  };
+}
+
+function prescriptionAsText(rx: any, patientName: string, patientId: string): string {
+  return [
+    'Aarogya-Drishti Prescription',
+    `Prescription ID: ${rx.prescriptionId || '—'}`,
+    `Patient: ${rx.patientName || patientName}`,
+    `Patient ID: ${rx.patientId || patientId}`,
+    `Doctor: ${rx.doctorName || '—'}`,
+    `Hospital: ${rx.hospitalName || '—'}`,
+    `Date: ${rx.createdAt ? new Date(rx.createdAt).toLocaleDateString() : '—'}`,
+    `Clinician assessment: ${rx.diagnosisImpression || '—'}`,
+    `Clinical observations: ${rx.clinicalObservations || '—'}`,
+    'Prescribed medicines:',
+    ...(rx.medicines || []).map((medicine: any, index: number) => `${index + 1}. ${medicine.medicineName || 'Medicine'} | Dosage: ${medicine.dosage || '—'} | Frequency: ${medicine.frequency || '—'} | Duration: ${medicine.durationDays ?? '—'} days | Instructions: ${medicine.instructions || '—'}`),
+    `Follow-up: ${rx.followUpDate ? new Date(rx.followUpDate).toLocaleDateString() : '—'}`,
+    'SIMULATION — DEMO DATA ONLY — NOT FOR CLINICAL USE',
+  ].join('\n');
+}
+
+function prescriptionSpeechText(rx: any): string {
+  const medicines = (rx.medicines || []).map((medicine: any) => {
+    const precautions = medicine.instructions ? ` Precautions: ${medicine.instructions}.` : '';
+    return `${medicine.medicineName || 'Medicine'}. Dose: ${medicine.dosage || 'as written on the prescription'}. Timing: ${medicine.frequency || 'as written on the prescription'}.${precautions}`;
+  });
+  return `Prescription ${rx.prescriptionId || ''}. Read the clinician-issued instructions exactly as written. ${medicines.join(' ')} Do not change any medicine or dose without speaking with your clinician.`;
+}
+
+interface PatientReportChatProps {
+  screeningId: string;
+  reportContext: string;
+  currentLang: LanguageCode;
+}
+
+const PatientReportChat: React.FC<PatientReportChatProps> = ({ screeningId, reportContext, currentLang }) => {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [message, setMessage] = useState('');
+  const [shareProfileContext, setShareProfileContext] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [urgentCare, setUrgentCare] = useState(false);
+  const [pendingMutationId, setPendingMutationId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoadingHistory(true);
+      try {
+        const response = await fetch(`/api/patient/screenings/${encodeURIComponent(screeningId)}/chat`, {
+          headers: { Authorization: `Bearer ${getPatientAccessToken()}` },
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Chat history is not available right now.');
+        if (!cancelled) setMessages(payload.data?.messages || []);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Chat history is not available right now.');
+      } finally { if (!cancelled) setLoadingHistory(false); }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [screeningId]);
+
+  const send = async (text = message) => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    const mutationId = pendingMutationId || (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, (char) => { const value = Math.random() * 16 | 0; return (char === 'x' ? value : (value & 0x3 | 0x8)).toString(16); }));
+    setPendingMutationId(mutationId);
+    setSending(true); setError(''); setMessage('');
+    if (/trouble breathing|difficulty breathing|cannot breathe|trouble swallowing|difficulty swallowing|uncontrolled bleeding|rapid swelling/i.test(trimmed)) setUrgentCare(true);
+    try {
+      const response = await fetch(`/api/patient/screenings/${encodeURIComponent(screeningId)}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getPatientAccessToken()}` },
+        body: JSON.stringify({ mutationId, message: trimmed, language: currentLang, reportContext, shareProfileContext }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Message could not be sent.');
+      setMessages((previous) => [...previous, ...(payload.data?.messages || [])]);
+      setPendingMutationId(null);
+    } catch (sendError) {
+      setMessage(trimmed);
+      setError(sendError instanceof Error ? sendError.message : 'Message could not be sent.');
+    } finally { setSending(false); }
+  };
+
+  const suggestions = currentLang === 'te'
+    ? ['ఈ ఫలితం అంటే ఏమిటి?', 'వైద్యుడిని ఎప్పుడు సంప్రదించాలి?']
+    : currentLang === 'hi'
+      ? ['इस परिणाम का क्या अर्थ है?', 'डॉक्टर से कब संपर्क करें?']
+      : ['What does this report wording mean?', 'When should I speak with a clinician?'];
+
+  return (
+    <section className="patient-report-chat" aria-labelledby="report-chat-title">
+      <header><span className="patient-home-eyebrow">DEMO AI · REPORT SUPPORT</span><h2 id="report-chat-title">{currentLang === 'te' ? 'మీ నివేదిక గురించి అడగండి' : currentLang === 'hi' ? 'अपनी रिपोर्ट के बारे में पूछें' : 'Ask about your report'}</h2></header>
+      <div className="patient-report-chat-messages" aria-live="polite">
+        {loadingHistory && <p className="patient-inline-state">Loading saved conversation…</p>}
+        {!loadingHistory && messages.length === 0 && <p className="patient-inline-state">{currentLang === 'te' ? 'నివేదిక పదాలను సులభంగా అర్థం చేసుకోవడానికి ప్రశ్న అడగండి.' : currentLang === 'hi' ? 'रिपोर्ट के शब्दों को समझने के लिए प्रश्न पूछें।' : 'Ask a question to understand the report wording in plain language.'}</p>}
+        {messages.map((item, index) => <div key={item.messageId || index} className={`patient-chat-bubble ${item.role === 'user' ? 'patient' : 'assistant'}`}>{item.content}</div>)}
+        {sending && <div className="patient-chat-bubble assistant" role="status">Preparing a safe explanation…</div>}
+      </div>
+      {urgentCare && <div className="patient-urgent-banner" role="alert"><strong>Urgent care:</strong> Breathing or swallowing difficulty, uncontrolled bleeding, or rapidly worsening swelling needs prompt in-person care. Contact local emergency services or go to the nearest health facility.</div>}
+      <div className="patient-chat-suggestions">{suggestions.map((item) => <button key={item} type="button" onClick={() => void send(item)} disabled={sending}>{item}</button>)}</div>
+      <label className="patient-context-consent"><input type="checkbox" checked={shareProfileContext} onChange={(event) => setShareProfileContext(event.target.checked)} />{currentLang === 'te' ? 'ఈ సంభాషణ కోసం నా ఆరోగ్య ప్రొఫైల్ వివరాలను పంచుకోవడానికి సమ్మతి' : currentLang === 'hi' ? 'इस बातचीत के लिए मेरी स्वास्थ्य प्रोफ़ाइल साझा करने की सहमति' : 'I consent to share relevant health profile details for this chat.'}</label>
+      {error && <p className="patient-inline-error" role="alert">{error}</p>}
+      <form className="patient-chat-form" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+        <label className="sr-only" htmlFor={`patient-report-chat-${screeningId}`}>Ask a question about this report</label>
+        <input id={`patient-report-chat-${screeningId}`} value={message} onChange={(event) => setMessage(event.target.value)} maxLength={1000} placeholder={currentLang === 'te' ? 'మీ ప్రశ్నను టైప్ చేయండి' : currentLang === 'hi' ? 'अपना प्रश्न लिखें' : 'Type your question'} />
+        <button type="submit" className="dash-btn dash-btn-primary" disabled={sending || !message.trim()}>{currentLang === 'te' ? 'పంపండి' : currentLang === 'hi' ? 'भेजें' : 'Send'}</button>
+      </form>
+      <p className="patient-chat-disclaimer">AI suggestions are not a medical diagnosis; consult a doctor.</p>
+    </section>
+  );
+};
+
+const PatientSupportPanel: React.FC<{ currentLang: LanguageCode; onOpenAssistant?: () => void }> = ({ currentLang, onOpenAssistant }) => {
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [category, setCategory] = useState('technical');
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const loadTickets = async () => {
+    setLoading(true); setError('');
+    try {
+      const response = await fetch('/api/patient/support-tickets', { headers: { Authorization: `Bearer ${getPatientAccessToken()}` } });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Support requests could not be loaded.');
+      setTickets(payload.data?.tickets || []);
+    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Support requests could not be loaded.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void loadTickets(); }, []);
+
+  const submitTicket = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true); setError('');
+    try {
+      const mutationId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => { const value = Math.random() * 16 | 0; return (char === 'x' ? value : (value & 0x3 | 0x8)).toString(16); });
+      const response = await fetch('/api/patient/support-tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getPatientAccessToken()}` },
+        body: JSON.stringify({ mutationId, category, subject, description }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Support request could not be submitted.');
+      setSubject(''); setDescription(''); await loadTickets();
+    } catch (submitError) { setError(submitError instanceof Error ? submitError.message : 'Support request could not be submitted.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="patient-help-grid">
+      <section className="patient-home-lower-card">
+        <p className="patient-home-card-kicker">HELP &amp; SUPPORT</p><h2>Common questions</h2>
+        <details><summary>What does DEMO AI mean?</summary><p>It is a screening support feature for demonstration. A qualified clinician reviews personal health concerns.</p></details>
+        <details><summary>How do I arrange an appointment?</summary><p>Use Consultation or Appointments in the patient navigation to view available booking options.</p></details>
+        <details><summary>Can I join a video consultation?</summary><p>Video and voice streaming are blocked until a real teleconsultation adapter is available. Staff can use text case discussion.</p></details>
+        <button type="button" className="dash-btn dash-btn-outline" onClick={onOpenAssistant} disabled={!onOpenAssistant}>Ask Drishti AI assistant</button>
+        <p className="patient-help-emergency"><strong>Urgent help:</strong> Call 104 or visit the nearest health facility.</p>
+      </section>
+      <section className="patient-home-lower-card">
+        <p className="patient-home-card-kicker">SUPPORT REQUEST</p><h2>Contact support</h2>
+        <form className="patient-support-form" onSubmit={(event) => void submitTicket(event)}>
+          <label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="technical">Technical help</option><option value="appointment">Appointment</option><option value="report">Report</option><option value="account">Account</option><option value="other">Other</option></select></label>
+          <label>Subject<input value={subject} onChange={(event) => setSubject(event.target.value)} minLength={3} maxLength={120} required /></label>
+          <label>How can we help?<textarea value={description} onChange={(event) => setDescription(event.target.value)} minLength={5} maxLength={2000} rows={4} required /></label>
+          {error && <p className="patient-inline-error" role="alert">{error}</p>}
+          <button type="submit" className="dash-btn dash-btn-primary" disabled={saving}>{saving ? 'Submitting…' : 'Submit support request'}</button>
+        </form>
+        <h3>{currentLang === 'te' ? 'మీ అభ్యర్థనలు' : currentLang === 'hi' ? 'आपके अनुरोध' : 'Your requests'}</h3>
+        {loading ? <p role="status">Loading support requests…</p> : error && tickets.length === 0 ? <p className="patient-inline-error" role="alert">{error}</p> : tickets.length === 0 ? <p className="patient-inline-state">No support requests yet.</p> : <div className="patient-ticket-list">{tickets.map((ticket) => <article key={ticket.ticketId}><div><strong>{ticket.subject}</strong><small>{ticket.ticketId} · {new Date(ticket.createdAt).toLocaleDateString()}</small></div><span className="patient-ticket-status">{ticket.status.replace('_', ' ')}</span></article>)}</div>}
+      </section>
+    </div>
+  );
+};
 
 interface DiseaseInfo {
   title: Record<LanguageCode, string>;
-  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+  riskLevel: 'DEMO_AI_SUPPORT';
   riskBadge: Record<LanguageCode, string>;
   badgeColor: string;
   badgeBg: string;
   badgeBorder: string;
   icon: string;
   description: Record<LanguageCode, string>;
-  medicationsAndCare: Record<LanguageCode, string[]>;
-  habitsAndDiet: Record<LanguageCode, string[]>;
+  nextSteps: Record<LanguageCode, string[]>;
+  preparation: Record<LanguageCode, string[]>;
   clinicalAction: Record<LanguageCode, string>;
 }
 
-const DISEASE_KNOWLEDGE_BASE: Record<string, DiseaseInfo> = {
-  normal: {
-    title: {
-      te: 'సాధారణ ఆరోగ్యకరమైన శ్లేష్మం (Healthy Mucosa)',
-      en: 'Normal / Healthy Oral Mucosa',
-      hi: 'सामान्य स्वस्थ म्यूकोसा (Healthy Oral Tissue)',
-      ta: 'ஆரோக்கியமான வாய் திசு (Healthy Mucosa)',
-      kn: 'ಆರೋಗ್ಯಕರ ಬಾಯಿಯ ಮ್ಯೂಕೋಸಾ',
-      ml: 'ആരോഗ്യമുള്ള വായ ടിഷ്യു',
-    },
-    riskLevel: 'LOW',
-    riskBadge: {
-      te: '🟢 తక్కువ రిస్క్ (Low Risk)',
-      en: '🟢 Low Risk (Optimal Health)',
-      hi: '🟢 कम जोखिम (Low Risk)',
-      ta: '🟢 குறைந்த ஆபத்து (Low Risk)',
-      kn: '🟢 ಕಡಿಮೆ ಅಪಾಯ (Low Risk)',
-      ml: '🟢 കുറഞ്ഞ റിസ്ക് (Low Risk)',
-    },
-    badgeColor: 'var(--success-text)',
-    badgeBg: 'var(--success-bg)',
-    badgeBorder: 'var(--success-text)',
-    icon: '✨',
-    description: {
-      te: 'మీ నోటి లోపలి భాగం మరియు చిగుళ్ళు ఎటువంటి అసాధారణ మచ్చలు లేకుండా సాధారణ పింక్ రంగుతో ఆరోగ్యంగా ఉన్నాయి.',
-      en: 'Healthy uniform pink oral lining. Epithelial tissue is intact with no suspicious white, red, or ulcerated patches.',
-      hi: 'आपके मुंह की अंदरूनी परत और मसूड़े स्वस्थ गुलाबी रंग के हैं। कोई असामान्य सफेद या लाल पैच नहीं है।',
-      ta: 'உங்கள் வாய் ஆரோக்கியமாக உள்ளது. அசாதாரண தழும்புகள் இல்லை.',
-      kn: 'ನಿಮ್ಮ ಬಾಯಿಯ ಒಳಪದರವು ಯಾವುದೇ ಅಸಹಜ ಕಲೆಗಳಿಲ್ಲದೆ ಆರೋಗ್ಯಕರವಾಗಿದೆ.',
-      ml: 'നിങ്ങളുടെ വായയുടെ അകം ആരോഗ്യകരമായ പിങ്ക് നിറത്തിലാണ്.',
-    },
-    medicationsAndCare: {
-      te: [
-        '🪥 రోజుకు రెండుసార్లు మృదువైన బ్రష్‌తో పళ్ళు శుభ్రం చేసుకోండి (ఉదయం & రాత్రి).',
-        '💧 భోజనం తర్వాత ఎల్లప్పుడూ మంచినీటితో నోటిని పుక్కిలించి ఊయండి.',
-        '🦷 ఫ్లోరైడ్ టూత్‌పేస్ట్ ఉపయోగించండి.',
-      ],
-      en: [
-        '🪥 Gentle twice-daily brushing with soft bristles (morning & before bed).',
-        '💧 Thorough clean water rinse after every meal to clear food residues.',
-        '🦷 Use fluoride toothpaste to keep enamel strong.',
-      ],
-      hi: [
-        '🪥 दिन में दो बार मुलायम ब्रश से दांत साफ करें (सुबह और रात सोने से पहले)।',
-        '💧 भोजन के बाद हमेशा साफ पानी से कुल्ला करें।',
-        '🦷 फ्लोराइड युक्त टूथपेस्ट का उपयोग करें।',
-      ],
-      ta: ['🪥 தினமும் இருமுறை பல்துலக்குங்கள்.', '💧 சாப்பிட்ட பின் வாய் கொப்பளிக்கவும்.'],
-      kn: ['🪥 ದಿನಕ್ಕೆ ಎರಡು ಬಾರಿ ಮೃದುವಾದ ಬ್ರಷ್‌ನಿಂದ ಹಲ್ಲುಜ್ಜಿಕೊಳ್ಳಿ.', '💧 ಊಟದ ನಂತರ ಬಾಯಿ ಮುಕ್ಕಳಿಸಿ.'],
-      ml: ['🪥 ദിവസവും രണ്ടുതവണ പല്ല് തേക്കുക.', '💧 ഭക്ഷണത്തിന് ശേഷം വായ കഴുകുക.'],
-    },
-    habitsAndDiet: {
-      te: [
-        '🚫 గుట్కా, ఖైనీ, తంబాకు, చుట్టకు ఎల్లప్పుడూ దూరంగా ఉండండి.',
-        '🥗 తాజా పండ్లు, ఆకుకూరలు, పుష్కలంగా నీరు తీసుకోండి.',
-        '📅 ప్రతి 6 నెలలకు సమీపంలోని దంత క్లినిక్‌లో సాధారణ తనిఖీ చేయించుకోండి.',
-      ],
-      en: [
-        '🚫 100% Tobacco & Gutka cessation prevents oral disorders.',
-        '🥗 Consume fresh seasonal vegetables, hydration, and vitamin-rich fruits.',
-        '📅 Schedule a routine preventive dental checkup every 6 months.',
-      ],
-      hi: [
-        '🚫 गुटखा, खैनी, तंबाकू और बीड़ी से पूरी तरह दूर रहें।',
-        '🥗 ताजे फल, हरी सब्जियां और पर्याप्त पानी पिएं।',
-        '📅 हर 6 महीने में नजदीकी डेंटल क्लीनिक में सामान्य जांच कराएं।',
-      ],
-      ta: ['🚫 புகையிலை மற்றும் குட்காவை தவிர்க்கவும்.', '🥗 சத்தான உணவுகளை உண்ணுங்கள்.'],
-      kn: ['🚫 ತಂಬಾಕು, ಗುಟ್ಕಾ ಸೇವನೆ ತ್ಯಜಿಸಿ.', '🥗 ಹಸಿರು ತರಕಾರಿಗಳನ್ನು ಸೇವಿಸಿ.'],
-      ml: ['🚫 പുകയില ഉൽപ്പന്നങ്ങൾ ഒഴിവാക്കുക.', '🥗 പഴങ്ങളും പച്ചക്കറികളും കഴിക്കുക.'],
-    },
-    clinicalAction: {
-      te: 'ఏ విధమైన తక్షణ వైద్యం అవసరం లేదు. సాధారణ ఆరోగ్యకరమైన అలవాట్లను కొనసాగించండి.',
-      en: 'No urgent clinical intervention needed. Continue regular oral hygiene.',
-      hi: 'किसी आपातकालीन उपचार की आवश्यकता नहीं है। नियमित स्वच्छता जारी रखें।',
-      ta: 'அவசர சிகிச்சை தேவையில்லை. வழக்கமான பழக்கங்களை தொடரவும்.',
-      kn: 'ತುರ್ತು ಚಿಕಿತ್ಸೆಯ ಅಗತ್ಯವಿಲ್ಲ. ನಿಯಮಿತ ಸ್ವಚ್ಛತೆ ಕಾಪಾಡಿಕೊಳ್ಳಿ.',
-      ml: 'അടിയന്തിര ചികിത്സ ആവശ്യമില്ല. പതിവ് ശുചിത്വം തുടരുക.',
-    },
+const PATIENT_SCREENING_INFO: DiseaseInfo = {
+  title: { en: 'Screening observation recorded', te: 'Screening observation recorded', hi: 'Screening observation recorded', ta: 'Screening observation recorded', kn: 'Screening observation recorded', ml: 'Screening observation recorded' },
+  riskLevel: 'DEMO_AI_SUPPORT',
+  riskBadge: { en: 'DEMO AI - screening support only', te: 'DEMO AI - screening support only', hi: 'DEMO AI - screening support only', ta: 'DEMO AI - screening support only', kn: 'DEMO AI - screening support only', ml: 'DEMO AI - screening support only' },
+  badgeColor: 'var(--warning-text)',
+  badgeBg: 'var(--warning-bg)',
+  badgeBorder: 'var(--warning-text)',
+  icon: '◉',
+  description: {
+    en: 'An automated screening tool recorded an image observation. This is DEMO AI screening support, not a medical diagnosis. A qualified clinician should review it with your health information.',
+    te: 'An automated screening tool recorded an image observation. This is DEMO AI screening support, not a medical diagnosis. A qualified clinician should review it with your health information.',
+    hi: 'An automated screening tool recorded an image observation. This is DEMO AI screening support, not a medical diagnosis. A qualified clinician should review it with your health information.',
+    ta: 'An automated screening tool recorded an image observation. This is DEMO AI screening support, not a medical diagnosis.',
+    kn: 'An automated screening tool recorded an image observation. This is DEMO AI screening support, not a medical diagnosis.',
+    ml: 'An automated screening tool recorded an image observation. This is DEMO AI screening support, not a medical diagnosis.',
   },
-
-  benign_inflammatory: {
-    title: {
-      te: 'నోటి పూత / అల్సర్ లేదా వాపు (Aphthous Stomatitis / Ulcer)',
-      en: 'Benign Inflammatory Condition (Oral Ulcer / Canker Sore / Stomatitis)',
-      hi: 'मुंह का छाला या सूजन (Oral Ulcer / Benign Inflammation)',
-      ta: 'வாய் புண் அல்லது வீக்கம் (Oral Ulcer)',
-      kn: 'ಬಾಯಿಯ ಹುಣ್ಣು ಅಥವಾ ಊತ (Mouth Ulcer)',
-      ml: 'വായയിലെ വ്രണം അല്ലെങ്കിൽ വീക്കം (Oral Ulcer)',
-    },
-    riskLevel: 'MODERATE',
-    riskBadge: {
-      te: '🟡 మధ్యస్థ రిస్క్ (Moderate Risk - శ్రద్ధ అవసరం)',
-      en: '🟡 Moderate Risk (Care & Monitoring Needed)',
-      hi: '🟡 मध्यम जोखिम (ध्यान देने की आवश्यकता)',
-      ta: '🟡 நடுத்தர ஆபத்து (கவனிப்பு தேவை)',
-      kn: '🟡 ಮಧ್ಯಮ ಅಪಾಯ (ಕಾಳಜಿ ಅಗತ್ಯ)',
-      ml: '🟡 മിതമായ റിസ്ക് (ശ്രദ്ധിക്കുക)',
-    },
-    badgeColor: 'var(--warning-text)',
-    badgeBg: 'var(--warning-bg)',
-    badgeBorder: 'var(--warning-text)',
-    icon: '🩹',
-    description: {
-      te: 'నోటి లోపల చిన్న పుండు (నోటి పూత) లేదా చిగుళ్ళ వాపు కనిపించింది. ఇది సాధారణంగా విటమిన్ల లోపం, ఒత్తిడి లేదా కడుపులో వేడి వల్ల వస్తుంది.',
-      en: 'Mild localized mucosal ulceration or inflammation detected. Typically non-malignant, related to canker sores, accidental bite, or nutritional deficiency.',
-      hi: 'मुंह के अंदर छोटा छाला या मसूड़े में हल्की सूजन पाई गई है। यह आमतौर पर विटामिन की कमी या पेट की गर्मी से होता है।',
-      ta: 'வாயில் சிறிய புண் அல்லது ஈறு வீக்கம் காணப்படுகிறது.',
-      kn: 'ಬಾಯಿಯ ಒಳಗೆ ಸಣ್ಣ ಹುಣ್ಣು ಅಥವಾ ಒಸಡಿನ ಊತ ಕಂಡುಬಂದಿದೆ.',
-      ml: 'വായയ്ക്കുള്ളിൽ ചെറിയ വ്രണമോ വീക്കമോ കണ്ടെത്തി.',
-    },
-    medicationsAndCare: {
-      te: [
-        '🧂 గోరువెచ్చని ఉప్పునీటి పుక్కిలింత: 1 గ్లాసు గోరువెచ్చని నీటిలో అర చెంచా ఉప్పు కలిపి రోజుకు 3-4 సార్లు భోజనం తర్వాత పుక్కిలించండి.',
-        '🧴 పూత జెల్ (Soothing Oral Gel): నొప్పి తగ్గడానికి క్లినికల్ అనుమతితో కోలిన్ సాలిసిలేట్ లేదా క్లోరెక్సిడైన్ జెల్ పూయవచ్చు.',
-        '💊 విటమిన్ బి-కాంప్లెక్స్ & విటమిన్ సి: వైద్యుల సలహా మేరకు బి-కాంప్లెక్స్ మాత్రలు తీసుకోవడం వల్ల పుండు త్వరగా మానుతుంది.',
-      ],
-      en: [
-        '🧂 Warm Saline Mouthwash: Dissolve 1/2 tsp salt in warm water; rinse 3-4 times daily after meals to accelerate healing.',
-        '🧴 Soothing Mucosal Gel: Apply over-the-counter oral antiseptic/anesthetic gel (e.g. Chlorhexidine or Choline Salicylate) for pain relief.',
-        '💊 B-Complex & Vitamin C: Take daily multivitamin supplements to restore epithelial mucosal resilience.',
-      ],
-      hi: [
-        '🧂 गुनगुने नमक के पानी से कुल्ला: 1 गिलास गुनगुने पानी में आधा चम्मच नमक मिलाकर दिन में 3-4 बार कुल्ला करें।',
-        '🧴 दर्द निवारक ओरल जेल: छालों पर आराम के लिए कोलीन सैलिसिलेट या क्लोरहेक्सिडीन जेल लगाएं।',
-        '💊 बी-कॉम्प्लेक्स और विटामिन सी: डॉक्टर की सलाह से बी-कॉम्प्लेक्स की गोली लें।',
-      ],
-      ta: ['🧂 வெதுவெதுப்பான உப்பு நீரால் வாய் கொப்பளிக்கவும்.', '🧴 வாய் புண் ஜெல் பயன்படுத்தவும்.'],
-      kn: ['🧂 ಬೆಚ್ಚಗಿನ ಉಪ್ಪು ನೀರಿನಿಂದ ಬಾಯಿ ಮುಕ್ಕಳಿಸಿ.', '🧴 ಹುಣ್ಣಿನ ಜೆಲ್ ಹಚ್ಚಿ.'],
-      ml: ['🧂 ചെറുചൂടുള്ള ഉപ്പുവെള്ളം കൊണ്ട് വായ കഴുകുക.', '🧴 വ്രണത്തിന് ജെൽ പുരട്ടുക.'],
-    },
-    habitsAndDiet: {
-      te: [
-        '🌶️ కారంగా, చాలా వేడిగా మరియు పులుపుగా ఉండే ఆహారాలు తాత్కాలికంగా మానుకోండి.',
-        '🥛 పెరుగు, మజ్జిగ, చలువ చేసే పదార్థాలు మరియు కొబ్బరినీళ్ళు ఎక్కువగా తాగండి.',
-        '🚫 పొగాకు, సిగరెట్లు, ఖైనీ పూర్తిగా నిలిపివేయండి.',
-      ],
-      en: [
-        '🌶️ Avoid spicy, hot, crunchy, and acidic foods until the ulcer heals.',
-        '🥛 Consume buttermilk, curd, coconut water, and high-hydration foods.',
-        '🚫 Completely cease tobacco and alcohol use to prevent mucosal aggravation.',
-      ],
-      hi: [
-        '🌶️ मसालेदार, गर्म और खट्टे भोजन से कुछ दिनों के लिए परहेज करें।',
-        '🥛 छाछ, दही, नारियल पानी का अधिक सेवन करें।',
-        '🚫 तंबाकू, बीड़ी, गुटखा का सेवन तुरंत बंद करें।',
-      ],
-      ta: ['🌶️ காரமான உணவுகளை தவிர்க்கவும்.', '🥛 மோர் மற்றும் தயிர் அதிகம் சாப்பிடவும்.'],
-      kn: ['🌶️ ಖಾರ ಮತ್ತು ಬಿಸಿ ಆಹಾರವನ್ನು ತಪ್ಪಿಸಿ.', '🥛 ಮಜ್ಜಿಗೆ ಮತ್ತು ಮೊಸರು ಸೇವಿಸಿ.'],
-      ml: ['🌶️ എരിവുള്ള ഭക്ഷണങ്ങൾ ഒഴിവാക്കുക.', '🥛 മോരും തൈരും കഴിക്കുക.'],
-    },
-    clinicalAction: {
-      te: 'ఈ పుండు 7 నుండి 10 రోజుల్లో తగ్గకపోతే, వెంటనే CHC పాడేరు లేదా సమీప ప్రాథమిక ఆరోగ్య కేంద్రాన్ని (PHC) సంప్రదించండి.',
-      en: 'If this ulcer does not heal within 7 to 10 days, visit CHC Paderu Dental Outpost for an in-person clinical checkup.',
-      hi: 'यदि यह छाला 7 से 10 दिनों में ठीक नहीं होता है, तो तुरंत CHC पाडेरु या नजदीकी अस्पताल जाएं।',
-      ta: '7-10 நாட்களில் புண் ஆறவில்லை என்றால், மருத்துவரை அணுகவும்.',
-      kn: '7-10 ದಿನಗಳಲ್ಲಿ ಹುಣ್ಣು ಗುಣವಾಗದಿದ್ದರೆ ವೈದ್ಯರನ್ನು ಭೇಟಿ ಮಾಡಿ.',
-      ml: '7-10 ദിവസത്തിനകം മാറിയില്ലെങ്കിൽ ഡോക്ടറെ കാണുക.',
-    },
+  nextSteps: {
+    en: ['Discuss this report with a qualified health worker.', 'Only a clinician can review the image with your health history.'],
+    te: ['Discuss this report with a qualified health worker.', 'Only a clinician can review the image with your health history.'],
+    hi: ['Discuss this report with a qualified health worker.', 'Only a clinician can review the image with your health history.'],
+    ta: ['Discuss this report with a qualified health worker.'], kn: ['Discuss this report with a qualified health worker.'], ml: ['Discuss this report with a qualified health worker.'],
   },
-
-  opmd: {
-    title: {
-      te: 'తెల్లటి లేదా ఎర్రటి మచ్చల పొర - OPMD (Oral Lichen Planus / Leukoplakia)',
-      en: 'Oral Potentially Malignant Disorder (OPMD / Leukoplakia / Lichen Planus)',
-      hi: 'सफेद या लाल पैच - OPMD (Oral Lichen Planus / Leukoplakia)',
-      ta: 'வெள்ளை அல்லது சிவப்பு தழும்பு (OPMD)',
-      kn: 'ಬಿಳಿ ಅಥವಾ ಕೆಂಪು ಕಲೆ - OPMD',
-      ml: 'വെള്ളയോ ചുവപ്പോ ആയ പാട് (OPMD)',
-    },
-    riskLevel: 'HIGH',
-    riskBadge: {
-      te: '🔴 అధిక రిస్క్ (High Risk - తక్షణ వైద్య పరీక్ష అవసరం)',
-      en: '🔴 High Risk (Urgent Specialist Review Recommended)',
-      hi: '🔴 उच्च जोखिम (तत्काल डॉक्टर की जांच आवश्यक)',
-      ta: '🔴 அதிக ஆபத்து (உடனடி மருத்துவ ஆலோசனை தேவை)',
-      kn: '🔴 ಹೆಚ್ಚಿನ ಅಪಾಯ (ತುರ್ತು ತಪಾಸಣೆ ಅಗತ್ಯ)',
-      ml: '🔴 ഉയർന്ന റിസ്ക് (ഉടൻ ഡോക്ടറെ കാണുക)',
-    },
-    badgeColor: 'var(--danger-text)',
-    badgeBg: 'var(--danger-bg)',
-    badgeBorder: 'var(--danger-text)',
-    icon: '⚠️',
-    description: {
-      te: 'నోటి లోపల తెల్లటి లేదా ఎర్రటి మచ్చల పొర కనిపించింది. ఇది పొగాకు, గుట్కా లేదా దీర్ఘకాలిక రాపిడి వల్ల వచ్చే ప్రమాద సూచిక (OPMD) కావచ్చు.',
-      en: 'Mucosal keratinization, persistent white plaque, or reticular striae detected. Classified as a Potentially Malignant Disorder requiring visual confirmation by a Dental Specialist.',
-      hi: 'मुंह के अंदर सफेद या लाल धब्बे की परत दिखाई दी है। यह तंबाकू या गुटखे के कारण होने वाला संभावित पूर्व-कैंसर (OPMD) लक्षण हो सकता है।',
-      ta: 'வாயில் வெள்ளை அல்லது சிவப்பு தழும்பு காணப்படுகிறது.',
-      kn: 'ಬಾಯಿಯ ಒಳಗೆ ಬಿಳಿ ಅಥವಾ ಕೆಂಪು ಕಲೆಗಳ ಪದರ ಕಂಡುಬಂದಿದೆ.',
-      ml: 'വായയ്ക്കുള്ളിൽ വെള്ളയോ ചുവപ്പോ ആയ പാടുകൾ കണ്ടെത്തി.',
-    },
-    medicationsAndCare: {
-      te: [
-        '🚨 తక్షణ క్లినికల్ తనిఖీ: CHC పాడేరు దంత వైద్య నిపుణులను (Dental Officer) వెంటనే సంప్రదించండి.',
-        '🚫 పొగాకు 100% ఆపండి: గుట్కా, ఖైనీ, పాన్, బీడీని తక్షణమే పూర్తిగా నిలిపివేయాలి. ఇది అత్యంత ముఖ్యం.',
-        '💊 యాంటీఆక్సిడెంట్ చికిత్స: వైద్యుల పర్యవేక్షణలో లైకోపీన్ (Lycopene) లేదా విటమిన్ ఏ/ఈ థెరపీ తీసుకోవాలి.',
-        '⚠️ మచ్చపై వేలితో లేదా బ్రష్‌తో గట్టిగా రుద్దకండి.',
-      ],
-      en: [
-        '🚨 Urgent In-Person Clinical Exam: Consult the Dental Specialist at CHC Paderu Dental Outpost.',
-        '🚫 100% Complete Cessation: Cease all betel nut, khaini, gutka, and bidi use immediately.',
-        '💊 Prescribed Antioxidant Therapy: Medical Officer may prescribe high-potency Lycopene, Vitamin A/E.',
-        '⚠️ Never scrub or scrape the white patch with fingers or sharp tools.',
-      ],
-      hi: [
-        '🚨 तुरंत डॉक्टर से जांच: CHC पाडेरु के दंत रोग विशेषज्ञ से तुरंत जांच कराएं।',
-        '🚫 तंबाकू पूरी तरह बंद: गुटखा, खैनी, पान और बीड़ी का सेवन तुरंत 100% बंद करें।',
-        '💊 एंटीऑक्सीडेंट दवा: डॉक्टर की सलाह से लाइकोपीन और आवश्यक दवाएं लें।',
-        '⚠️ पैच को उंगली या किसी नुकीली चीज से न खुरचें।',
-      ],
-      ta: ['🚨 உடனடியாக மருத்துவரை அணுகவும்.', '🚫 புகையிலை பழக்கத்தை உடனடியாக கைவிடவும்.'],
-      kn: ['🚨 ತಕ್ಷಣ ದಂತ ವೈದ್ಯರನ್ನು ಸಂಪರ್ಕಿಸಿ.', '🚫 ತಂಬಾಕು ಸೇವನೆಯನ್ನು ತಕ್ಷಣ ನಿಲ್ಲಿಸಿ.'],
-      ml: ['🚨 ഉടൻ ഡോക്ടറെ കാണുക.', '🚫 പുകയില ഉൽപ്പന്നങ്ങൾ പൂർണ്ണമായും നിർത്തുക.'],
-    },
-    habitsAndDiet: {
-      te: [
-        '👩‍⚕️ మీ గ్రామంలోని ఆశా (ASHA) కార్యకర్తను సంప్రదించండి; ఆమె మిమ్మల్ని పాడేరు ఆసుపత్రికి తీసుకెళ్లడంలో సహాయపడుతుంది.',
-        '🥦 యాంటీఆక్సిడెంట్ ఆహారం: పచ్చి కూరగాయలు, క్యారెట్లు, టమాటాలు, బొప్పాయి ఎక్కువగా తినండి.',
-      ],
-      en: [
-        '👩‍⚕️ Inform your village ASHA worker (Lakshmi Devi); she will arrange clinical escort to CHC Paderu.',
-        '🥦 High-antioxidant diet: Carrots, tomatoes, green leafy vegetables, and citrus fruits.',
-      ],
-      hi: [
-        '👩‍⚕️ अपनी आशा कार्यकर्ता से संपर्क करें, वह अस्पताल जाने में सहायता करेंगी।',
-        '🥦 एंटीऑक्सीडेंट युक्त भोजन: गाजर, टमाटर, हरी सब्जियां खाएं।',
-      ],
-      ta: ['👩‍⚕️ உங்கள் ஆஷா பணியாளரை அணுகவும்.'],
-      kn: ['👩‍⚕️ ನಿಮ್ಮ ಆಶಾ ಕಾರ್ಯಕರ್ತೆಯನ್ನು ಸಂಪರ್ಕಿಸಿ.'],
-      ml: ['👩‍⚕️ ആശാ വർക്കറെ സമീപിക്കുക.'],
-    },
-    clinicalAction: {
-      te: 'CHC పాడేరు డెంటల్ విభాగంలో రాబోయే 3-5 రోజుల్లో తప్పనిసరిగా ఇన్-పర్సన్ పరీక్ష చేయించుకోండి.',
-      en: 'Schedule an in-person clinical examination at CHC Paderu Dental Department within 3 to 5 days.',
-      hi: 'अगले 3-5 दिनों के भीतर CHC पाडेरु के दंत विभाग में जांच कराएं।',
-      ta: '3-5 நாட்களுக்குள் CHC மருத்துவமனைக்கு செல்லவும்.',
-      kn: 'ಮುಂದಿನ 3-5 ದಿನಗಳಲ್ಲಿ CHC ಪಾಡೇರು ಆಸ್ಪತ್ರೆಗೆ ಭೇಟಿ ನೀಡಿ.',
-      ml: '3-5 ദിവസത്തിനകം ആശുപത്രിയിൽ പരിശോധന നടത്തുക.',
-    },
+  preparation: {
+    en: ['Bring this report to your appointment.', 'Continue any instructions already given by your clinician.'],
+    te: ['Bring this report to your appointment.', 'Continue any instructions already given by your clinician.'],
+    hi: ['Bring this report to your appointment.', 'Continue any instructions already given by your clinician.'],
+    ta: ['Bring this report to your appointment.'], kn: ['Bring this report to your appointment.'], ml: ['Bring this report to your appointment.'],
   },
-
-  suspected_malignant: {
-    title: {
-      te: 'తీవ్రమైన పుండు / అత్యవసర నిపుణుల పరీక్ష (Suspicious Mucosal Alteration)',
-      en: 'High-Risk Mucosal Alteration (Urgent Biopsy / Specialist Consultation)',
-      hi: 'संदिग्ध गहरा छाला / तत्काल विशेषज्ञ जांच (High-Risk Alteration)',
-      ta: 'அவசர சிறப்பு மருத்துவ ஆலோசனை (High-Risk Alteration)',
-      kn: 'ತೀವ್ರವಾದ ಬಾಯಿಯ ಹುಣ್ಣು / ತುರ್ತು ಪರೀಕ್ಷೆ',
-      ml: 'അടിയന്തിര വിദഗ്ദ്ധ പരിശോധന ആവശ്യമാണ്',
-    },
-    riskLevel: 'CRITICAL',
-    riskBadge: {
-      te: '🔴 అత్యవసర నిపుణుల సంప్రదింపు (Critical Priority)',
-      en: '🔴 Critical Priority (Immediate Specialist Hospital Referral)',
-      hi: '🔴 सर्वोच्च प्राथमिकता (अस्पताल में तत्काल जांच)',
-      ta: '🔴 மிக அவசரம் (Immediate Specialist Referral)',
-      kn: '🔴 ತುರ್ತು ಗಮನ ಅಗತ್ಯ (Critical Priority)',
-      ml: '🔴 അതീവ ജാഗ്രത (Immediate Specialist Referral)',
-    },
-    badgeColor: 'var(--danger-text)',
-    badgeBg: 'var(--danger-bg)',
-    badgeBorder: 'var(--danger-text)',
-    icon: '🚨',
-    description: {
-      te: 'నోటి కణజాలంలో గట్టిదనం లేదా మానని లోతైన ఎరుపు/తెలుపు గాయం కనిపించింది. దీనికి వెంటనే జిల్లా లేదా ఏరియా ఆసుపత్రి నిపుణులు పరీక్ష చేయాలి.',
-      en: 'Erosive, indurated, or chronic non-healing mucosal alteration detected. Requires prioritized clinical biopsy and histopathological verification by an ENT/Oral Surgeon.',
-      hi: 'मुंह में गहरा न भरने वाला घाव या कठोरता पाई गई है। इसे तुरंत जिला अस्पताल के विशेषज्ञ डॉक्टर को दिखाना अनिवार्य है।',
-      ta: 'ஆறாத புண் காணப்படுகிறது. உடனடியாக அரசு மருத்துவமனைக்கு செல்லவும்.',
-      kn: 'ಗುಣವಾಗದ ತೀವ್ರ ಗಾಯ ಕಂಡುಬಂದಿದೆ. ತಕ್ಷಣ ಜಿಲ್ಲಾ ಆಸ್ಪತ್ರೆಗೆ ಭೇಟಿ ನೀಡಿ.',
-      ml: 'ഉണങ്ങാത്ത വ്രണം കണ്ടെത്തി. ഉടൻ തന്നെ വിദഗ്ദ്ധ പരിശോധന നടത്തുക.',
-    },
-    medicationsAndCare: {
-      te: [
-        '🏥 ఏరియా హాస్పిటల్ పాడేరు (Area Hospital Paderu) లేదా కేజీహెచ్ విశాఖపట్నంకు వెంటనే వెళ్ళండి.',
-        '🩺 డాక్టర్ ఆధ్వర్యంలో బయాప్సీ (Biopsy) నిర్ధారణ పరీక్ష తప్పనిసరిగా చేయించుకోండి.',
-        '🚫 ఎలాంటి నాటు మందులు లేదా ఆకుల పసర్లు రాయవద్దు; ఇది సమస్యను తీవ్రం చేయవచ్చు.',
-      ],
-      en: [
-        '🏥 Immediate referral to Area Hospital Paderu / King George Hospital (KGH) Visakhapatnam ENT-Dental Unit.',
-        '🩺 Undergo clinical biopsy and diagnostic confirmation as ordered by Medical Officer.',
-        '🚫 Do NOT apply unverified herbal remedies or caustic substances to the lesion.',
-      ],
-      hi: [
-        '🏥 तुरंत एरिया अस्पताल पाडेरु या केजीएच विशाखापट्टनम जाएं।',
-        '🩺 डॉक्टर की देखरेख में बायोप्सी जांच कराएं।',
-        '🚫 किसी भी प्रकार की घरेलू जड़ी-बूटी या चूर्ण घाव पर न लगाएं।',
-      ],
-      ta: ['🏥 உடனடியாக அரசு தலைமை மருத்துவமனைக்கு செல்லவும்.'],
-      kn: ['🏥 ತಕ್ಷಣ ತಾಲೂಕು ಅಥವಾ ಜಿಲ್ಲಾ ಆಸ್ಪತ್ರೆಗೆ ತೆರಳಿ.'],
-      ml: ['🏥 ഉടൻ തന്നെ അടുത്തുള്ള വലിയ ആശുപത്രിയിൽ എത്തുക.'],
-    },
-    habitsAndDiet: {
-      te: [
-        '📞 104 హెల్త్‌లైన్ లేదా మీ గ్రామ ఏఎన్ఎం (ANM) కు తక్షణమే సమాచారం ఇవ్వండి.',
-        '🍲 సులభంగా మింగగలిగే చల్లని, మృదువైన ద్రవ ఆహారం తీసుకోండి.',
-      ],
-      en: [
-        '📞 Call 104 Health Helpline or contact your village ANM/ASHA immediately.',
-        '🍲 Consume soft, bland, cooled food that is easy to swallow without pain.',
-      ],
-      hi: [
-        '📞 104 स्वास्थ्य हेल्पलाइन या अपनी एएनएम से तुरंत संपर्क करें।',
-        '🍲 नरम, हल्का और ठंडा खाना खाएं।',
-      ],
-      ta: ['📞 104 அவசர உதவிக்கு அழைக்கவும்.'],
-      kn: ['📞 104 ಸಹಾಯವಾಣಿಗೆ ಕರೆ ಮಾಡಿ.'],
-      ml: ['📞 104 ഹെൽപ്പ് ലൈനിൽ വിളിക്കുക.'],
-    },
-    clinicalAction: {
-      te: 'ఈరోజే లేదా రేపటిలోగా పాడేరు ప్రభుత్వ ఆసుపత్రిలోని ఈఎన్‌టీ / డెంటల్ విభాగానికి వెళ్ళండి.',
-      en: 'Proceed immediately today or tomorrow to Area Hospital Paderu Oral Oncology/Dental unit.',
-      hi: 'आज ही या कल सुबह पाडेरु सरकारी अस्पताल के दंत विभाग में संपर्क करें।',
-      ta: 'இன்றே மருத்துவரை அணுகவும்.',
-      kn: 'ಇಂದೇ ಅಥವಾ ನಾಳೆ ಬೆಳಿಗ್ಗೆ ಆಸ್ಪತ್ರೆಗೆ ಭೇಟಿ ನೀಡಿ.',
-      ml: 'ഇന്നുതന്നെ ആശുപത്രിയിൽ എത്തുക.',
-    },
+  clinicalAction: {
+    en: 'You can book a consultation to discuss this screening observation.',
+    te: 'You can book a consultation to discuss this screening observation.',
+    hi: 'You can book a consultation to discuss this screening observation.',
+    ta: 'You can book a consultation to discuss this screening observation.',
+    kn: 'You can book a consultation to discuss this screening observation.',
+    ml: 'You can book a consultation to discuss this screening observation.',
   },
 };
 
 export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   currentUser,
   onNavigateTab,
-  currentLang = 'te',
+  currentLang = 'en',
   onOpenLanguageModal,
   onToggleAIAssistant,
-  initialTab = 'overview',
+  initialTab = 'home',
+  initialResourceId,
 }) => {
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'appointments' | 'referrals' | 'prescriptions' | 'history' | 'hospitals' | 'education' | 'care-team' | 'reports'
-  >(initialTab);
+  const [activeTab, setActiveTab] = useState<PatientDashboardTab>((initialTab as any) || 'home');
+  const treatmentLogMutationIdRef = useRef<string | null>(null);
+  const treatmentPhotoMutationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    try { localStorage.removeItem('aarogya_gemini_api_key'); } catch {}
+  }, []);
+
+  const switchTab = (tab: PatientDashboardTab) => {
+    const paths: Record<PatientDashboardTab, string> = {
+      home: 'dashboard', profile: 'profile', screening: 'screening', assessment: 'assessment',
+      consultation: 'consult', appointments: 'consult', referrals: 'assessment', prescriptions: 'prescriptions',
+      history: 'history', hospitals: 'hospitals', education: 'help', 'care-team': 'help', reports: 'reports',
+      treatment: 'treatment', reminders: 'reminders', help: 'help', 'report-detail': 'reports',
+    };
+    if ((tab === 'appointments' || tab === 'consultation') && initialResourceId && (activeTab === 'assessment' || activeTab === 'report-detail')) {
+      try { sessionStorage.setItem('patient_booking_screening_id', initialResourceId); } catch {}
+    }
+    window.location.hash = `#/patient/${paths[tab]}`;
+    setActiveTab(tab);
+  };
+
+  useEffect(() => {
+    const currentState = window.history.state;
+    if (!currentState?.patientDashboardTab) {
+      window.history.replaceState(
+        { ...(currentState && typeof currentState === 'object' ? currentState : {}), patientDashboardTab: activeTab },
+        '',
+        window.location.href
+      );
+    }
+
+    const handleBackForward = (event: PopStateEvent) => {
+      const previousTab = event.state?.patientDashboardTab as PatientDashboardTab | undefined;
+      if (previousTab) setActiveTab(previousTab);
+    };
+
+    window.addEventListener('popstate', handleBackForward);
+    return () => window.removeEventListener('popstate', handleBackForward);
+  }, []);
 
   // Live video is blocked until a real teleconsultation adapter is configured.
   const isDoctorCallActive = false;
 
   // Real-Time Patient Identifier
-  const patientId = currentUser?.patientId || 'PAT-LOCAL-001';
+  const patientId = currentUser?.patientId || '';
   const patientName = currentUser?.fullName || 'Beneficiary';
+  const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
+  const [appointmentRefreshVersion, setAppointmentRefreshVersion] = useState(0);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
+  const [appointmentsError, setAppointmentsError] = useState('');
+  const [unreadReminderCount, setUnreadReminderCount] = useState<number | null>(null);
+  const [nextReminderTitle, setNextReminderTitle] = useState('');
+  const [patientReminders, setPatientReminders] = useState<any[]>([]);
+  const [remindersLoading, setRemindersLoading] = useState(false);
+  const [remindersError, setRemindersError] = useState('');
+
+  useEffect(() => {
+    const token = getPatientAccessToken();
+    if (!token) {
+      setAppointmentsLoading(false);
+      setAppointmentsError('Sign in to load your appointment details.');
+      return;
+    }
+    let cancelled = false;
+    const headers = { Authorization: `Bearer ${token}` };
+    const loadPatientSummary = async () => {
+      try {
+        const response = await fetch('/api/v1/consultations/appointments/my', { headers });
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Appointments are unavailable.');
+        if (!cancelled) setPatientAppointments(payload.data?.appointments || []);
+      } catch (error) {
+        if (!cancelled) setAppointmentsError(error instanceof Error ? error.message : 'Appointments are unavailable.');
+      } finally { if (!cancelled) setAppointmentsLoading(false); }
+      try {
+        if (activeTab === 'reminders') setRemindersLoading(true);
+        const response = await fetch('/api/v1/notifications?limit=30', { headers });
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) throw new Error('Reminders are unavailable.');
+        if (!cancelled) {
+          setUnreadReminderCount(Number(payload.data?.unreadCount || 0));
+          const notifications = payload.data?.notifications || [];
+          setPatientReminders(notifications);
+          setNextReminderTitle(notifications.find((notification: any) => !notification.read)?.title || '');
+        }
+      } catch (error) {
+        if (!cancelled) { setUnreadReminderCount(null); setRemindersError(error instanceof Error ? error.message : 'Reminders are unavailable.'); }
+      } finally { if (!cancelled) setRemindersLoading(false); }
+    };
+    void loadPatientSummary();
+    return () => { cancelled = true; };
+  }, [patientId, activeTab, appointmentRefreshVersion]);
+
+  useEffect(() => {
+    const refresh = () => setAppointmentRefreshVersion((version) => version + 1);
+    window.addEventListener('patient-appointments-refresh', refresh);
+    return () => window.removeEventListener('patient-appointments-refresh', refresh);
+  }, []);
 
   // Digital Prescription Viewer Modal State (Module 6 & 7) - Loaded from real patient records
   const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
-  const [prescriptionsList] = useState<any[]>(() => {
+  const [textFormatPrescriptionId, setTextFormatPrescriptionId] = useState<string | null>(null);
+  const [prescriptionsList, setPrescriptionsList] = useState<any[]>(() => {
     try {
       const stored = localStorage.getItem(`aarogya_prescriptions_${patientId}`);
       return stored ? JSON.parse(stored) : [];
@@ -382,9 +423,22 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       return [];
     }
   });
+  const [treatmentPlans, setTreatmentPlans] = useState<any[]>([]);
+  const [treatmentLogs, setTreatmentLogs] = useState<any[]>([]);
+  const [selectedTreatmentPlanId, setSelectedTreatmentPlanId] = useState('');
+  const [treatmentLoading, setTreatmentLoading] = useState(true);
+  const [treatmentSaving, setTreatmentSaving] = useState(false);
+  const [treatmentError, setTreatmentError] = useState('');
+  const [remoteMedicineChecks, setRemoteMedicineChecks] = useState<Record<string, boolean>>({});
+  const [screeningHistoryLoading, setScreeningHistoryLoading] = useState(true);
+  const [screeningHistoryError, setScreeningHistoryError] = useState('');
+  const visiblePrescriptions = initialResourceId
+    ? prescriptionsList.filter((prescription) => prescription.prescriptionId === initialResourceId || prescription._id === initialResourceId)
+    : prescriptionsList;
+  const [symptomNote, setSymptomNote] = useState('');
 
   // Referrals List State (Module 5) - Loaded from real patient referrals
-  const [referralsList] = useState<any[]>(() => {
+  const [referralsList, setReferralsList] = useState<any[]>(() => {
     try {
       const stored = localStorage.getItem(`aarogya_referrals_${patientId}`);
       return stored ? JSON.parse(stored) : [];
@@ -392,16 +446,244 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       return [];
     }
   });
+  const [availablePatientDoctors, setAvailablePatientDoctors] = useState<any[]>([]);
+  const [assessmentLoading, setAssessmentLoading] = useState(false);
+  const [assessmentError, setAssessmentError] = useState('');
+  const [painScore, setPainScore] = useState<number | ''>('');
+  const [symptomSeverity, setSymptomSeverity] = useState<'none' | 'mild' | 'moderate' | 'severe'>('none');
+  const [treatmentPhotoFile, setTreatmentPhotoFile] = useState<File | null>(null);
+  const [treatmentPhotoConsent, setTreatmentPhotoConsent] = useState(false);
+  const [treatmentPhotoHash, setTreatmentPhotoHash] = useState('');
+  const [treatmentPhotoUrls, setTreatmentPhotoUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const createdUrls: string[] = [];
+    const fileIds = [...new Set(treatmentLogs.map((log) => log.photoProgress?.fileId).filter(Boolean))] as string[];
+    void Promise.all(fileIds.map(async (fileId) => {
+      const response = await fetch(`/api/v1/storage/files/${encodeURIComponent(fileId)}`, { headers: { Authorization: `Bearer ${getPatientAccessToken()}` } });
+      if (!response.ok) return null;
+      const url = URL.createObjectURL(await response.blob());
+      createdUrls.push(url);
+      return [fileId, url] as const;
+    })).then((entries) => {
+      if (cancelled) { createdUrls.forEach((url) => URL.revokeObjectURL(url)); return; }
+      setTreatmentPhotoUrls(Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, string]>));
+    }).catch(() => { if (!cancelled) setTreatmentPhotoUrls({}); });
+    return () => { cancelled = true; createdUrls.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [treatmentLogs]);
+
+  useEffect(() => {
+    const token = getPatientAccessToken();
+    if (!token || !currentUser?.patientId) return;
+    let cancelled = false;
+    fetch(`/api/v1/referrals/patient/${encodeURIComponent(currentUser.patientId)}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Referral history is unavailable.');
+        if (!cancelled) setReferralsList(payload.data?.referrals || []);
+      }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [currentUser?.patientId]);
+
+  useEffect(() => {
+    if (activeTab !== 'assessment' && activeTab !== 'home') return;
+    const token = getPatientAccessToken();
+    if (!token) { setAssessmentError('Sign in to load doctor availability.'); return; }
+    let cancelled = false;
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    if (date.getDay() === 0) date.setDate(date.getDate() + 1);
+    setAssessmentLoading(true); setAssessmentError('');
+    fetch(`/api/v1/consultations/availability?date=${date.toISOString().slice(0, 10)}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Doctor availability is unavailable.');
+        if (!cancelled) setAvailablePatientDoctors(payload.data?.doctors || []);
+      }).catch((error) => {
+        if (!cancelled) setAssessmentError(error instanceof Error ? error.message : 'Doctor availability is unavailable.');
+      }).finally(() => { if (!cancelled) setAssessmentLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab]);
 
   // Real-time Uploaded Oral Screening History
-  const [screeningHistory, setScreeningHistory] = useState<any[]>(() => {
+  const [screeningHistory, setScreeningHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!patientId) return;
     try {
-      const stored = localStorage.getItem(`aarogya_screenings_${patientId}`);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+      localStorage.setItem(`aarogya_screenings_${patientId}`, JSON.stringify(screeningHistory.map(sanitizePatientScreeningRecord)));
+    } catch {}
+  }, [patientId, screeningHistory]);
+
+  useEffect(() => {
+    const token = getPatientAccessToken();
+    if (!token || !currentUser?.patientId) { setScreeningHistoryLoading(false); return; }
+    let cancelled = false;
+    fetch(`/api/ai/screenings?patientId=${encodeURIComponent(currentUser.patientId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Screening history is unavailable.');
+      const remoteRecords = (Array.isArray(payload.data) ? payload.data : []).map((record: any) => ({
+        id: record.screeningId,
+        label: PATIENT_SCREENING_LABEL,
+        createdAt: record.createdAt,
+        date: record.createdAt ? new Date(record.createdAt).toLocaleDateString() : '',
+        time: record.createdAt ? new Date(record.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        notes: record.advice || PATIENT_SCREENING_NOTE,
+        riskLevel: record.triageCategory || 'Pending clinician review',
+        clinicianReviewStatus: record.clinicianReviewStatus || 'PENDING',
+        source: record.source,
+        remote: true,
+      }));
+      if (!cancelled) setScreeningHistory((previous) => {
+        const localIds = new Set(previous.map((record) => record.id).filter(Boolean));
+        return [...previous, ...remoteRecords.filter((record: any) => !localIds.has(record.id)).map(sanitizePatientScreeningRecord)]
+          .sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
+      });
+    }).catch((error) => {
+      if (!cancelled) setScreeningHistoryError(error instanceof Error ? error.message : 'Screening history is unavailable.');
+    }).finally(() => { if (!cancelled) setScreeningHistoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [currentUser?.patientId]);
+
+  useEffect(() => {
+    const token = getPatientAccessToken();
+    if (!token || !currentUser?.patientId) { setTreatmentLoading(false); return; }
+    let cancelled = false;
+    const headers = { Authorization: `Bearer ${token}` };
+    const loadPatientRecords = async () => {
+      setTreatmentLoading(true);
+      try {
+        const [prescriptionResponse, planResponse] = await Promise.all([
+          fetch(`/api/v1/prescriptions/patient/${encodeURIComponent(currentUser.patientId!)}`, { headers }),
+          fetch('/api/patient/treatment-plans', { headers }),
+        ]);
+        const [prescriptionPayload, planPayload] = await Promise.all([prescriptionResponse.json(), planResponse.json()]);
+        if (!prescriptionResponse.ok || !prescriptionPayload?.success) throw new Error(prescriptionPayload?.error?.message || 'Prescription history is unavailable.');
+        if (!planResponse.ok || !planPayload?.success) throw new Error(planPayload?.error?.message || 'Treatment tracking is unavailable.');
+        if (!cancelled) {
+          const remotePrescriptions = prescriptionPayload.data?.prescriptions || [];
+          setPrescriptionsList((previous) => {
+            const byId = new Map(previous.map((item) => [item.prescriptionId || item._id, item]));
+            remotePrescriptions.forEach((item: any) => byId.set(item.prescriptionId || item._id, item));
+            return [...byId.values()];
+          });
+          const plans = planPayload.data?.plans || [];
+          setTreatmentPlans(plans);
+          const selected = plans.find((plan: any) => plan.status === 'active') || plans[0];
+          if (selected) setSelectedTreatmentPlanId(selected.treatmentPlanId);
+        }
+      } catch (error) {
+        if (!cancelled) setTreatmentError(error instanceof Error ? error.message : 'Patient records are unavailable.');
+      } finally { if (!cancelled) setTreatmentLoading(false); }
+    };
+    void loadPatientRecords();
+    return () => { cancelled = true; };
+  }, [currentUser?.patientId]);
+
+  const activeTreatmentPlan = treatmentPlans.find((plan) => plan.treatmentPlanId === selectedTreatmentPlanId)
+    || treatmentPlans.find((plan) => plan.status === 'active')
+    || treatmentPlans[0];
+
+  useEffect(() => {
+    const token = getPatientAccessToken();
+    if (!token || !activeTreatmentPlan?.treatmentPlanId) return;
+    let cancelled = false;
+    const loadLogs = async () => {
+      try {
+        const response = await fetch(`/api/patient/treatment-plans/${encodeURIComponent(activeTreatmentPlan.treatmentPlanId)}/logs`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Treatment history is unavailable.');
+        const today = new Date().toISOString().slice(0, 10);
+        const log = (payload.data?.logs || []).find((item: any) => new Date(item.date).toISOString().slice(0, 10) === today);
+        if (!cancelled) {
+          setTreatmentLogs(payload.data?.logs || []);
+          setRemoteMedicineChecks(Object.fromEntries((log?.medicineLogs || []).map((item: any) => [item.medicineId, Boolean(item.taken)])));
+          if (log?.notes) setSymptomNote(log.notes);
+        }
+      } catch (error) {
+        if (!cancelled) setTreatmentError(error instanceof Error ? error.message : 'Treatment history is unavailable.');
+      }
+    };
+    void loadLogs();
+    return () => { cancelled = true; };
+  }, [activeTreatmentPlan?.treatmentPlanId]);
+
+  const startTreatmentTracking = async (prescription: any) => {
+    const token = getPatientAccessToken();
+    if (!token) { setTreatmentError('Sign in to start treatment tracking.'); return; }
+    setTreatmentSaving(true); setTreatmentError('');
+    try {
+      const response = await fetch('/api/patient/treatment-plans/from-prescription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ mutationId: createPatientMutationId(), prescriptionId: prescription.prescriptionId }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Treatment tracking could not be started.');
+      const plan = payload.data?.plan;
+      if (plan) {
+        setTreatmentPlans((previous) => [plan, ...previous.filter((item) => item.treatmentPlanId !== plan.treatmentPlanId)]);
+        setSelectedTreatmentPlanId(plan.treatmentPlanId);
+        setRemoteMedicineChecks({});
+      }
+      setActiveTab('treatment');
+      window.location.hash = '#/patient/treatment';
+    } catch (error) { setTreatmentError(error instanceof Error ? error.message : 'Treatment tracking could not be started.'); }
+    finally { setTreatmentSaving(false); }
+  };
+
+  const saveTreatmentLog = async (checks: Record<string, boolean>, note?: string, photoFile?: File, pain?: number | '') => {
+    if (!activeTreatmentPlan?.treatmentPlanId) return;
+    const token = getPatientAccessToken();
+    if (!token) { setTreatmentError('Sign in to save treatment check-ins.'); return; }
+    setTreatmentSaving(true); setTreatmentError('');
+    try {
+      let photoProgress: any;
+      if (photoFile) {
+        if (!treatmentPhotoConsent) throw new Error('Consent to securely store and share this progress photo with your treating clinician first.');
+        const form = new FormData();
+        form.append('photo', photoFile);
+        treatmentPhotoMutationIdRef.current ||= createPatientMutationId();
+        form.append('mutationId', treatmentPhotoMutationIdRef.current);
+        form.append('consentGiven', 'true');
+        const photoResponse = await fetch(`/api/patient/treatment-plans/${encodeURIComponent(activeTreatmentPlan.treatmentPlanId)}/photos`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
+        });
+        const photoPayload = await photoResponse.json();
+        if (!photoResponse.ok || !photoPayload?.success) throw new Error(photoPayload?.error?.message || 'Progress photo could not be saved.');
+        photoProgress = photoPayload.data?.photoProgress;
+        setTreatmentPhotoHash(photoPayload.data?.sha256Hash || '');
+      }
+      const response = await fetch('/api/patient/treatment-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          mutationId: treatmentLogMutationIdRef.current || (treatmentLogMutationIdRef.current = createPatientMutationId()),
+          treatmentPlanId: activeTreatmentPlan.treatmentPlanId,
+          date: new Date().toISOString().slice(0, 10),
+          medicineLogs: (activeTreatmentPlan.medicines || []).map((medicine: any) => ({ medicineId: medicine.medicineId, taken: Boolean(checks[medicine.medicineId]) })),
+          ...(note ? { symptomLog: { symptoms: [], severity: symptomSeverity, notes: note } } : {}),
+          ...(pain !== '' && pain !== undefined ? { painLog: { score: Number(pain), notes: note || undefined } } : {}),
+          ...(photoProgress ? { photoProgress } : {}),
+          ...(note ? { notes: note } : {}),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error?.message || 'Treatment check-in could not be saved.');
+      if (payload.data?.log) setTreatmentLogs((previous) => [payload.data.log, ...previous.filter((item) => new Date(item.date).toISOString().slice(0, 10) !== new Date(payload.data.log.date).toISOString().slice(0, 10))]);
+      treatmentLogMutationIdRef.current = null;
+      if (photoFile) treatmentPhotoMutationIdRef.current = null;
+      if (photoFile) { setTreatmentPhotoFile(null); setTreatmentPhotoConsent(false); }
+    } catch (error) { setTreatmentError(error instanceof Error ? error.message : 'Treatment check-in could not be saved.'); }
+    finally { setTreatmentSaving(false); }
+  };
+  const activeReport = screeningHistory.find((record) => record.id === initialResourceId)
+    || (activeTab === 'report-detail' ? screeningHistory[0] : null);
 
   const removeScreeningRecord = (recordId: string | undefined, recordIndex: number) => {
     const shouldRemove = window.confirm('Delete this screening photo and its record from this device?');
@@ -439,19 +721,20 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   };
 
   // Voice Guidance (Module 11) - Web Speech API
-  const speakText = (text: string) => {
+  const speakText = (text: string, options?: { language?: 'en' | 'te' | 'hi'; rate?: number }) => {
     try {
       if (!('speechSynthesis' in window)) return;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      if (currentLang === 'te') {
+      const language = options?.language || currentLang;
+      if (language === 'te') {
         utterance.lang = 'te-IN';
-      } else if (currentLang === 'hi') {
+      } else if (language === 'hi') {
         utterance.lang = 'hi-IN';
       } else {
         utterance.lang = 'en-IN';
       }
-      utterance.rate = 0.95;
+      utterance.rate = options?.rate || 1;
       window.speechSynthesis.speak(utterance);
     } catch {}
   };
@@ -462,28 +745,31 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   const [cameraLoading, setCameraLoading] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraDeviceCount, setCameraDeviceCount] = useState(0);
+  const [cameraReady, setCameraReady] = useState(false);
   const [capturedImagePreview, setCapturedImagePreview] = useState<string | null>(null);
+  const [pendingCaptureFile, setPendingCaptureFile] = useState<File | null>(null);
+  const [pendingCapturePreview, setPendingCapturePreview] = useState<string | null>(null);
+  const cameraText = (key: string, fallback: string) => {
+    const path = `patientCamera.${key}`;
+    const translated = getClientTranslation(translations[currentLang] || translations.en, path);
+    if (translated !== path) return translated;
+    const english = getClientTranslation(translations.en, path);
+    return english === path ? fallback : english;
+  };
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [liveScreeningResult, setLiveScreeningResult] = useState<IMucosalLesionResult | null>(null);
-  const [screeningDate, setScreeningDate] = useState<string>('09 Nov 2026');
+  const [screeningDate, setScreeningDate] = useState<string>(() => new Date().toLocaleDateString());
 
-  // Gemini Multimodal Verification States
-  const [geminiResult, setGeminiResult] = useState<IGeminiRefinementResult | null>(null);
-  const [isVerifyingGemini, setIsVerifyingGemini] = useState<boolean>(false);
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    try {
-      return localStorage.getItem('aarogya_gemini_api_key') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [tempApiKey, setTempApiKey] = useState<string>('');
-  const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(false);
+  const [prescriptionSpeechRate, setPrescriptionSpeechRate] = useState(1);
+  const [prescriptionSpeechLanguage, setPrescriptionSpeechLanguage] = useState<'en' | 'te' | 'hi'>(currentLang === 'te' || currentLang === 'hi' ? currentLang : 'en');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestIdRef = useRef(0);
+  const pendingPreviewUrlRef = useRef<string | null>(null);
   const analysisRunRef = useRef(0);
   const currentAnalysisEntryIdRef = useRef<string | null>(null);
   const analysisAbortControllerRef = useRef<AbortController | null>(null);
@@ -495,17 +781,8 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
     salineRinse: true,
   });
 
-  const village = (currentUser as any)?.villageName || 'Agency Habitation';
-  const mandal = (currentUser as any)?.mandal || 'Paderu Agency';
-
-  // Cleanup camera stream on unmount
-  useEffect(() => {
-    return () => {
-      stopCameraStream();
-    };
-  }, []);
-
-  const stopCameraStream = () => {
+  const stopCameraStream = (updateUi = true) => {
+    cameraRequestIdRef.current += 1;
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -513,54 +790,85 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setIsCameraActive(false);
-    setCameraLoading(false);
+    if (updateUi) {
+      setIsCameraActive(false);
+      setCameraLoading(false);
+      setCameraReady(false);
+    }
   };
 
+  const attachVideoElement = useCallback((video: HTMLVideoElement | null) => {
+    videoRef.current = video;
+    if (video && mediaStreamRef.current) {
+      video.srcObject = mediaStreamRef.current;
+      void video.play().catch(() => {
+        setCameraError(cameraText('previewFailed', 'Camera preview could not start. Please upload a photo instead.'));
+        stopCameraStream();
+      });
+    }
+  }, [currentLang]);
+
+  useEffect(() => {
+    return () => {
+      stopCameraStream(false);
+      if (pendingPreviewUrlRef.current) URL.revokeObjectURL(pendingPreviewUrlRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'screening') stopCameraStream();
+  }, [activeTab]);
+
+  useEffect(() => {
+    const stopForLogout = () => stopCameraStream();
+    window.addEventListener('aarogya:stop-camera', stopForLogout);
+    return () => window.removeEventListener('aarogya:stop-camera', stopForLogout);
+  }, []);
+
+  const cameraErrorMessage = (error: unknown): string => {
+    const name = typeof error === 'object' && error && 'name' in error ? String((error as { name?: string }).name || '') : '';
+    console.warn('[patient-camera] getUserMedia failed', { name: name || 'UnknownError', message: error instanceof Error ? error.message : String(error) });
+    const key = name === 'NotAllowedError' ? 'permissionDenied'
+      : name === 'InsecureContextError' ? 'notSecure'
+      : name === 'SecurityError' ? 'permissionDenied'
+      : name === 'NotFoundError' || name === 'DevicesNotFoundError' ? 'noCamera'
+      : name === 'NotReadableError' || name === 'TrackStartError' ? 'cameraBusy'
+      : name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError' ? 'constraints'
+      : name === 'TypeError' || name === 'NotSupportedError' ? 'unsupported'
+      : 'general';
+    return cameraText(key, 'Could not start the camera. Check camera permissions or upload a photo instead.');
+  };
   const startCameraStream = async (targetFacing: 'environment' | 'user') => {
     stopCameraStream();
     setCameraError(null);
     setCameraLoading(true);
+    const requestId = cameraRequestIdRef.current;
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera not supported on this browser. Please upload an image.');
+      if (!window.isSecureContext) {
+        throw Object.assign(new TypeError('Camera access requires a secure context (HTTPS or localhost).'), { name: 'InsecureContextError' });
       }
+      if (!navigator.mediaDevices?.getUserMedia) throw new TypeError('navigator.mediaDevices.getUserMedia is unavailable');
       let stream: MediaStream;
       try {
-        const constraints: MediaStreamConstraints = {
-          video: {
-            facingMode: targetFacing,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch {
-        // Fallback for laptop/desktop webcams that do not support environment facing mode
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: targetFacing }, audio: false });
+      } catch (preferredError) {
+        const preferredName = typeof preferredError === 'object' && preferredError && 'name' in preferredError ? String((preferredError as { name?: string }).name || '') : '';
+        if (!['OverconstrainedError', 'ConstraintNotSatisfiedError'].includes(preferredName)) throw preferredError;
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      if (requestId !== cameraRequestIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
       }
       mediaStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
-      }
       setIsCameraActive(true);
       setFacingMode(targetFacing);
-    } catch (err: any) {
-      console.warn('Camera stream error:', err);
-      setCameraError(
-        currentLang === 'te'
-          ? 'కెమెరా ప్రారంభించలేకపోయాము. దయచేసి కెమెరా అనుమతిని ఇవ్వండి లేదా ఫోటో అప్‌లోడ్ చేయండి.'
-          : currentLang === 'hi'
-          ? 'कैमरा शुरू नहीं हो सका। कृपया अनुमति दें या गैलरी से फोटो अपलोड करें।'
-          : 'Could not start camera. Please grant camera permission or upload a photo from your gallery.'
-      );
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      setCameraDeviceCount(devices.filter((device) => device.kind === 'videoinput').length);
+    } catch (error) {
+      if (requestId === cameraRequestIdRef.current) setCameraError(cameraErrorMessage(error));
     } finally {
-      setCameraLoading(false);
+      if (requestId === cameraRequestIdRef.current) setCameraLoading(false);
     }
   };
 
@@ -571,32 +879,52 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
 
   // Run Real-Time AI Inference on Canvas
   const processCanvasImage = async (canvas: HTMLCanvasElement) => {
+    if (!patientId) {
+      setScreeningHistoryError('Your patient record is not linked to this login. Please contact support.');
+      return;
+    }
     const analysisRunId = ++analysisRunRef.current;
     analysisAbortControllerRef.current?.abort();
     analysisAbortControllerRef.current = new AbortController();
     setIsAnalyzing(true);
-    setGeminiResult(null);
+    setScreeningHistoryError('');
     try {
       const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       setCapturedImagePreview(dataUrl);
-
-      // Step 1: Run Primary Neural Model (ONNX WebAssembly)
-      const result = await analyzeMucosalLesion(canvas, patientId);
+      const token = getPatientAccessToken();
+      const result = await analyzeMucosalLesion(canvas, patientId, currentUser?.hospitalId, token, true, currentLang);
       if (analysisRunRef.current !== analysisRunId) return;
       setLiveScreeningResult(result);
       const currentDateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       setScreeningDate(currentDateStr);
 
+      let recordId = result.screeningId;
+      let notes = result.geminiAnalysis?.answerText || result.label || PATIENT_SCREENING_NOTE;
+      let recordStatus = 'Saved for clinician review';
+      if (result.source === 'on-device') {
+        const offlineReport = await generateCombinedReport(
+          patientId, currentUser?.hospitalId, result, undefined, undefined, token, undefined, undefined, true
+        );
+        recordId = offlineReport.screeningId || offlineReport.clientId;
+        notes = offlineReport.combinedRecommendation.advice;
+        recordStatus = 'Saved offline; sync pending';
+      }
+
       // Record in live screening history
       const newHistoryEntry = {
-        id: `SCR-LIVE-${Date.now().toString().slice(-6)}`,
+        id: recordId || `pending-${Date.now()}`,
         date: currentDateStr,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        imageUrl: dataUrl,
-        label: result.label,
+        label: 'DEMO AI screening support',
         confidence: Math.round(result.confidence * 100),
-        status: 'Real-Time AI Complete',
-        notes: (result as any).geminiAnalysis?.clinicalSummary || 'Live photo oral screening inference.',
+        observation: result.geminiAnalysis?.observedCondition || result.label,
+        geminiAnalysis: result.geminiAnalysis,
+        imageQuality: result.imageQuality,
+        status: recordStatus,
+        notes,
+        triageCategory: result.referToSpecialist ? 'URGENT_SPECIALIST' : 'SCREENING_SUPPORT',
+        source: result.source,
+        createdAt: new Date().toISOString(),
       };
       currentAnalysisEntryIdRef.current = newHistoryEntry.id;
 
@@ -608,61 +936,14 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
         return updated;
       });
 
-      // Also dispatch to backend real-time screening case queue
-      try {
-        const token = localStorage.getItem('aarogya_token') || '';
-        fetch('/api/v1/screening/ai/analyze', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            patientId,
-            patientName,
-            imageBase64: dataUrl,
-          }),
-          signal: analysisAbortControllerRef.current?.signal,
-        }).catch(() => null);
-
-        // Also queue in real-time cases for MO Doctor Dashboard
-        const existingCasesStr = localStorage.getItem('aarogya_realtime_cases');
-        const existingCases = existingCasesStr ? JSON.parse(existingCasesStr) : [];
-        const newDoctorCase = {
-          id: newHistoryEntry.id,
-          name: patientName,
-          age: 40,
-          gender: 'Beneficiary',
-          village,
-          mandal,
-          lesionSite: result.label || 'Oral Cavity',
-          durationWeeks: 1,
-          aiTriageFlag: result.label,
-          riskCategory: result.label === 'opmd' ? 'HIGH' : result.label === 'benign_inflammatory' ? 'MODERATE' : 'LOW',
-          sha256Hash: `live_sha_${Date.now()}`,
-          photoUrl: dataUrl,
-          status: 'PENDING_REVIEW',
-          createdAt: new Date().toISOString(),
-        };
-        existingCases.unshift(newDoctorCase);
-        localStorage.setItem('aarogya_realtime_cases', JSON.stringify(existingCases));
-      } catch {}
-
-      // Step 2: Intelligent Multi-Tier Gate:
-      // Invoke Google Gemini Multimodal Vision to analyze mucosal observations, recommend specialist doctor & home remedies
-      setIsVerifyingGemini(true);
-      try {
-        const gemini = await verifyAndRefineWithGemini(canvas, result, currentLang, geminiApiKey);
-        if (analysisRunRef.current !== analysisRunId) return;
-        setGeminiResult(gemini);
-      } catch (gErr) {
-        console.warn('Gemini verification error:', gErr);
-      } finally {
-        setIsVerifyingGemini(false);
-      }
       if (analysisRunRef.current === analysisRunId) currentAnalysisEntryIdRef.current = null;
     } catch (err) {
       console.error('Error running oral screening inference:', err);
+      if (analysisRunRef.current === analysisRunId) {
+        setCapturedImagePreview(null);
+        setLiveScreeningResult(null);
+        setScreeningHistoryError(err instanceof Error ? err.message : 'Screening could not be completed. Please retry.');
+      }
     } finally {
       if (analysisRunRef.current === analysisRunId) setIsAnalyzing(false);
     }
@@ -682,584 +963,317 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
         } catch {}
         return updated;
       });
-      try {
-        const storedCases = JSON.parse(localStorage.getItem('aarogya_realtime_cases') || '[]');
-        localStorage.setItem('aarogya_realtime_cases', JSON.stringify(
-          storedCases.filter((record: any) => record.id !== entryId)
-        ));
-      } catch {}
     }
     stopCameraStream();
     setIsAnalyzing(false);
-    setIsVerifyingGemini(false);
+    clearPendingCapture();
     setCapturedImagePreview(null);
     setLiveScreeningResult(null);
-    setGeminiResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleManualGeminiVerification = async () => {
-    if (!canvasRef.current || !liveScreeningResult) return;
-    setIsVerifyingGemini(true);
-    try {
-      const gemini = await verifyAndRefineWithGemini(canvasRef.current, liveScreeningResult, currentLang, geminiApiKey);
-      setGeminiResult(gemini);
-    } catch (gErr) {
-      console.warn('Manual Gemini verification failed:', gErr);
-    } finally {
-      setIsVerifyingGemini(false);
-    }
+  const setPendingCapture = (file: File) => {
+    if (pendingPreviewUrlRef.current) URL.revokeObjectURL(pendingPreviewUrlRef.current);
+    const previewUrl = URL.createObjectURL(file);
+    pendingPreviewUrlRef.current = previewUrl;
+    setPendingCaptureFile(file);
+    setPendingCapturePreview(previewUrl);
   };
 
-  // Capture snapshot from Live Video
+  const clearPendingCapture = () => {
+    if (pendingPreviewUrlRef.current) URL.revokeObjectURL(pendingPreviewUrlRef.current);
+    pendingPreviewUrlRef.current = null;
+    setPendingCaptureFile(null);
+    setPendingCapturePreview(null);
+  };
+
+  // Capture a still frame, then require the patient to review it before analysis.
   const handleCaptureSnapshot = () => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !canvasRef.current || !cameraReady) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     stopCameraStream();
-    processCanvasImage(canvas);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        setCameraError('The camera photo could not be created. Please try again or upload a photo.');
+        return;
+      }
+      setPendingCapture(new File([blob], `oral-screening-${Date.now()}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }));
+    }, 'image/jpeg', 0.9);
+  };
+
+  const handleRetakePhoto = () => {
+    clearPendingCapture();
+    setCapturedImagePreview(null);
+    setLiveScreeningResult(null);
+    if (activeInputMode === 'camera') void startCameraStream(facingMode);
+    else if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  const handleUseCapturedPhoto = async () => {
+    const file = pendingCaptureFile;
+    if (!file || !canvasRef.current) return;
+    if (!patientId) {
+      setScreeningHistoryError('Your patient record is not linked to this login. Please contact support.');
+      return;
+    }
+    const imageUrl = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error('Could not read this image. Choose another photo.'));
+        image.src = imageUrl;
+      });
+      const maxDim = 1200;
+      const scale = Math.min(1, maxDim / Math.max(image.width, image.height));
+      const canvas = canvasRef.current;
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Image processing is unavailable in this browser.');
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      clearPendingCapture();
+      await processCanvasImage(canvas);
+    } catch (error) {
+      setScreeningHistoryError(error instanceof Error ? error.message : 'Could not use this photo. Choose another image.');
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+    }
   };
 
   // Handle Image File Upload (Clicked Photos / Gallery)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setScreeningHistoryError('Choose an image file (JPG, PNG, or HEIC), not a document or video.');
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      setScreeningHistoryError('Choose a photo smaller than 12 MB so it can be checked clearly.');
+      return;
+    }
 
+    setActiveInputMode('upload');
+    setCameraError(null);
+    setScreeningHistoryError('');
     stopCameraStream();
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        if (!canvasRef.current) return;
-        const canvas = canvasRef.current;
-        // Limit max dimension to 1200px for high performance
-        const maxDim = 1200;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, w, h);
-        processCanvasImage(canvas);
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const getGreeting = () => {
-    if (currentLang === 'te') {
-      return `నమస్కారం, ${patientName} గారు! మీ నోటి ఆరోగ్యం మరియు క్లినికల్ రికార్డులు.`;
-    }
-    if (currentLang === 'hi') {
-      return `नमस्ते, ${patientName} जी! आपका ओरल स्वास्थ्य एवं देखभाल पोर्टल।`;
-    }
-    return `Welcome back, ${patientName}! Your personal oral health & care portal.`;
+    setPendingCapture(file);
   };
 
   // Get active disease knowledge block
-  const rawKey = liveScreeningResult?.label || 'normal';
-  const diseaseInfo = DISEASE_KNOWLEDGE_BASE[rawKey] || DISEASE_KNOWLEDGE_BASE.normal;
-
-  const navTabs = [
-    { id: 'overview' as const, label: currentLang === 'te' ? '📋 ఆరోగ్య హోమ్ & స్క్రీనింగ్' : currentLang === 'hi' ? '📋 स्वास्थ्य होम' : '📋 Health Home & AI' },
-    { id: 'appointments' as const, label: currentLang === 'te' ? '📅 నా అపాయింట్‌మెంట్లు' : currentLang === 'hi' ? '📅 अपॉइंटमेंट' : '📅 My Appointments' },
-    { id: 'referrals' as const, label: currentLang === 'te' ? '🔄 నా రిఫరల్స్' : currentLang === 'hi' ? '🔄 मेरे रेफरल' : '🔄 My Referrals' },
-    { id: 'prescriptions' as const, label: currentLang === 'te' ? '💊 నా మందుల చీటీలు' : currentLang === 'hi' ? '💊 दवाई के पर्चे' : '💊 Prescriptions' },
-    { id: 'history' as const, label: currentLang === 'te' ? '📜 నా ఆరోగ్య చరిత్ర' : currentLang === 'hi' ? '📜 स्वास्थ्य इतिहास' : '📜 Health History' },
-    { id: 'hospitals' as const, label: currentLang === 'te' ? '🏥 సమీప ఆసుపత్రులు' : currentLang === 'hi' ? '🏥 नजदीकी अस्पताल' : '🏥 Nearby Hospitals' },
-    { id: 'education' as const, label: currentLang === 'te' ? '🪥 నోటి సంరక్షణ సూచనలు' : currentLang === 'hi' ? '🪥 ओरल स्वास्थ्य' : '🪥 Oral Care' },
-    { id: 'care-team' as const, label: '👥 Care Team' },
-    { id: 'reports' as const, label: '📄 Medical Records' },
+  const diseaseInfo = PATIENT_SCREENING_INFO;
+  const geminiEducation = liveScreeningResult?.geminiAnalysis;
+  const screeningEngineLabel = geminiEducation?.analyzedByModel
+    ? `Gemini · ${geminiEducation.analyzedByModel}`
+    : liveScreeningResult?.source === 'on-device'
+      ? 'On-device ONNX (offline)'
+      : liveScreeningResult?.modelVersion || 'Server screening model';
+  const screeningExplanation = geminiEducation?.patientExplanation?.trim()
+    || geminiEducation?.answerText?.trim()
+    || PATIENT_ORAL_EDUCATION_FALLBACK.explanation;
+  const possibleCauses = geminiEducation?.possibleCauses?.length
+    ? geminiEducation.possibleCauses
+    : PATIENT_ORAL_EDUCATION_FALLBACK.possibleCauses;
+  const clinicianTalkingPoints = geminiEducation?.whatToTellClinician?.length
+    ? geminiEducation.whatToTellClinician
+    : PATIENT_ORAL_EDUCATION_FALLBACK.whatToTellClinician;
+  const reviewGuidance = geminiEducation?.whenToSeekReview?.length
+    ? geminiEducation.whenToSeekReview
+    : PATIENT_ORAL_EDUCATION_FALLBACK.whenToSeekReview;
+  const oralHealthSources = geminiEducation?.informationSources?.length
+    ? geminiEducation.informationSources
+    : PATIENT_ORAL_EDUCATION_FALLBACK.sources;
+  const patientEducationCards = [
+    {
+      title: currentLang === 'te' ? 'సాధ్యమైన సాధారణ కారణాలు' : currentLang === 'hi' ? 'संभावित सामान्य कारण' : 'Possible causes (general information)',
+      items: possibleCauses,
+    },
+    {
+      title: currentLang === 'te' ? 'వైద్య సిబ్బందికి చెప్పాల్సినవి' : currentLang === 'hi' ? 'स्वास्थ्यकर्मी को बताने योग्य बातें' : 'What to tell your health worker',
+      items: clinicianTalkingPoints,
+    },
+    {
+      title: currentLang === 'te' ? 'ఎప్పుడు వైద్య సమీక్ష తీసుకోవాలి' : currentLang === 'hi' ? 'कब स्वास्थ्यकर्मी से मिलें' : 'When to seek an in-person review',
+      items: reviewGuidance,
+    },
   ];
+  const profileValues = [currentUser?.fullName, currentUser?.yearOfBirth, currentUser?.gender, currentUser?.phone, currentUser?.address, currentUser?.village, currentUser?.mandal];
+  const profileCompletion = Math.round((profileValues.filter(Boolean).length / profileValues.length) * 100);
+  const prescribedMedicineItems: Array<{ key: string; medicine: any }> = (activeTreatmentPlan?.medicines || []).map((medicine: any) => ({ key: String(medicine.medicineId), medicine }));
+  const weekStart = new Date(); weekStart.setUTCDate(weekStart.getUTCDate() - 6); weekStart.setUTCHours(0, 0, 0, 0);
+  const recentTreatmentLogs = treatmentLogs.filter((log) => new Date(log.date).getTime() >= weekStart.getTime());
+  const medicinesTakenThisWeek = recentTreatmentLogs.reduce((count, log) => count + (log.medicineLogs || []).filter((entry: any) => entry.taken).length, 0);
+  const medicinesScheduledThisWeek = prescribedMedicineItems.length * 7;
+  const dailyCareProgress = medicinesScheduledThisWeek ? Math.round((medicinesTakenThisWeek / medicinesScheduledThisWeek) * 100) : 0;
+  const adherenceChart = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - (6 - index));
+    const dateKey = date.toISOString().slice(0, 10);
+    const log = treatmentLogs.find((item) => new Date(item.date).toISOString().slice(0, 10) === dateKey);
+    return { day: date.toLocaleDateString(currentLang, { weekday: 'short', timeZone: 'UTC' }), percentage: Number(log?.adherencePercentage || 0) };
+  });
+
 
   return (
-    <div className="patient-dashboard-root" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+    <div className="patient-dashboard-root patient-dashboard-layout patient-dashboard-layout-fullwidth">
       {/* Hidden processing canvas */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* 1. Warm Patient Welcome Hero with Instant Language Button */}
-      <div
-        className="patient-welcome-hero"
-        style={{
-          background: 'var(--surface)',
-          border: '1.5px solid var(--border)',
-          borderRadius: '18px',
-          padding: '24px 28px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '16px',
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)',
-          color: 'var(--text-primary)',
-          marginTop: '4px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.5rem',
-              fontWeight: 800,
-              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
-              flexShrink: 0,
-            }}
-          >
-            {patientName.charAt(0)}
-          </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              ITDA Paderu Tribal Health Initiative • ఆరోగ్య దృష్టి
-            </div>
-            <h2 style={{ margin: '4px 0 4px 0', fontSize: '1.38rem', color: 'var(--text-primary)', fontWeight: 700, lineHeight: 1.3 }}>
-              {getGreeting()}
-            </h2>
-            <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
-              📍 <strong style={{ color: 'var(--text-primary)' }}>{village}</strong>, {mandal} • Health ID:{' '}
-              <code style={{ color: 'var(--accent)', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700, border: '1px solid var(--border)' }}>
-                {patientId}
-              </code>
-              {' '}• ABHA:{' '}
-              <code style={{ color: 'var(--btn-primary-bg)', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700, border: '1px solid var(--border)' }}>
-                {currentUser?.abhaNumber || '14-8492-3814-7731'}
-              </code>
-            </div>
-          </div>
+      <aside className="patient-dashboard-sidebar" aria-label={currentLang === 'te' ? 'రోగి నావిగేషన్' : currentLang === 'hi' ? 'रोगी नेविगेशन' : 'Patient navigation'}>
+        <div className="patient-sidebar-brand"><span aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M3.5 16s4.4-8 12.5-8 12.5 8 12.5 8-4.4 8-12.5 8S3.5 16 3.5 16Z" stroke="currentColor" strokeWidth="2"/><circle cx="16" cy="16" r="3.5" fill="currentColor"/><path d="M22.5 5.5c-4.7 0-7.4 1.9-7.4 5.4 0 1 .3 1.8.8 2.5 1.9-2.6 4.1-4.4 7.2-5.6l-.6-2.3Z" fill="#4b8c73"/></svg></span><strong>Aarogya Drishti</strong><small>Patient Portal</small></div>
+        <div className="patient-sidebar-heading">
+          <span className="patient-sidebar-avatar" aria-hidden="true">{patientName.slice(0, 1).toUpperCase()}</span>
+          <div><strong>{patientName}</strong><span>{currentLang === 'te' ? 'రోగి పోర్టల్' : currentLang === 'hi' ? 'रोगी पोर्टल' : 'Patient portal'}</span></div>
         </div>
-
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Theme Mode Toggle (Light / Dark) */}
-          <ThemeToggle currentLang={currentLang} />
-
-          {/* Language Selector Button */}
-          {onOpenLanguageModal && (
-            <button
-              type="button"
-              onClick={onOpenLanguageModal}
-              style={{
-                background: 'var(--surface-2)',
-                color: 'var(--text-primary)',
-                border: '1.5px solid var(--border)',
-                padding: '8px 16px',
-                borderRadius: '10px',
-                fontWeight: 700,
-                fontSize: '0.86rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.18s ease',
-              }}
-            >
-              <span>🌐</span>
-              <span>{currentLang === 'te' ? 'భాష: తెలుగు' : currentLang === 'hi' ? 'भाषा: हिन्दी' : 'Language: EN'}</span>
-              <span style={{ fontSize: '0.72rem', background: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', padding: '2px 6px', borderRadius: '6px' }}>మార్చండి</span>
+        <p className="patient-sidebar-section-label">{currentLang === 'te' ? 'రోగి సేవలు' : currentLang === 'hi' ? 'रोगी सेवाएँ' : 'Patient tools'}</p>
+        <nav className="patient-sidebar-nav">
+          {([
+            ['home', '⌂', currentLang === 'te' ? 'డాష్‌బోర్డ్' : currentLang === 'hi' ? 'डैशबोर्ड' : 'Dashboard'],
+            ['profile', '◉', currentLang === 'te' ? 'ఆరోగ్య ప్రొఫైల్' : currentLang === 'hi' ? 'स्वास्थ्य प्रोफ़ाइल' : 'Health Profile'],
+            ['screening', '◎', currentLang === 'te' ? 'నోటి స్క్రీనింగ్' : currentLang === 'hi' ? 'मुख स्क्रीनिंग' : 'Oral Screening'],
+            ['assessment', '✳', currentLang === 'te' ? 'DEMO AI అంచనా' : currentLang === 'hi' ? 'DEMO AI आकलन' : 'AI Assessment'],
+            ['consultation', '▦', currentLang === 'te' ? 'సంప్రదింపులు' : currentLang === 'hi' ? 'परामर्श' : 'Consultation'],
+            ['history', '◷', currentLang === 'te' ? 'నివేదికలు & చరిత్ర' : currentLang === 'hi' ? 'रिपोर्ट और इतिहास' : 'Reports & History'],
+            ['treatment', '＋', currentLang === 'te' ? 'చికిత్స ట్రాకింగ్' : currentLang === 'hi' ? 'उपचार ट्रैकिंग' : 'Treatment'],
+          ] as [PatientDashboardTab, string, string][]).map(([tab, icon, label], index) => (
+            <button key={`${index}-${tab}`} type="button" className={`patient-sidebar-item${activeTab === tab ? ' active' : ''}`} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => switchTab(tab)}>
+              <span className="patient-sidebar-number">{index + 1}</span><span className="patient-sidebar-icon" aria-hidden="true">{icon}</span><span className="patient-sidebar-label">{label}</span>
             </button>
-          )}
+          ))}
+        </nav>
+        <div className="patient-sidebar-tools">
+          <p className="patient-sidebar-ai-note">DEMO AI screening support. Report chat uses the server configured Gemini service when available.</p>
+          <button type="button" className="patient-sidebar-key" onClick={onOpenLanguageModal}>
+            <span aria-hidden="true">文</span><span>{currentLang === 'te' ? 'భాష' : currentLang === 'hi' ? 'भाषा' : 'Language'}</span>
+          </button>
 
-          <span
-            style={{
-              background: 'rgba(16, 185, 129, 0.25)',
-              color: '#34d399',
-              border: '1px solid rgba(16, 185, 129, 0.5)',
-              padding: '6px 14px',
-              borderRadius: '20px',
-              fontWeight: 700,
-              fontSize: '0.82rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            ● Citizen Verified
-          </span>
-
-          {onNavigateTab && (
-            <button
-              type="button"
-              style={{
-                background: '#10b981',
-                color: '#022c22',
-                border: 'none',
-                padding: '9px 18px',
-                borderRadius: '10px',
-                fontWeight: 700,
-                fontSize: '0.86rem',
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.4)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              onClick={() => onNavigateTab('appointments')}
-            >
-              📅 {currentLang === 'te' ? 'అపాయింట్‌మెంట్' : currentLang === 'hi' ? 'अपॉइंटमेंट लें' : 'Book Appointment'}
-            </button>
-          )}
         </div>
-      </div>
+      </aside>
 
-      {/* 2. Patient Health Overview KPI Grid */}
-      <div className="dash-kpi-grid">
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-header">
-            <span className="dash-kpi-label">Health ID Card</span>
-            <div className="dash-kpi-icon-wrap icon-emerald">🪪</div>
-          </div>
-          <div className="dash-kpi-value" style={{ fontSize: '1.35rem' }}>{patientId}</div>
-          <div className="dash-kpi-footer">
-            <span className="dash-kpi-trend-up">● Active</span>
-            <span>ABHA Linked Profile</span>
-          </div>
+      <main className="patient-dashboard-content">
+      <div className="patient-demo-banner" role="status">{'\u26a0\ufe0f SIMULATION SYSTEM \u2014 DEMO DATA ONLY \u2014 NOT FOR CLINICAL USE'}</div>
+      {activeTab === 'home' && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}><HealthCardButton patient={currentUser} language={currentLang} /></div>}
+      <nav className="patient-global-breadcrumb" aria-label="Breadcrumb"><button type="button" onClick={() => switchTab('home')}>Patient Portal</button><span aria-hidden="true">/</span><span>{activeTab === 'report-detail' ? 'Oral Screening / Report' : activeTab.replace('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())}</span></nav>
+      {activeTab !== 'home' && activeTab !== 'report-detail' && <header className="patient-route-title"><h1>{({ profile: 'Health Profile', screening: 'Oral Screening', assessment: 'AI Assessment & Referrals', consultation: 'Consultation', appointments: 'Consultation', history: 'Reports & History', treatment: 'Treatment Tracking', reminders: 'Consultation', help: 'Consultation', referrals: 'Referral Tracking', prescriptions: 'Treatment', reports: 'Medical Reports', hospitals: 'Hospitals', education: 'Health Education', 'care-team': 'Care Team' } as Record<string, string>)[activeTab] || 'Patient Portal'}</h1></header>}
+      {currentUser?.verificationStatus === 'UNVERIFIED' && (
+        <div role="status" style={{ margin: '0 0 14px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--warning-text)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontWeight: 700, fontSize: '0.84rem' }}>
+          {currentLang === 'te' ? 'ఆరోగ్య కార్యకర్త ధృవీకరణ కోసం వేచి ఉంది'
+            : currentLang === 'hi' ? 'स्वास्थ्य कार्यकर्ता द्वारा सत्यापन लंबित'
+              : 'Pending verification by health worker'}
         </div>
-
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-header">
-            <span className="dash-kpi-label">Latest Oral Screening</span>
-            <div className="dash-kpi-icon-wrap icon-blue">🩺</div>
-          </div>
-          <div className="dash-kpi-value" style={{ fontSize: '1.25rem', color: diseaseInfo.badgeColor }}>
-            {diseaseInfo.riskBadge[currentLang] || diseaseInfo.riskBadge.en}
-          </div>
-          <div className="dash-kpi-footer">
-            <span>{screeningDate}</span>
-            <span style={{ color: '#94a3b8' }}>• {diseaseInfo.title[currentLang] || diseaseInfo.title.en}</span>
-          </div>
-        </div>
-
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-header">
-            <span className="dash-kpi-label">
-              {currentLang === 'te' ? 'తదుపరి ఓపీడీ అపాయింట్‌మెంట్' : currentLang === 'hi' ? 'अगला ओपीडी अपॉइंटमेंट' : 'Next OPD Appointment'}
-            </span>
-            <div className="dash-kpi-icon-wrap icon-amber">📅</div>
-          </div>
-          <div className="dash-kpi-value" style={{ fontSize: '1.2rem' }}>
-            {currentLang === 'te' ? 'నేడు 10:30 AM' : 'Today 10:30 AM'}
-          </div>
-          <div className="dash-kpi-footer">
-            <span>
-              {currentLang === 'te' ? 'సీహెచ్‌సీ పాడేరు డెంటల్ విభాగం' : 'CHC Paderu Dental Outpost'}
-            </span>
-          </div>
-        </div>
-
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-header">
-            <span className="dash-kpi-label">
-              {currentLang === 'te' ? 'పొగాకు రహిత రోజుల రికార్డు' : currentLang === 'hi' ? 'तंबाकू मुक्त दिन' : 'Tobacco-Free Streak'}
-            </span>
-            <div className="dash-kpi-icon-wrap icon-rose">🌿</div>
-          </div>
-          <div className="dash-kpi-value" style={{ fontSize: '1.35rem', color: '#10b981' }}>
-            {currentLang === 'te' ? '42 రోజులు' : '42 Days'}
-          </div>
-          <div className="dash-kpi-footer">
-            <span className="dash-kpi-trend-up">
-              ★ {currentLang === 'te' ? 'అత్యుత్తమ పురోగతి' : currentLang === 'hi' ? 'उत्कृष्ट प्रगति' : 'Excellent Progress'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 2.5. TEN MAIN PATIENT ACTIONS (Module 1 - Accessible, Clean Unified Cards) */}
-      <div style={{ marginTop: '10px', marginBottom: '8px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-primary)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🌟</span>
-            <span>{currentLang === 'te' ? 'ముఖ్యమైన రోగి సేవలు (Main Healthcare Actions)' : currentLang === 'hi' ? 'मुख्य स्वास्थ्य सेवाएं' : 'Main Healthcare Actions'}</span>
-          </h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {onToggleAIAssistant && (
-              <button
-                type="button"
-                onClick={onToggleAIAssistant}
-                style={{
-                  background: 'var(--btn-primary-bg)',
-                  color: 'var(--btn-primary-text)',
-                  border: 'none',
-                  padding: '6px 14px',
-                  borderRadius: '20px',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
-                }}
-              >
-                <span>🤖</span>
-                <span>{currentLang === 'te' ? 'దృష్టి ఏఐ రోబోట్' : currentLang === 'hi' ? 'दृष्टि एआई चैटबॉट' : 'Chat with Drishti AI'}</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => speakText(
-                currentLang === 'te'
-                  ? 'ముఖ్యమైన రోగి సేవలు: ఆరోగ్య ఫోటో అప్‌లోడ్, ఏఐ పరీక్ష, డాక్టర్‌తో వీడియో కాల్, ఆసుపత్రులు, అపాయింట్‌మెంట్లు, రిఫరల్స్, మందుల చీటీలు, అత్యవసర సహాయం 108.'
-                  : 'Main healthcare actions: Upload health image, AI screening, Video call doctor, Find hospitals, Appointments, Referrals, Prescriptions, Emergency 108.'
-              )}
-              style={{
-                background: 'var(--surface-2)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)',
-                padding: '6px 12px',
-                borderRadius: '20px',
-                fontSize: '0.8rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              🔊 {currentLang === 'te' ? 'వినండి (Listen)' : 'Listen'}
-            </button>
-          </div>
-        </div>
-
-        <div className="patient-actions-grid">
-          {/* Action 1: Upload Health Image */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => {
-              setActiveTab('overview');
-              setActiveInputMode('upload');
-              if (fileInputRef.current) fileInputRef.current.click();
-            }}
-          >
-            <span className="patient-action-icon">📸</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '1. ఫోటో అప్‌లోడ్' : '1. Upload Image'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'గ్యాలరీ నుండి ఎంచుకోండి' : 'Upload from phone'}
-            </span>
-          </button>
-
-          {/* Action 2: AI Health Screening */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => {
-              setActiveTab('overview');
-              setActiveInputMode('camera');
-              startCameraStream('environment');
-            }}
-          >
-            <span className="patient-action-icon">🔬</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '2. ఏఐ స్క్రీనింగ్' : '2. AI Screening'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'రియల్-టైమ్ కెమెరా' : 'Live Camera Scan'}
-            </span>
-          </button>
-
-          {/* Action 3: Talk to a Doctor (WebRTC Live Video Consultation) */}
-          <button
-            type="button"
-            className={`patient-action-btn ${isDoctorCallActive ? 'call-active' : ''}`}
-            onClick={() => onNavigateTab?.('teleconsultation')}
-          >
-            <span className="patient-action-icon">{isDoctorCallActive ? '🟢' : '🩺'}</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te'
-                ? isDoctorCallActive
-                  ? '3. డాక్టర్ ఆన్‌లైన్‌లో ఉన్నారు!'
-                  : '3. డాక్టర్‌తో మాట్లాడండి'
-                : isDoctorCallActive
-                ? '3. Doctor is Online Now!'
-                : '3. Text Case Discussion'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te'
-                ? isDoctorCallActive
-                  ? 'కాల్‌లో చేరడానికి నొక్కండి'
-                  : 'ప్రత్యక్ష వీడియో సంప్రదింపు'
-                : isDoctorCallActive
-                ? 'Click to Join Call'
-                : 'Text discussion is available; live video is blocked'}
-            </span>
-          </button>
-
-          {/* Action 4: Find Nearby Hospital */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => setActiveTab('hospitals')}
-          >
-            <span className="patient-action-icon">🏥</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '4. సమీప ఆసుపత్రి' : '4. Nearby Hospital'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'పాడేరు CHC & అరకు' : 'CHC Paderu & GPS'}
-            </span>
-          </button>
-
-          {/* Action 5: My Appointments */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => setActiveTab('appointments')}
-          >
-            <span className="patient-action-icon">📅</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '5. నా అపాయింట్‌మెంట్లు' : '5. Appointments'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'తేదీ & సమయం బుకింగ్' : 'Upcoming & History'}
-            </span>
-          </button>
-
-          {/* Action 6: My Referrals */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => setActiveTab('referrals')}
-          >
-            <span className="patient-action-icon">🔄</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '6. నా రిఫరల్స్' : '6. My Referrals'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'KGH & నిపుణుల కేంద్రాలు' : 'Specialist Tracking'}
-            </span>
-          </button>
-
-          {/* Action 7: My Prescriptions */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => setActiveTab('prescriptions')}
-          >
-            <span className="patient-action-icon">💊</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '7. మందుల చీటీలు' : '7. Prescriptions'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'మోతాదు & ప్రింట్' : 'Medicines & Dosage'}
-            </span>
-          </button>
-
-          {/* Action 8: My Health History */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={() => setActiveTab('history')}
-          >
-            <span className="patient-action-icon">📜</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '8. ఆరోగ్య చరిత్ర' : '8. Health History'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'గత పరీక్షలు & ఫలితాలు' : 'Clinical Records'}
-            </span>
-          </button>
-
-          {/* Action 9: Emergency Help 108 */}
-          <a
-            href="tel:108"
-            className="patient-action-btn emergency-btn"
-          >
-            <span className="patient-action-icon">🚨</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '9. అత్యవసర సహాయం 108' : '9. Emergency 108'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'ఉచిత అంబులెన్స్ కాల్' : 'Free Tribal Ambulance'}
-            </span>
-          </a>
-
-          {/* Action 10: Language Settings */}
-          <button
-            type="button"
-            className="patient-action-btn"
-            onClick={onOpenLanguageModal}
-          >
-            <span className="patient-action-icon">🌐</span>
-            <strong className="patient-action-title">
-              {currentLang === 'te' ? '10. భాష ఎంపిక' : '10. Language Settings'}
-            </strong>
-            <span className="patient-action-desc">
-              {currentLang === 'te' ? 'తెలుగు / हिन्दी / English' : 'Select Language'}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* 3. Section Navigation Switcher */}
-      <div
-        className="patient-section-nav"
-        style={{
-          display: 'flex',
-          gap: '10px',
-          flexWrap: 'wrap',
-          borderBottom: '1.5px solid #cbd5e1',
-          paddingBottom: '16px',
-          marginTop: '4px',
-        }}
-      >
-        {navTabs.map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              className={`dash-btn ${isActive ? 'dash-btn-primary' : 'dash-btn-outline'}`}
-              style={{
-                background: isActive ? 'var(--btn-primary-bg)' : 'var(--surface)',
-                color: isActive ? 'var(--btn-primary-text)' : 'var(--text-primary)',
-                border: isActive ? '1.5px solid var(--btn-primary-bg)' : '1.5px solid var(--border)',
-                fontWeight: isActive ? 700 : 600,
-                fontSize: '0.88rem',
-                padding: '10px 18px',
-                borderRadius: '10px',
-                boxShadow: isActive ? '0 4px 14px rgba(5, 150, 105, 0.35)' : '0 2px 4px rgba(0, 0, 0, 0.04)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.18s ease',
-              }}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
+      )}
       {/* Active Tab View with In-Place Switch Transition */}
       <div key={activeTab} className="tab-pane-transition">
-        {/* -------------------- TAB: OVERVIEW & REAL-TIME SCREENING STUDIO -------------------- */}
-          {activeTab === 'overview' && (
+        {activeTab === 'report-detail' && (
+          <section className="patient-report-page" aria-labelledby="patient-report-title">
+            <div className="patient-page-heading">
+              <button type="button" className="patient-back-button" onClick={() => switchTab('history')}>← {currentLang === 'te' ? 'చరిత్రకు తిరిగి వెళ్లండి' : currentLang === 'hi' ? 'इतिहास पर वापस जाएँ' : 'Back to reports & history'}</button>
+              <p className="patient-breadcrumb">{currentLang === 'te' ? 'స్క్రీనింగ్ / నివేదిక' : currentLang === 'hi' ? 'स्क्रीनिंग / रिपोर्ट' : 'Oral Screening / Report'}</p>
+              <h1 id="patient-report-title">{currentLang === 'te' ? 'స్క్రీనింగ్ నివేదిక' : currentLang === 'hi' ? 'स्क्रीनिंग रिपोर्ट' : 'Screening report'}</h1>
+            </div>
+            {!activeReport ? (
+              <div className="patient-empty-state"><span aria-hidden="true">▤</span><h2>{currentLang === 'te' ? 'నివేదిక కనుగొనబడలేదు' : currentLang === 'hi' ? 'रिपोर्ट नहीं मिली' : 'Report not found'}</h2><p>{currentLang === 'te' ? 'ఈ పరికరంలో ఈ నివేదిక సేవ్ కాలేదు.' : currentLang === 'hi' ? 'यह रिपोर्ट इस डिवाइस पर उपलब्ध नहीं है।' : 'This report is not available on this device.'}</p><button type="button" className="dash-btn dash-btn-primary" onClick={() => switchTab('history')}>Open history</button></div>
+            ) : (
+              <div className="patient-report-grid">
+                <article className="patient-report-summary">
+                  {activeReport.imageUrl ? <img className="patient-report-photo" src={activeReport.imageUrl} alt="Patient uploaded screening image" /> : <div className="patient-report-photo-placeholder">Image not available on this device</div>}
+                  <div className="patient-report-meta"><span className="patient-report-badge">DEMO AI OUTPUT - NOT FOR CLINICAL USE</span><span className="patient-report-risk">{activeReport.geminiAnalysis?.riskCategory || 'low'} risk category</span><span>{activeReport.date}{activeReport.time ? ` · ${activeReport.time}` : ''}</span></div>
+                  <h2>Image quality and review</h2><p>{activeReport.imageQuality?.ok === false ? 'Retake recommended' : 'Image quality passed'} · <strong>Pending doctor review</strong></p>
+                  <h2>Image observation</h2><p className="patient-report-finding">{activeReport.geminiAnalysis?.imageObservation || `The photo appears to show ${activeReport.observation || 'an area recorded for clinician review'}.`}</p><p>This description may be inaccurate.</p>
+                  <h3>Possible conditions to discuss with a doctor</h3><p>These are possible, not a diagnosis.</p><div className="patient-chip-list">{(activeReport.geminiAnalysis?.possibleConditions || ['Mouth ulcer', 'Oral irritation']).slice(0, 3).map((item: string) => <a key={item} href={`#/patient/education?condition=${encodeURIComponent(item)}`} className="patient-chip">{item}</a>)}</div>
+                  <h3>Risk factors</h3><div className="patient-chip-list">{Object.entries((currentUser as any)?.habits || {}).filter(([, value]) => Boolean(value)).map(([key]) => <span className="patient-chip" key={key}>{key.replace(/([A-Z])/g, ' $1')}</span>)}{(activeReport.geminiAnalysis?.riskFactors || []).map((item: string) => <span className="patient-chip" key={item}>{item}</span>)}{!Object.values((currentUser as any)?.habits || {}).some(Boolean) && !(activeReport.geminiAnalysis?.riskFactors || []).length && <span className="patient-chip">No recorded factors</span>}</div>
+                  <h3>Possible causes</h3><ul>{(activeReport.geminiAnalysis?.possibleCauses || ['Irritation from a rough tooth, accidental biting, hot food or drink can sometimes cause a similar appearance.']).slice(0, 4).map((item: string) => <li key={item}>{item}</li>)}</ul>
+                  <h3>Things to avoid and oral hygiene</h3><ul>{(activeReport.geminiAnalysis?.thingsToAvoid || ['Avoid tobacco, gutkha, areca nut, alcohol, very spicy or hot foods, picking or biting the area, and harsh mouthwash.', 'Brush gently twice daily with a soft toothbrush and keep the mouth clean.']).slice(0, 4).map((item: string) => <li key={item}>{item}</li>)}</ul>
+                  <h3>When to consult a doctor</h3><ul>{(activeReport.geminiAnalysis?.whenToConsult || ['Arrange a review if it does not settle within 1 to 2 weeks.', 'Seek urgent in-person care for bleeding, a hard lump, a white or red patch, trouble swallowing or opening the mouth, or tobacco, gutkha, or areca use.']).slice(0, 4).map((item: string) => <li key={item}>{item}</li>)}</ul>
+                  <div className="patient-report-disclaimer">This automated observation is not a medical diagnosis and does not replace review by a qualified clinician.</div>
+                  <div className="patient-assessment-actions"><button type="button" className="dash-btn dash-btn-primary" onClick={() => switchTab('consultation')}>Book Consultation</button><button type="button" className="dash-btn dash-btn-outline" onClick={() => (window.location.hash = `#/patient/assessment/${encodeURIComponent(activeReport.id || initialResourceId || '')}`)}>Specialist Directory</button></div>
+                </article>
+                {activeReport.remote || activeReport.source === 'server' ? <PatientReportChat
+                  screeningId={activeReport.id || initialResourceId || ''}
+                  reportContext={`DEMO AI screening support. Record summary: ${activeReport.notes || 'Review pending'}. Recorded ${activeReport.date || 'recently'}.`}
+                  currentLang={currentLang}
+                /> : <aside className="patient-report-summary"><h2>Saved on this device</h2><p>This record can use report chat after it syncs to your health record.</p></aside>}
+              </div>
+            )}
+          </section>
+        )}
+        {activeTab === 'profile' && <PatientProfilePage currentUser={currentUser} currentLang={currentLang} />}
+        {activeTab === 'assessment' && (
+          <section className="patient-home-lower-card"><p className="patient-home-card-kicker">DEMO AI · CARE NAVIGATION</p><h2>AI assessment</h2><p className="patient-home-note">DEMO AI screening support can help organize next steps. A qualified clinician reviews screening information and makes care decisions.</p><div className="patient-assessment-actions"><button type="button" className="dash-btn dash-btn-outline" onClick={() => switchTab('hospitals')}>Find hospitals and specialists</button><button type="button" className="dash-btn dash-btn-primary" onClick={() => switchTab('consultation')}>Book a consultation</button></div><h3>Verified doctors with available times</h3>{assessmentLoading ? <p role="status">Loading doctor availability…</p> : assessmentError ? <p className="patient-inline-error" role="alert">{assessmentError}</p> : availablePatientDoctors.length === 0 ? <p className="patient-inline-state">No available doctor times were returned. Open Consultation to choose another date.</p> : <div className="patient-doctor-cards">{availablePatientDoctors.map((doctor) => <article key={doctor.userId} className="patient-home-lower-card"><strong>{doctor.name}</strong><span>{doctor.specialization || 'Clinical consultation'}</span><small>{doctor.hospitalName} · {doctor.availableSlotsCount} available times</small><button type="button" className="dash-btn dash-btn-primary" onClick={() => { if (initialResourceId) { try { sessionStorage.setItem('patient_booking_screening_id', initialResourceId); } catch {} } window.location.hash = `#/patient/consult/${encodeURIComponent(doctor.userId)}`; }}>Consult this doctor</button></article>)}</div>}</section>
+        )}
+        {activeTab === 'treatment' && (
+          <section className="patient-home-lower-card patient-treatment-page">
+            <p className="patient-home-card-kicker">TREATMENT TRACKING</p>
+            <h2>Daily medicine check-in</h2>
+            <p className="patient-home-note">Follow only the clinician-issued prescription. This tracker records check-ins and does not change medicine or dose instructions.</p>
+            {treatmentLoading ? <p role="status">Loading treatment records...</p> : treatmentError && !activeTreatmentPlan ? <p className="patient-inline-error" role="alert">{treatmentError}</p> : !activeTreatmentPlan ? (
+              <div className="patient-empty-state">
+                <span aria-hidden="true">+</span><h3>No treatment plan started</h3><p>Start tracking from a clinician-issued prescription.</p>
+                {prescriptionsList.length ? prescriptionsList.map((prescription) => <button key={prescription.prescriptionId} type="button" className="dash-btn dash-btn-primary" disabled={treatmentSaving} onClick={() => void startTreatmentTracking(prescription)}>Start tracking {prescription.prescriptionId}</button>) : <button type="button" className="dash-btn dash-btn-outline" onClick={() => switchTab('prescriptions')}>View prescriptions</button>}
+              </div>
+            ) : (
+              <>
+                <div className="patient-treatment-toolbar">
+                  {treatmentPlans.length > 1 && <label>Plan<select value={activeTreatmentPlan.treatmentPlanId} onChange={(event) => setSelectedTreatmentPlanId(event.target.value)}>{treatmentPlans.map((plan) => <option key={plan.treatmentPlanId} value={plan.treatmentPlanId}>{plan.prescriptionId} - {plan.status}</option>)}</select></label>}
+                  <strong>{dailyCareProgress}% check-ins this week</strong>
+                </div>
+                <progress value={dailyCareProgress} max="100" aria-label={`Weekly treatment check-in progress ${dailyCareProgress}%`} />
+                <div className="patient-adherence-chart" role="img" aria-label="Daily medicine adherence over the last seven days">
+                  {adherenceChart.map((day, index) => <div className="patient-adherence-day" key={`${day.day}-${index}`}><span>{day.percentage}%</span><div className="patient-adherence-track"><i style={{ height: `${day.percentage}%` }} /></div><small>{day.day}</small></div>)}
+                </div>
+                <div className="patient-treatment-list">
+                  {prescribedMedicineItems.map(({ key, medicine }) => <label key={key} className="patient-treatment-item"><input type="checkbox" checked={Boolean(remoteMedicineChecks[key])} disabled={treatmentSaving} onChange={(event) => { const updated = { ...remoteMedicineChecks, [key]: event.target.checked }; setRemoteMedicineChecks(updated); void saveTreatmentLog(updated); }} /><span><strong>{medicine.medicineName}</strong><span>{medicine.dosage} - {medicine.frequency}</span>{medicine.instructions && <small>{medicine.instructions}</small>}</span></label>)}
+                </div>
+                <div className="patient-symptom-grid">
+                  <label className="patient-symptom-label">Symptom or pain note<textarea value={symptomNote} maxLength={500} rows={3} onChange={(event) => setSymptomNote(event.target.value)} placeholder="Optional note for your own tracking" /></label>
+                  <label className="patient-symptom-label">Symptom severity<select value={symptomSeverity} onChange={(event) => setSymptomSeverity(event.target.value as typeof symptomSeverity)}><option value="none">Not recorded</option><option value="mild">Mild</option><option value="moderate">Moderate</option><option value="severe">Severe</option></select></label>
+                  <label className="patient-symptom-label">Pain score (0-10)<input type="number" min="0" max="10" value={painScore} onChange={(event) => setPainScore(event.target.value === '' ? '' : Math.min(10, Math.max(0, Number(event.target.value))))} /></label>
+                </div>
+                <label className="patient-symptom-label">Progress photo<input key={treatmentPhotoFile ? 'selected-photo' : 'empty-photo'} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0] || null; if (file && file.size > 5 * 1024 * 1024) { setTreatmentError('Choose a photo smaller than 5 MB.'); event.target.value = ''; return; } setTreatmentPhotoFile(file); setTreatmentPhotoConsent(false); setTreatmentPhotoHash(''); setTreatmentError(''); }} /></label>
+                {treatmentPhotoFile && <><p className="patient-muted-copy">Selected: {treatmentPhotoFile.name}</p><label className="patient-context-consent"><input type="checkbox" checked={treatmentPhotoConsent} onChange={(event) => setTreatmentPhotoConsent(event.target.checked)} />I consent to securely store this photo with my treatment record for review by my treating clinician.</label></>}
+                {treatmentPhotoHash && <p className="patient-muted-copy" role="status">Photo saved securely. SHA-256: {treatmentPhotoHash.slice(0, 16)}...</p>}
+                <button type="button" className="dash-btn dash-btn-outline" disabled={treatmentSaving || (!symptomNote.trim() && painScore === '' && symptomSeverity === 'none' && !treatmentPhotoFile)} onClick={() => void saveTreatmentLog(remoteMedicineChecks, symptomNote.trim() || undefined, treatmentPhotoFile || undefined, painScore)}>{treatmentSaving ? 'Saving...' : 'Save daily entry'}</button>
+                {treatmentError && <p className="patient-inline-error" role="alert">{treatmentError}</p>}
+                {recentTreatmentLogs.some((log) => log.photoProgress?.photoId) && <div className="patient-photo-progress-list"><h3>Saved progress photos</h3>{recentTreatmentLogs.filter((log) => log.photoProgress?.photoId).slice(0, 5).map((log) => <article key={log.logId}><p>{new Date(log.date).toLocaleDateString()} - {log.photoProgress.photoId}</p>{log.photoProgress.fileId && (treatmentPhotoUrls[log.photoProgress.fileId] ? <img src={treatmentPhotoUrls[log.photoProgress.fileId]} alt="Saved treatment progress photo" /> : <p role="status">Loading private photo...</p>)}</article>)}</div>}
+              </>
+            )}
+          </section>
+        )}
+        {activeTab === 'reminders' && (
+          <section className="patient-home-lower-card"><p className="patient-home-card-kicker">APPOINTMENTS &amp; REMINDERS</p><h2>Your reminders</h2>{remindersLoading ? <p role="status">Loading reminders…</p> : remindersError ? <p className="patient-inline-error" role="alert">{remindersError}</p> : patientReminders.length === 0 ? <div className="patient-empty-state"><span aria-hidden="true">◷</span><h3>You’re up to date</h3><p>New in-app reminders will appear here.</p></div> : <div className="patient-ticket-list">{patientReminders.map((reminder) => <article key={reminder.notificationId}><div><strong>{reminder.title}</strong><small>{reminder.body}</small><small>{new Date(reminder.createdAt).toLocaleString()}</small></div><span className={`patient-ticket-status ${reminder.read ? '' : 'unread'}`}>{reminder.read ? 'Read' : 'Unread'}</span></article>)}</div>}<button type="button" className="dash-btn dash-btn-outline" onClick={() => switchTab('appointments')}>Manage appointments</button></section>
+        )}
+        {activeTab === 'help' && <PatientSupportPanel currentLang={currentLang} onOpenAssistant={onToggleAIAssistant} />}
+        {activeTab === 'home' && (
+          <PatientHomeOverview
+            patientName={patientName}
+            patientId={patientId}
+            currentLang={currentLang}
+            appointments={patientAppointments}
+            appointmentsLoading={appointmentsLoading}
+            appointmentsError={appointmentsError}
+            doctors={availablePatientDoctors}
+            doctorsLoading={assessmentLoading}
+            doctorsError={assessmentError}
+            profileCompletion={profileCompletion}
+            recentReports={screeningHistory}
+            treatmentProgress={dailyCareProgress}
+            hasPrescription={prescribedMedicineItems.length > 0}
+            hasTreatmentActivity={recentTreatmentLogs.length > 0 || Object.values(habitChecked).some(Boolean)}
+            remindersCount={unreadReminderCount}
+            nextReminderTitle={nextReminderTitle}
+            onNavigate={(tab) => switchTab(tab === 'appointments' || tab === 'reminders' || tab === 'help' ? 'consultation' : tab)}
+            onOpenReport={(report, index) => { const id = report.id || `screening-${index}`; window.location.hash = `#/patient/screening/${encodeURIComponent(id)}/report`; }}
+            onListenReport={(report) => speakText(`${report.label || 'Screening record'}. ${report.notes || 'DEMO AI screening support only.'}`)}
+          />
+        )}        {/* -------------------- TAB: OVERVIEW & REAL-TIME SCREENING STUDIO -------------------- */}
+          {activeTab === 'screening' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
           
           {/* REAL-TIME SCREENING STUDIO CARD (Clean, Simple, High-Contrast) */}
@@ -1277,17 +1291,14 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
               <div>
                 <h3 className="dash-panel-title" style={{ fontSize: '1.25rem', color: 'var(--text-primary)' }}>
                   <span>📸</span>
-                  <span>{currentLang === 'te' ? 'రియల్-టైమ్ నోటి స్క్రీనింగ్ & పరీక్ష స్టూడియో' : currentLang === 'hi' ? 'रीयल-टाइम ओरल स्क्रीनिंग स्टूडियो' : 'Real-Time Oral Screening & Disease Check'}</span>
+                  <span>Oral screening support</span>
                 </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
-                  {currentLang === 'te'
-                    ? 'మీ నోరు, నాలుక లేదా చిగురు ఫోటో తీసి లేదా అప్‌లోడ్ చేసి క్షణాల్లో రియల్-టైమ్ వ్యాధి పరిస్థితిని మరియు సంరక్షణను తెలుసుకోండి.'
-                    : currentLang === 'hi'
-                    ? 'अपने मुंह, जीभ या मसूड़े की फोटो लें या अपलोड करें और तुरंत स्वास्थ्य स्थिति व देखभाल सलाह पाएं।'
-                    : 'Capture with camera or upload a clicked photo for immediate real-time AI disease triaging & home care guidance.'}
-                </p>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.86rem', color: 'var(--text-secondary)' }}>Capture or upload a photo to save a DEMO AI screening support record for review by qualified health staff.</p>
               </div>
             </div>
+
+            <p className="patient-muted-copy" style={{ marginBottom: '16px' }}>Photo-capture consent is recorded during registration. Uploads are checked against that consent before analysis.</p>
+            {screeningHistoryError && <p className="patient-inline-error" role="alert">{screeningHistoryError}</p>}
 
             {/* Input Switcher: Camera vs. File Upload */}
             <div style={{ display: 'flex', gap: '12px', marginBottom: '18px', flexWrap: 'wrap' }}>
@@ -1353,6 +1364,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                capture="environment"
                 style={{ display: 'none' }}
                 onChange={handleFileUpload}
                 onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
@@ -1375,10 +1387,11 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 }}
               >
                 <video
-                  ref={videoRef}
+                  ref={attachVideoElement}
                   playsInline
                   autoPlay
                   muted
+                  onPlaying={() => setCameraReady(Boolean(videoRef.current?.videoWidth && videoRef.current?.videoHeight))}
                   style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '420px', objectFit: 'cover' }}
                 />
 
@@ -1423,6 +1436,8 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   <button
                     type="button"
                     onClick={handleToggleCameraFacing}
+                    aria-label={facingMode === 'environment' ? cameraText('switchFront', 'Switch to front camera') : cameraText('switchBack', 'Switch to back camera')}
+                    hidden={cameraDeviceCount < 2}
                     style={{
                       background: 'rgba(0, 0, 0, 0.65)',
                       color: '#ffffff',
@@ -1434,14 +1449,15 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       cursor: 'pointer',
                     }}
                   >
-                    🔄 {facingMode === 'environment' ? 'Front Camera' : 'Back Camera'}
+                    {facingMode === 'environment' ? cameraText('switchFront', 'Switch to front camera') : cameraText('switchBack', 'Switch to back camera')}
                   </button>
 
                   <button
                     type="button"
                     onClick={handleCaptureSnapshot}
+                    disabled={!cameraReady}
                     style={{
-                      background: '#10b981',
+                      background: cameraReady ? '#10b981' : '#64748b',
                       color: '#022c22',
                       border: '3px solid #ffffff',
                       padding: '12px 28px',
@@ -1455,12 +1471,12 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       gap: '8px',
                     }}
                   >
-                    📸 {currentLang === 'te' ? 'ఫోటో తీసి స్కాన్ చేయండి' : currentLang === 'hi' ? 'फोटो लें और स्कैन करें' : 'Snap & Analyze Now'}
+                    {cameraText('capturePhoto', 'Capture photo')}
                   </button>
 
                   <button
                     type="button"
-                    onClick={stopCameraStream}
+                    onClick={() => stopCameraStream()}
                     style={{
                       background: 'rgba(239, 68, 68, 0.75)',
                       color: '#ffffff',
@@ -1474,6 +1490,24 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   >
                     ✕ {currentLang === 'te' ? 'మూసివేయి' : 'Close'}
                   </button>
+                </div>
+              </div>
+            )}
+
+            {pendingCaptureFile && pendingCapturePreview && (
+              <div className="patient-camera-photo-review" aria-live="polite">
+                <img src={pendingCapturePreview} alt={cameraText('photoAlt', 'Preview of the oral screening photo')} />
+                <div>
+                  <h4>{cameraText('reviewTitle', 'Review your photo')}</h4>
+                  <p>{cameraText('reviewHelp', 'Choose whether to use this photo or take/select another.')}</p>
+                  <div className="patient-camera-photo-actions">
+                    <button type="button" className="dash-btn dash-btn-outline" onClick={handleRetakePhoto}>
+                      {cameraText('retake', 'Retake / Choose another')}
+                    </button>
+                    <button type="button" className="dash-btn dash-btn-primary" onClick={() => void handleUseCapturedPhoto()}>
+                      {cameraText('usePhoto', 'Use photo')}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1492,6 +1526,16 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 }}
               >
                 ⚠️ {cameraError}
+              </div>
+            )}
+
+            {cameraError && (
+              <div className="patient-camera-fallback">
+                <p>{cameraText('fallbackHelp', 'If live capture is unavailable, choose a photo from your device camera or gallery.')}</p>
+                <label className="patient-camera-fallback-input">
+                  <span>{cameraText('uploadPhoto', 'Upload a photo')}</span>
+                  <input type="file" accept="image/*" capture="environment" onChange={handleFileUpload} />
+                </label>
               </div>
             )}
 
@@ -1534,7 +1578,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
             )}
 
             {/* REAL-TIME COMPREHENSIVE RESULT CARD OR AWAITING UPLOAD STATE */}
-            {!capturedImagePreview && !liveScreeningResult ? (
+            {pendingCaptureFile ? null : !capturedImagePreview && !liveScreeningResult ? (
               <div
                 style={{
                   background: 'var(--surface)',
@@ -1559,7 +1603,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                     ? 'పై కెమెరా వీక్షణ ద్వారా ప్రత్యక్ష ఫోటో తీయండి లేదా మీ గ్యాలరీ నుండి ఫోటో ఎంచుకోండి. ఆర్టిఫిషియల్ ఇంటెలిజెన్స్ మరియు జెమినీ మల్టీమోడల్ విశ్లేషణ ఇక్కడ స్వయంచాలకంగా కనిపిస్తాయి.'
                     : currentLang === 'hi'
                     ? 'ऊपर दिए गए कैमरे से लाइव फोटो लें या अपनी गैलरी से फोटो चुनें। एआई और जेमिनी मल्टीमॉडल विश्लेषण यहां दिखाई देगा।'
-                    : 'Open the live camera viewfinder above or choose a photo from your gallery. Multi-tier AI neural inference and Google Gemini vision analysis will run directly on your uploaded image.'}
+                    : 'Use a live camera view or choose a photo from your gallery. DEMO AI screening support runs on this device; report chat uses the server Gemini service when configured.'}
                 </p>
               </div>
             ) : (
@@ -1594,7 +1638,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                         {diseaseInfo.title[currentLang] || diseaseInfo.title.en}
                       </h4>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                        Screening ID: <code>SCR-PAD-2026-LIVE</code> • Date: {screeningDate} • Engine: ONNX WebAssembly
+                        Screening ID: <code>{liveScreeningResult?.imageRef || 'Local screening record'}</code> • Date: {screeningDate} • Engine: {screeningEngineLabel}
                       </div>
                     </div>
                   </div>
@@ -1617,81 +1661,6 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   </span>
                 </div>
               </div>
-
-              {/* TWO-TIER MODEL STATUS & GEMINI VERIFICATION PANEL */}
-              {isVerifyingGemini && (
-                <div
-                  style={{
-                    background: 'var(--info-bg)',
-                    border: '1.5px solid var(--info-text)',
-                    color: 'var(--info-text)',
-                    borderRadius: '12px',
-                    padding: '12px 16px',
-                    marginBottom: '16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                  }}
-                >
-                  <span style={{ fontSize: '1.3rem', animation: 'spin 1s infinite linear' }}>✨</span>
-                  <div>
-                    <strong style={{ color: 'var(--info-text)', fontSize: '0.9rem' }}>
-                      {currentLang === 'te'
-                        ? 'జెమినీ క్లినికల్ ఏఐతో నిర్ధారణ జరుగుతోంది...'
-                        : 'Verifying with Gemini 1.5 Multimodal Clinical Vision...'}
-                    </strong>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--info-text)' }}>
-                      {currentLang === 'te'
-                        ? 'ప్రాథమిక మోడల్ ఫలితాన్ని క్లినికల్ చిత్ర విశ్లేషణతో సరిపోల్చుతోంది.'
-                        : 'Double-checking preliminary neural findings against stomatology visual criteria.'}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {geminiResult && (
-                <div
-                  style={{
-                    background: geminiResult.isCorrected ? 'var(--warning-bg)' : 'var(--success-bg)',
-                    border: `1.5px solid ${geminiResult.isCorrected ? 'var(--warning-text)' : 'var(--success-text)'}`,
-                    color: 'var(--text-primary)',
-                    borderRadius: '12px',
-                    padding: '14px 18px',
-                    marginBottom: '18px',
-                    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.1)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '1.15rem' }}>✨</span>
-                      <strong style={{ color: geminiResult.isCorrected ? 'var(--warning-text)' : 'var(--success-text)', fontSize: '0.96rem' }}>
-                        {geminiResult.isCorrected
-                          ? (currentLang === 'te' ? 'జెమినీ ఏఐ ఫలితాన్ని సవరించి నిర్ధారించింది (Corrected by Gemini)' : 'Gemini Multimodal AI Refined & Corrected This Finding')
-                          : (currentLang === 'te' ? 'జెమినీ ఏఐ ప్రాథమిక ఫలితాన్ని ధృవీకరించింది (Confirmed by Gemini)' : 'Gemini Multimodal AI Confirmed Primary Finding')}
-                      </strong>
-                    </div>
-                    <span style={{ fontSize: '0.72rem', background: 'var(--surface)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '6px', color: 'var(--text-secondary)' }}>
-                      Engine: {geminiResult.source}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: '6px' }}>
-                    <strong>{currentLang === 'te' ? 'సవరించిన వ్యాధి నిర్ధారణ:' : 'Refined Condition:'}</strong>{' '}
-                    <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{geminiResult.refinedCondition}</span>
-                  </div>
-
-                  {geminiResult.correctionNote && (
-                    <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', background: 'var(--surface)', border: '1px solid var(--border)', padding: '8px 12px', borderRadius: '8px', marginBottom: '8px', lineHeight: 1.45 }}>
-                      💡 <strong>Note:</strong> {geminiResult.correctionNote}
-                    </div>
-                  )}
-
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                    👨‍⚕️ <strong>{currentLang === 'te' ? 'సిఫార్సు చేయబడిన వైద్యులు:' : 'Recommended Doctor:'}</strong>{' '}
-                    {geminiResult.recommendedDoctor.specialty} at {geminiResult.recommendedDoctor.facility} ({geminiResult.recommendedDoctor.consultationReason})
-                  </div>
-                </div>
-              )}
 
               {/* Image Preview & Description */}
               <div
@@ -1722,62 +1691,57 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 )}
                 <div>
                   <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: '4px' }}>
-                    {currentLang === 'te' ? 'పరిస్థితి వివరణ (What this looks like):' : currentLang === 'hi' ? 'स्थिति का विवरण:' : 'Condition Analysis:'}
+                    {currentLang === 'te' ? 'పరిస్థితి వివరణ (What this looks like):' : currentLang === 'hi' ? 'स्थिति का विवरण:' : 'What this means:'}
                   </div>
                   <p style={{ margin: 0, fontSize: '0.94rem', lineHeight: 1.55, color: 'var(--text-primary)' }}>
-                    {diseaseInfo.description[currentLang] || diseaseInfo.description.en}
+                    {screeningExplanation}
                   </p>
+                  {geminiEducation?.observedCondition && (
+                    <p style={{ margin: '10px 0 0', fontSize: '0.88rem', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                      <strong>{currentLang === 'te' ? 'చిత్రంలో కనిపించినది (స్క్రీనింగ్ పరిశీలన): ' : currentLang === 'hi' ? 'तस्वीर में दिखा अवलोकन: ' : 'Image observation (screening support): '}</strong>
+                      {geminiEducation.observedCondition}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              {/* Two Column Layout: Needed Care & Diet/Habits */}
+              {!geminiEducation && (
+                <p role="status" style={{ margin: '0 0 16px', padding: '10px 12px', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '0.84rem', lineHeight: 1.45 }}>
+                  {currentLang === 'te'
+                    ? 'ఈ స్క్రీనింగ్‌లో Gemini వివరణ అందుబాటులో లేదు. క్రింద ఉన్నది సాధారణ ఆరోగ్య సమాచారం మాత్రమే.'
+                    : currentLang === 'hi'
+                      ? 'इस स्क्रीनिंग के लिए Gemini की व्याख्या उपलब्ध नहीं थी। नीचे केवल सामान्य स्वास्थ्य जानकारी है।'
+                      : 'Gemini was not used for this result. The information below is general oral-health guidance, not image analysis.'}
+                </p>
+              )}
+
+              {/* Patient education: potential causes, appointment notes and review timing */}
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
                   gap: '16px',
                   marginBottom: '20px',
                 }}
               >
-                {/* Column 1: Needed Medication & Home Care */}
-                <div
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                  }}
-                >
-                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--success-text)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>💊</span>
-                    <span>{currentLang === 'te' ? 'అవసరమైన సంరక్షణ & మందులు (Medication & Home Care):' : currentLang === 'hi' ? 'आवश्यक देखभाल एवं दवाएं:' : 'Needed Care & Home Remedies:'}</span>
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                    {(diseaseInfo.medicationsAndCare[currentLang] || diseaseInfo.medicationsAndCare.en).map((item, idx) => (
-                      <li key={idx}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
+                {patientEducationCards.map((card) => (
+                  <section key={card.title} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
+                    <h5 style={{ margin: '0 0 10px', color: 'var(--text-primary)', fontSize: '0.92rem', lineHeight: 1.4 }}>{card.title}</h5>
+                    <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                      {card.items.map((item, idx) => <li key={`${card.title}-${idx}`}>{item}</li>)}
+                    </ul>
+                  </section>
+                ))}
+              </div>
 
-                {/* Column 2: Habits & Dietary Guidelines */}
-                <div
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                  }}
-                >
-                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--warning-text)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>🥗</span>
-                    <span>{currentLang === 'te' ? 'ఆహార నియమాలు & జాగ్రత్తలు (Diet & Prevention):' : currentLang === 'hi' ? 'आहार एवं परहेज:' : 'Diet & Habits Guidance:'}</span>
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                    {(diseaseInfo.habitsAndDiet[currentLang] || diseaseInfo.habitsAndDiet.en).map((item, idx) => (
-                      <li key={idx}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
+              <div style={{ marginBottom: '18px', fontSize: '0.8rem', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                <strong>{currentLang === 'te' ? 'ఆరోగ్య సమాచారం మూలాలు: ' : currentLang === 'hi' ? 'स्वास्थ्य जानकारी के स्रोत: ' : 'Health information sources: '}</strong>
+                {oralHealthSources.map((source, index) => (
+                  <React.Fragment key={source.url}>
+                    {index > 0 && ' · '}
+                    <a href={source.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{source.label}</a>
+                  </React.Fragment>
+                ))}
               </div>
 
               {/* Clinical Next Steps & Action Banner */}
@@ -1798,7 +1762,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
               >
                 <div>
                   <div style={{ fontWeight: 700, color: 'var(--info-text)', fontSize: '0.88rem', marginBottom: '2px' }}>
-                    🏥 {currentLang === 'te' ? 'సిఫార్సు చేయబడిన తదుపరి చర్య (Clinical Next Steps):' : currentLang === 'hi' ? 'अगला चिकित्सीय कदम:' : 'Recommended Clinical Action:'}
+                    🏥 {currentLang === 'te' ? 'సిఫార్సు చేయబడిన తదుపరి చర్య (Clinical Next Steps):' : currentLang === 'hi' ? 'अगला चिकित्सीय कदम:' : 'Next step:'}
                   </div>
                   <div style={{ fontSize: '0.84rem', color: 'var(--text-primary)' }}>
                     {diseaseInfo.clinicalAction[currentLang] || diseaseInfo.clinicalAction.en}
@@ -1843,28 +1807,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       👩‍⚕️ {currentLang === 'te' ? 'వైద్యుల డైరెక్టరీ' : currentLang === 'hi' ? 'विशेषज्ञ सूची' : 'Specialist Directory'}
                     </button>
                   )}
-                  {!isVerifyingGemini && (
-                    <button
-                      type="button"
-                      onClick={handleManualGeminiVerification}
-                      style={{
-                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                        color: '#ffffff',
-                        border: '1px solid #38bdf8',
-                        padding: '8px 16px',
-                        borderRadius: '8px',
-                        fontWeight: 700,
-                        fontSize: '0.84rem',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <span>✨</span>
-                      <span>{geminiResult ? (currentLang === 'te' ? 'జెమినీతో మళ్లీ తనిఖీ చేయండి' : 'Re-verify with Gemini') : (currentLang === 'te' ? 'జెమినీతో నిర్ధారించండి' : 'Verify with Gemini Vision')}</span>
-                    </button>
-                  )}
+
                 </div>
               </div>
 
@@ -1878,7 +1821,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   paddingTop: '10px',
                 }}
               >
-                ⚠️ <strong>DEMO AI Screening Assistance:</strong> This tool provides preliminary algorithmic triage support for remote tribal habitations and does NOT constitute a definitive medical diagnosis. All official diagnoses, prescriptions, and therapeutic plans are performed exclusively in person by qualified Medical Officers and Dental Officers at CHC Paderu.
+                ⚠️ <strong>DEMO AI screening support only.</strong> This automated observation is not a medical diagnosis and does not replace review by a qualified clinician.
               </div>
             </div>
             )}
@@ -2010,8 +1953,11 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       )}
 
       {/* -------------------- TAB: UPCOMING APPOINTMENTS -------------------- */}
-      {activeTab === 'appointments' && (
+      {(activeTab === 'appointments' || activeTab === 'consultation') && (
         <div className="dash-panel">
+          <div className="patient-call-demo-notice" role="note"><strong>DEMO VIDEO CONSULTATION</strong><span>When your confirmed online appointment is ready, your doctor starts the call. The <b>Join video consultation</b> button appears here automatically. Allow camera and microphone access to join.</span></div>
+          <ConsultationPortalPanel role="patient" patientId={currentUser?.patientId || currentUser?.userId} currentLang={currentLang} initialDoctorId={activeTab === 'consultation' ? initialResourceId : undefined} screeningId={(() => { try { return sessionStorage.getItem('patient_booking_screening_id') || undefined; } catch { return undefined; } })()} />
+          <div className="patient-appointments-legacy">
           <div className="dash-panel-header">
             <h3 className="dash-panel-title">
               <span>📅</span>
@@ -2197,6 +2143,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       )}
@@ -2498,21 +2445,11 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                     : 'Doctor-verified prescribed medications, dosages, and lifestyle care instructions.'}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => speakText(
-                  currentLang === 'te'
-                    ? 'మీకు డాక్టర్ సోమశేఖర్ గారు క్లోట్రిమజోల్ మౌత్ పెయింట్ మరియు విటమిన్ బి కాంప్లెక్స్ మాత్రలు సూచించారు.'
-                    : 'Your active prescription includes Clotrimazole mouth paint and Vitamin B-Complex.'
-                )}
-                style={{ background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', color: '#34d399', padding: '6px 12px', borderRadius: '16px', fontSize: '0.78rem', cursor: 'pointer', fontWeight: 700 }}
-              >
-                🔊 {currentLang === 'te' ? 'వినండి' : currentLang === 'hi' ? 'सुनें' : 'Listen'}
-              </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {prescriptionsList.map((rx, idx) => (
+              {visiblePrescriptions.length === 0 && <div className="patient-empty-state"><span aria-hidden="true">▤</span><h3>{initialResourceId ? 'Prescription not found' : 'No prescriptions available'}</h3><p>{initialResourceId ? 'This prescription is not available on this device.' : 'A prescription written by a clinician will appear here.'}</p><button type="button" className="dash-btn dash-btn-primary" onClick={() => switchTab('appointments')}>View appointments</button></div>}
+              {visiblePrescriptions.map((rx, idx) => (
                 <div
                   key={idx}
                   style={{
@@ -2537,6 +2474,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       </div>
                     </div>
 
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <button
                       type="button"
                       onClick={() => setSelectedPrescription(rx)}
@@ -2561,6 +2499,14 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                         ? '🖨️ पूरा पर्चा देखें (View & Print Rx)'
                         : '🖨️ View & Print Prescription (Rx)'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setTextFormatPrescriptionId(textFormatPrescriptionId === (rx.prescriptionId || String(idx)) ? null : (rx.prescriptionId || String(idx)))}
+                      style={{ padding: '8px 14px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer' }}
+                    >
+                      {currentLang === 'te' ? 'పాఠ్య రూపం' : currentLang === 'hi' ? 'टेक्स्ट प्रारूप' : 'Text format'}
+                    </button>
+                    </div>
                   </div>
 
                   {/* Medicines Summary */}
@@ -2586,6 +2532,35 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       ))}
                     </div>
                   </div>
+                  <section className="patient-prescription-voice" aria-label="Prescription read aloud">
+                    <div className="patient-prescription-voice-copy">
+                      <p className="patient-home-card-kicker">PRESCRIPTION VOICE-OVER</p>
+                      <h4>Read the prescription aloud</h4>
+                      <p>This reads the clinician’s prescription wording verbatim. It does not change medicines or doses.</p>
+                      <div className="patient-prescription-transcript"><strong>Transcript</strong><p>{prescriptionSpeechText(rx)}</p></div>
+                    </div>
+                    <div className="patient-prescription-voice-controls">
+                      <label>Language<select value={prescriptionSpeechLanguage} onChange={(event) => setPrescriptionSpeechLanguage(event.target.value as 'en' | 'te' | 'hi')}><option value="en">English</option><option value="te">తెలుగు</option><option value="hi">हिन्दी</option></select></label>
+                      <label>Speed<select value={prescriptionSpeechRate} onChange={(event) => setPrescriptionSpeechRate(Number(event.target.value))}><option value={0.75}>0.75×</option><option value={1}>1×</option><option value={1.25}>1.25×</option></select></label>
+                      <div className="patient-prescription-voice-buttons">
+                        <button type="button" onClick={() => speakText(prescriptionSpeechText(rx), { language: prescriptionSpeechLanguage, rate: prescriptionSpeechRate })}>Play</button>
+                        <button type="button" onClick={() => window.speechSynthesis?.pause()}>Pause</button>
+                        <button type="button" onClick={() => window.speechSynthesis?.cancel()}>Stop</button>
+                      </div>
+                      <button type="button" className="patient-home-text-link" onClick={() => void startTreatmentTracking(rx)} disabled={treatmentSaving}>Start treatment tracking →</button>
+                    </div>
+                  </section>
+                  {textFormatPrescriptionId === (rx.prescriptionId || String(idx)) && (
+                    <div style={{ marginTop: 8, padding: 12, borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <strong>{currentLang === 'te' ? 'ప్రిస్క్రిప్షన్ — పాఠ్య రూపం' : currentLang === 'hi' ? 'प्रिस्क्रिप्शन — टेक्स्ट प्रारूप' : 'Prescription — Text Format'}</strong>
+                        <button type="button" onClick={() => void navigator.clipboard?.writeText(prescriptionAsText(rx, patientName, patientId))} style={{ cursor: 'pointer' }}>
+                          {currentLang === 'te' ? 'పాఠ్యాన్ని కాపీ చేయండి' : currentLang === 'hi' ? 'टेक्स्ट कॉपी करें' : 'Copy text'}
+                        </button>
+                      </div>
+                      <pre style={{ margin: 0, padding: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: '0.84rem', color: 'var(--text-primary)' }}>{prescriptionAsText(rx, patientName, patientId)}</pre>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -2604,6 +2579,8 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 ? '📜 मेरा चिकित्सा एवं स्क्रीनिंग इतिहास (Medical History Timeline)'
                 : '📜 My Medical & Screening History Timeline'}
             </h3>
+            {screeningHistoryLoading && <p role="status">Loading saved reports…</p>}
+            {screeningHistoryError && <p className="patient-inline-error" role="alert">{screeningHistoryError}</p>}
             {screeningHistory.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8' }}>
                 <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📂</div>
@@ -2659,6 +2636,16 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                     </div>
                     <button
                       type="button"
+                      className="dash-btn dash-btn-outline"
+                      onClick={() => {
+                        const reportId = item.id || `screening-${idx}`;
+                        window.location.hash = `#/patient/screening/${encodeURIComponent(reportId)}/report`;
+                      }}
+                    >
+                      {currentLang === 'te' ? 'నివేదిక చూడండి' : currentLang === 'hi' ? 'रिपोर्ट देखें' : 'View report'}
+                    </button>
+                    {!item.remote && <button
+                      type="button"
                       aria-label={`Delete screening record from this device: ${item.date || item.id || idx + 1}`}
                       onClick={() => removeScreeningRecord(item.id, idx)}
                       style={{
@@ -2672,7 +2659,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       }}
                     >
                       Delete
-                    </button>
+                    </button>}
                   </div>
                 ))}
               </div>
@@ -2691,140 +2678,9 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
         />
       )}
 
-      {/* GEMINI API KEY CONFIGURATION MODAL */}
-      {showApiKeyModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 999999,
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(6px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '520px',
-              background: '#0d1b2a',
-              border: '1.5px solid #10b981',
-              borderRadius: '16px',
-              padding: '24px',
-              color: '#ffffff',
-              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-              <h3 style={{ margin: 0, color: '#34d399', fontSize: '1.18rem', fontWeight: 700 }}>
-                ✨ Google Gemini Multimodal API Key
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowApiKeyModal(false)}
-                style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
-              >
-                ✕
-              </button>
-            </div>
-            <p style={{ fontSize: '0.86rem', color: '#cbd5e1', lineHeight: 1.5, marginBottom: '14px' }}>
-              Enter your Google AI Studio Gemini API key to enable direct 2-tier multimodal clinical verification. When the primary neural model has low confidence or ambiguity, Gemini will analyze the photo to verify and correct the diagnosis.
-            </p>
-            <input
-              type="password"
-              placeholder="AIzaSy..."
-              value={tempApiKey}
-              onChange={(e) => setTempApiKey(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px 14px',
-                borderRadius: '8px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: '#ffffff',
-                fontSize: '0.9rem',
-                marginBottom: '16px',
-                boxSizing: 'border-box',
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setGeminiApiKey('');
-                  try {
-                    localStorage.removeItem('aarogya_gemini_api_key');
-                  } catch {}
-                  setShowApiKeyModal(false);
-                }}
-                style={{
-                  background: 'transparent',
-                  color: '#f87171',
-                  border: '1px solid #ef4444',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  fontWeight: 600,
-                  fontSize: '0.84rem',
-                  cursor: 'pointer',
-                }}
-              >
-                Clear Key
-              </button>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowApiKeyModal(false)}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.1)',
-                    color: '#ffffff',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    fontWeight: 600,
-                    fontSize: '0.84rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const trimmed = tempApiKey.trim();
-                    setGeminiApiKey(trimmed);
-                    try {
-                      if (trimmed) {
-                        localStorage.setItem('aarogya_gemini_api_key', trimmed);
-                      } else {
-                        localStorage.removeItem('aarogya_gemini_api_key');
-                      }
-                    } catch {}
-                    setShowApiKeyModal(false);
-                  }}
-                  style={{
-                    background: '#10b981',
-                    color: '#022c22',
-                    border: 'none',
-                    padding: '8px 20px',
-                    borderRadius: '8px',
-                    fontWeight: 700,
-                    fontSize: '0.86rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Save Key
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       </div>
+      <footer className="patient-global-footer">AI suggestions are not a medical diagnosis; consult a doctor.</footer>
+      </main>
     </div>
   );
 };

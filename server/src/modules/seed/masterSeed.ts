@@ -261,6 +261,17 @@ export async function runMasterSeed(): Promise<void> {
       simulation: true,
     },
     {
+      userId: 'usr_admin_alias',
+      username: 'admin',
+      role: 'admin' as const,
+      fullName: 'ITDA Admin (Paderu)',
+      hospitalId: 'hosp_paderu_dh',
+      passwordHash: pwdHash,
+      phone: '+918912345671',
+      status: 'active' as const,
+      simulation: true,
+    },
+    {
       userId: 'usr_mo_003',
       username: 'doctor.paderu',
       role: 'medical_officer' as const,

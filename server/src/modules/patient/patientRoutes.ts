@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAuth } from '../../middleware/authGuard.js';
 import { auditTag } from '../../middleware/auditTag.js';
-import { authorizeCapability } from '../auth/authorizationEngine.js';
+import { authorizeCapability, hasCapability } from '../auth/authorizationEngine.js';
 import { validate } from '../../middleware/validate.js';
 import { Patient } from './patientModel.js';
 import { DuplicateReview } from './duplicateReviewModel.js';
@@ -13,6 +13,8 @@ import { evaluateDuplicateCandidate } from './duplicateDetector.js';
 import { patientEvents } from './patientEvents.js';
 import { HealthWorkerAssignment } from '../assignment/assignmentModel.js';
 import { Village } from '../reference/villageModel.js';
+import { User } from '../auth/userModel.js';
+import { AuditLog } from '../audit/auditModel.js';
 
 const router = Router();
 
@@ -116,10 +118,10 @@ const SyncBatchSchema = z.object({
   ).min(1, 'At least one sync item required'),
 });
 
-function generateTribalPatientId(): string {
+export function generateTribalPatientId(): string {
   const year = new Date().getFullYear();
-  const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
-  return `PAD-${year}-${randomSuffix}`;
+  const randomSuffix = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
+  return `AD-${year}-${randomSuffix}`;
 }
 
 // ==========================================
@@ -250,6 +252,12 @@ router.post(
         ],
         simulation: true,
       });
+
+      if (data.consentObtained ?? true) {
+        const { Consent } = await import('../consent/consentModel.js');
+        const validUntil = new Date(); validUntil.setFullYear(validUntil.getFullYear() + 1);
+        await Consent.create({ consentId: `con_${uuidv4()}`, patientId, purpose: 'screening_ai_analysis', status: 'granted', validUntil, grantedAt: new Date(), actorId: req.user!.id, actorRole: req.user!.role, language: 'en', termsVersion: '1.0.0', simulation: true });
+      }
 
       // 5. RECORD IN IDEMPOTENT SYNC LEDGER
       if (clientMutationId) {
@@ -598,18 +606,95 @@ router.post(
 // ==========================================
 // 6. Get Patient by ID with History
 // ==========================================
-router.get(
-  '/:id',
+router.patch(
+  '/:id/verify',
   requireAuth,
-  authorizeCapability('patient:read'),
+  authorizeCapability('patient:verify'),
+  auditTag('PATIENT_IN_PERSON_VERIFIED', 'patient'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const patientId = req.params.id as string;
+      if (!['medical_officer', 'anm', 'asha'].includes(req.user!.role)) {
+        res.envelopeError('FORBIDDEN', 'Only a health worker or medical officer may verify patient accounts', undefined, 403);
+        return;
+      }
+      const patient = await User.findOne({ patientId, role: 'patient' });
+      if (!patient) {
+        res.envelopeError('PATIENT_NOT_FOUND', 'Patient account not found', undefined, 404);
+        return;
+      }
+
+      if (req.user!.role === 'asha' || req.user!.role === 'anm') {
+        const [assignment, village] = await Promise.all([
+          HealthWorkerAssignment.findOne({ workerId: req.user!.id, status: 'active' }),
+          Village.findOne({
+            villageName: { $regex: new RegExp(`^${(patient.village || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+            mandal: { $regex: new RegExp(`^${(patient.mandal || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+          }),
+        ]);
+        if (!assignment?.assignedVillages?.includes(village?.villageId || '')) {
+          res.envelopeError('PATIENT_SCOPE_DENIED', 'Patient is outside your assigned village scope', undefined, 403);
+          return;
+        }
+        patient.hospitalId = assignment.hospitalId;
+      } else if (req.user!.role === 'medical_officer' && req.user!.hospitalId) {
+        patient.hospitalId = req.user!.hospitalId;
+      }
+
+      patient.verificationStatus = 'VERIFIED';
+      patient.verificationDetails = {
+        ...(patient.verificationDetails || {}),
+        verifiedBy: req.user!.id,
+        verifiedAt: new Date(),
+      };
+      await patient.save();
+      res.envelope({ patientId, verificationStatus: patient.verificationStatus, message: 'Patient account verified in person.' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  '/:id',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const patientId = req.params.id as string;
+
+      // Patients can only access their own patient record (Invariant 7: Cross-Hospital & Patient Privacy Scoping)
+      if (req.user!.role === 'patient') {
+        const user: any = await User.findOne({ userId: req.user!.id }).lean();
+        const isOwnRecord = user?.patientId === patientId || user?.userId === patientId;
+        if (!isOwnRecord) {
+          res.envelopeError('FORBIDDEN', 'Access denied. Patients may only view their own clinical records.', undefined, 403);
+          return;
+        }
+      } else {
+        const authorized = await hasCapability(req.user!, 'patient:read');
+        if (!authorized) {
+          res.envelopeError('FORBIDDEN', 'Access denied. You do not have permission to view patient records.', undefined, 403);
+          return;
+        }
+      }
+
       const patient = await Patient.findOne({ patientId }).lean();
 
       if (!patient) {
         res.envelopeError('PATIENT_NOT_FOUND', 'Patient record not found', undefined, 404);
         return;
+      }
+
+      // Staff health-card/record reads remain constrained to their facility.
+      if (req.user!.role !== 'patient' && req.user!.role !== 'system_admin' && req.user!.hospitalId && patient.hospitalId !== req.user!.hospitalId) {
+        res.envelopeError('PATIENT_SCOPE_DENIED', 'Patient is outside your assigned hospital scope', undefined, 403);
+        return;
+      }
+
+      if (typeof req.query.healthCardDownload === 'string' && ['png', 'pdf'].includes(req.query.healthCardDownload)) {
+        if (AuditLog.db.readyState === 1) {
+          await AuditLog.create({ action: 'patient.health_card_download', resourceType: 'patient', resourceId: patientId, actorId: req.user!.id, actorRole: req.user!.role, ip: req.ip || req.socket.remoteAddress || '127.0.0.1', userAgent: req.get('user-agent'), statusCode: 200, metadata: { format: req.query.healthCardDownload }, simulation: true });
+        }
       }
 
       res.envelope({

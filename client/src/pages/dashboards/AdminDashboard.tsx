@@ -1,3 +1,4 @@
+import { DoctorAdministration } from '../../components/DoctorAdministration';
 import React, { useState } from 'react';
 import { AuthUser } from '../../components/AuthPanel';
 import '../../styles/Dashboard.css';
@@ -395,55 +396,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* Tab 2: Doctor Management (Module 9) */}
-      {activeTab === 'doctors' && (
-        <div className="dash-panel">
-          <div className="dash-panel-header">
-            <h3 className="dash-panel-title">
-              <span>👨‍⚕️</span>
-              <span>Doctor &amp; Medical Officer Provisioning (ASR District)</span>
-            </h3>
-            <button
-              type="button"
-              className="dash-btn dash-btn-primary"
-              onClick={() => setShowAddDoctor(true)}
-            >
-              + Register New Medical Officer
-            </button>
-          </div>
-
-          <div className="dash-table-container">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>Doctor ID</th>
-                  <th>Name &amp; Qualification</th>
-                  <th>Specialization</th>
-                  <th>Assigned Hospital</th>
-                  <th>Consultations</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {doctorsList.map((doc) => (
-                  <tr key={doc.id}>
-                    <td style={{ fontFamily: 'monospace', color: '#38bdf8', fontWeight: 700 }}>{doc.id}</td>
-                    <td>
-                      <strong>{doc.name}</strong>
-                      <div style={{ fontSize: '0.74rem', color: '#94a3b8' }}>{doc.qualification}</div>
-                    </td>
-                    <td>{doc.specialty}</td>
-                    <td>{doc.hospitalName}</td>
-                    <td style={{ textAlign: 'center', fontWeight: 700 }}>{doc.totalConsultations}</td>
-                    <td>
-                      <span className="dash-status-pill status-completed">{doc.status}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {activeTab === 'doctors' && <DoctorAdministration />}
 
       {/* Tab 3: Medical Camps Management (Module 9) */}
       {activeTab === 'camps' && (

@@ -1,35 +1,35 @@
 :root {
   /* Core Color Palette - Curated Medical/Clinical Theme */
-  --color-brand-primary: #1c7293;
-  --color-brand-primary-hover: #155770;
-  --color-brand-accent: #06d6a0;
-  --color-brand-dark: #0b132b;
-  --color-brand-darker: #060b18;
-  --color-surface-card: #152238;
-  --color-surface-hover: #1c2d4a;
-  --color-border: rgba(255, 255, 255, 0.12);
-  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-brand-primary: #287A62;
+  --color-brand-primary-hover: #1F674F;
+  --color-brand-accent: #287A62;
+  --color-brand-dark: #123C30;
+  --color-brand-darker: #0E3027;
+  --color-surface-card: #FFFFFF;
+  --color-surface-hover: #E9F0E9;
+  --color-border: #E7E3D6;
+  --color-border-subtle: #EEEAE0;
 
   /* Status Tokens */
-  --color-status-success: #06d6a0;
-  --color-status-warning: #ffb703;
-  --color-status-danger: #e63946;
-  --color-status-info: #48cae4;
+  --color-status-success: #3B9B68;
+  --color-status-warning: #E9A23B;
+  --color-status-danger: #D95D55;
+  --color-status-info: #287A62;
 
   /* Typography Colors */
-  --color-text-primary: #f8fafc;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-text-inverse: #0b132b;
+  --color-text-primary: #253B32;
+  --color-text-secondary: #45574F;
+  --color-text-muted: #68766D;
+  --color-text-inverse: #F7F1DF;
 
   /* Elevation & Glassmorphism */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-glow: 0 0 20px rgba(6, 214, 160, 0.25);
-  --glass-bg: rgba(21, 34, 56, 0.75);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-backdrop: blur(12px);
+  --shadow-sm: 0 2px 6px rgba(18, 60, 48, 0.06);
+  --shadow-md: 0 4px 14px rgba(18, 60, 48, 0.08);
+  --shadow-lg: 0 12px 32px rgba(18, 60, 48, 0.12);
+  --shadow-glow: 0 0 0 3px rgba(40, 122, 98, 0.14);
+  --glass-bg: rgba(255, 255, 255, 0.96);
+  --glass-border: #E7E3D6;
+  --glass-backdrop: none;
 
   /* Typography Families */
   --font-heading: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -507,7 +507,7 @@ body {
 }
 
 .brand-period {
-  color: #ed624f;
+  color: var(--accent);
 }
 
 .brand-vernacular {
@@ -986,35 +986,35 @@ body {
 .theme-study,
 [data-theme="study"] {
   /* Exact Colors from Flash Card Study App */
-  --slate: #202943;
-  --slate-soft: #34415f;
-  --paper: #fbf8f1;
-  --white: #fffefa;
-  --coral: #ed624f;
-  --coral-pale: #ffe0d4;
-  --blue: #c9e7f3;
-  --blue-pale: #e8f5fa;
-  --mint: #d9eddd;
-  --mint-strong: #75ad88;
-  --sunshine: #f4dc91;
-  --lilac: #e4ddf5;
-  --pink: #f3c7d1;
-  --ink-muted: #69778a;
-  --line: #e1dfd7;
+  --slate: #253B32;
+  --slate-soft: #45574F;
+  --paper: #F7F5EF;
+  --white: #FFFFFF;
+  --coral: #287A62;
+  --coral-pale: #E9F0E9;
+  --blue: #E9F0E9;
+  --blue-pale: #F1F4EE;
+  --mint: #E9F0E9;
+  --mint-strong: #287A62;
+  --sunshine: #E9A23B;
+  --lilac: #E9F0E9;
+  --pink: #FCE9E7;
+  --ink-muted: #68766D;
+  --line: #E7E3D6;
   --serif: "Fraunces", Georgia, serif;
   --sans: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
 
   /* Semantic mappings for Aarogya-Drishti */
   --color-brand-primary: var(--coral);
-  --color-brand-primary-hover: #d94d3c;
+  --color-brand-primary-hover: #1F674F;
   --color-brand-accent: var(--mint-strong);
   --color-brand-dark: var(--slate);
-  --color-brand-darker: #151e34;
+  --color-brand-darker: #0E3027;
 
   --color-surface-card: var(--white);
   --color-surface-hover: var(--paper);
   --color-border: var(--line);
-  --color-border-subtle: #eae8e1;
+  --color-border-subtle: #EEEAE0;
 
   --color-text-primary: var(--slate);
   --color-text-secondary: var(--slate-soft);
@@ -1050,10 +1050,10 @@ body {
 .theme-study .site-header {
   min-height: 76px;
   height: auto;
-  background: var(--slate) !important;
+  background: var(--header-bg) !important;
   color: var(--paper);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 20px rgba(32, 41, 67, 0.15);
+  box-shadow: 0 3px 12px rgba(18, 60, 48, 0.06);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1073,7 +1073,7 @@ body {
 }
 
 .theme-study .topbar-subtitle {
-  color: #aebdc7;
+  color: #DCE6DC;
   font-size: 0.78rem;
   font-family: var(--sans);
 }
@@ -1139,9 +1139,9 @@ body {
 }
 
 .user-role-pill {
-  background: rgba(201, 231, 243, 0.2);
+  background: rgba(233, 240, 233, 0.2);
   color: var(--blue);
-  border: 1px solid rgba(201, 231, 243, 0.35);
+  border: 1px solid rgba(233, 240, 233, 0.35);
   padding: 2px 8px;
   border-radius: 9999px;
   font-size: 10px;
@@ -1162,15 +1162,15 @@ body {
 }
 
 .btn-quick-login:hover {
-  background: #d94d3c;
+  background: var(--color-brand-primary-hover);
   transform: translateY(-1px);
 }
 
 /* Sidebar in Study Theme */
 .theme-study .forest-sidebar {
-  background: linear-gradient(180deg, var(--slate) 0%, #151e34 100%) !important;
+  background: var(--sidebar-bg) !important;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 4px 0 24px rgba(32, 41, 67, 0.2);
+  box-shadow: 2px 0 12px rgba(18, 60, 48, 0.12);
 }
 
 .theme-study .sidebar-brand {
@@ -1191,9 +1191,9 @@ body {
 }
 
 .theme-study .brand-leaf-icon {
-  background: rgba(237, 98, 79, 0.18);
+  background: rgba(247, 241, 223, 0.12);
   border: 1.5px solid var(--coral);
-  box-shadow: 0 0 12px rgba(237, 98, 79, 0.3);
+  box-shadow: 0 2px 8px rgba(18, 60, 48, 0.12);
 }
 
 .theme-study .sidebar-toggle-btn {
@@ -1231,17 +1231,17 @@ body {
 }
 
 .theme-study .sidebar-nav-btn.active {
-  background: rgba(237, 98, 79, 0.15);
-  /* Paired text color applied above */
+  background: #F7F1DF;
+  color: #173F35;
   border-left: 3px solid var(--coral);
   font-weight: 700;
-  box-shadow: 0 4px 14px rgba(237, 98, 79, 0.2);
+  box-shadow: 0 3px 10px rgba(18, 60, 48, 0.1);
 }
 
 .theme-study .badge-emerald-accent {
-  background: rgba(237, 98, 79, 0.2);
-  color: var(--coral-pale);
-  border: 1px solid rgba(237, 98, 79, 0.4);
+  background: var(--success-bg);
+  color: var(--success-text);
+  border: 1px solid var(--success-text);
 }
 
 .theme-study .voice-assistant-trigger {
@@ -1303,14 +1303,14 @@ body {
 /* Hero Section in Study Theme */
 .theme-study .hero,
 .theme-study .forest-hero-card {
-  background: linear-gradient(118deg, var(--slate), #293653 48%, #1f5047) !important;
+  background: linear-gradient(118deg, #173F35, #123C30 52%, #287A62) !important;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--paper);
   overflow: hidden;
   position: relative;
   padding: 40px 44px;
-  box-shadow: 0 14px 40px rgba(32, 41, 67, 0.22);
+  box-shadow: 0 12px 32px rgba(18, 60, 48, 0.16);
 }
 
 .theme-study .hero::before {
@@ -1320,9 +1320,9 @@ body {
   height: 540px;
   right: -80px;
   top: -220px;
-  border: 1px solid rgba(196, 216, 236, 0.14);
+  border: 1px solid rgba(247, 241, 223, 0.14);
   border-radius: 50%;
-  box-shadow: 0 0 0 56px rgba(196, 216, 236, 0.03), 0 0 0 112px rgba(196, 216, 236, 0.02);
+  box-shadow: 0 0 0 56px rgba(247, 241, 223, 0.03), 0 0 0 112px rgba(247, 241, 223, 0.02);
   pointer-events: none;
 }
 
@@ -1330,7 +1330,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #aebdc7;
+  color: #DCE6DC;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 1.4px;
@@ -1394,7 +1394,7 @@ body {
   background: var(--coral) !important;
   color: #ffffff !important;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
   min-height: 44px;
@@ -1408,9 +1408,9 @@ body {
 
 .theme-study .button-coral:hover,
 .theme-study .btn-forest-primary:hover {
-  background: #d94d3c !important;
+  background: var(--color-brand-primary-hover) !important;
   transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(237, 98, 79, 0.35);
+  box-shadow: 0 6px 18px rgba(40, 122, 98, 0.2);
 }
 
 .theme-study .button-dark,
@@ -1418,7 +1418,7 @@ body {
   background: var(--slate) !important;
   color: #ffffff !important;
   border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 3px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
   min-height: 44px;
@@ -1445,7 +1445,7 @@ body {
   background: transparent !important;
   color: var(--paper) !important;
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 3px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
   min-height: 44px;

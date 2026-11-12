@@ -1,5 +1,6 @@
 import React from 'react';
 import { LanguageCode } from '../i18n';
+import '../styles/LanguagePreferenceModal.css';
 
 interface LanguagePreferenceModalProps {
   isOpen: boolean;
@@ -40,27 +41,6 @@ const LANGUAGES: LanguageOption[] = [
     subtext: 'सरल और सहज स्वास्थ्य पोर्टल इंटरफ़ेस',
     icon: '🇮🇳',
   },
-  {
-    code: 'ta',
-    nativeName: 'தமிழ்',
-    englishName: 'Tamil',
-    subtext: 'எளிய தமிழ் இடைமுகம்',
-    icon: '🏛️',
-  },
-  {
-    code: 'kn',
-    nativeName: 'ಕನ್ನಡ',
-    englishName: 'Kannada',
-    subtext: 'ಸರಳ ಕನ್ನಡ ಆರೋಗ್ಯ ಪೋರ್ಟಲ್',
-    icon: '🌺',
-  },
-  {
-    code: 'ml',
-    nativeName: 'മലയാളം',
-    englishName: 'Malayalam',
-    subtext: 'ലളിതമായ ആരോഗ്യ പോർട്ടൽ',
-    icon: '🌴',
-  },
 ];
 
 export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = ({
@@ -82,14 +62,16 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
 
   return (
     <div
+      className="language-preference-overlay"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="language-preference-title"
       style={{
         position: 'fixed',
-        inset: 0,
-        zIndex: 999999,
-        backgroundColor: 'rgba(5, 15, 25, 0.85)',
-        backdropFilter: 'blur(8px)',
+        inset: '44px 0 0',
+        zIndex: 999,
+        backgroundColor: 'rgba(22, 54, 47, 0.18)',
+        backdropFilter: 'blur(2px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -98,15 +80,18 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
       }}
     >
       <div
+        className="language-preference-card"
         style={{
           width: '100%',
           maxWidth: '680px',
-          background: 'linear-gradient(160deg, #0b1f1a 0%, #0d1b2a 100%)',
-          border: '1.5px solid rgba(16, 185, 129, 0.45)',
+          maxHeight: 'calc(100vh - 60px)',
+          overflowY: 'auto',
+          background: 'linear-gradient(160deg, #ffffff 0%, #f4faf7 100%)',
+          border: '1px solid #d6e5df',
           borderRadius: '20px',
           padding: '28px',
-          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(16, 185, 129, 0.2)',
-          color: '#ffffff',
+          boxShadow: '0 18px 48px rgba(24, 59, 53, 0.16)',
+          color: '#193b35',
           position: 'relative',
         }}
       >
@@ -120,8 +105,8 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
               width: 52,
               height: 52,
               borderRadius: '50%',
-              background: 'rgba(16, 185, 129, 0.2)',
-              border: '1px solid rgba(16, 185, 129, 0.5)',
+              background: '#e4f2ec',
+              border: '1px solid #c5e1d5',
               fontSize: '26px',
               marginBottom: '10px',
             }}
@@ -129,20 +114,21 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
             🗣️
           </div>
           <h2
+            id="language-preference-title"
             style={{
               fontSize: '1.45rem',
               fontWeight: 800,
               margin: '0 0 6px 0',
-              color: '#34d399',
+              color: '#176b5b',
               letterSpacing: '-0.01em',
             }}
           >
             దయచేసి మీ భాషను ఎంచుకోండి
           </h2>
-          <div style={{ fontSize: '1rem', color: '#cbd5e1', fontWeight: 600 }}>
+          <div style={{ fontSize: '1rem', color: '#536b63', fontWeight: 600 }}>
             कृपया अपनी भाषा चुनें • Select Your Language
           </div>
-          <p style={{ margin: '8px 0 0 0', fontSize: '0.84rem', color: '#94a3b8' }}>
+            <p style={{ margin: '8px 0 0 0', fontSize: '0.84rem', color: '#657a73' }}>
             Aarogya-Drishti (ఆరోగ్య దృష్టి) — ITDA Paderu Tribal Health Initiative
           </p>
         </div>
@@ -165,11 +151,11 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
                 onClick={() => handleLanguagePick(item.code)}
                 style={{
                   background: isSelected
-                    ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(5, 150, 105, 0.25) 100%)'
-                    : 'rgba(255, 255, 255, 0.04)',
+                    ? '#e8f4ef'
+                    : '#ffffff',
                   border: isSelected
-                    ? '2px solid #10b981'
-                    : '1px solid rgba(255, 255, 255, 0.12)',
+                    ? '2px solid #176b5b'
+                    : '1px solid #dce8e3',
                   borderRadius: '14px',
                   padding: '14px',
                   textAlign: 'left',
@@ -179,7 +165,7 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px',
-                  boxShadow: isSelected ? '0 4px 18px rgba(16, 185, 129, 0.3)' : 'none',
+                  boxShadow: isSelected ? '0 3px 12px rgba(23, 107, 91, 0.12)' : 'none',
                 }}
               >
                 {item.badge && (
@@ -189,8 +175,8 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
                       top: 8,
                       right: 8,
                       fontSize: '0.62rem',
-                      background: '#059669',
-                      color: '#ffffff',
+                      background: '#f3e7c5',
+                      color: '#654c1b',
                       padding: '2px 6px',
                       borderRadius: '6px',
                       fontWeight: 700,
@@ -205,16 +191,16 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
                     style={{
                       fontSize: '1.18rem',
                       fontWeight: 700,
-                      color: isSelected ? '#34d399' : '#ffffff',
+                      color: isSelected ? '#145b4d' : '#253b32',
                     }}
                   >
                     {item.nativeName}
                   </span>
                 </div>
-                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', fontWeight: 600 }}>
+                <div style={{ fontSize: '0.82rem', color: '#465e56', fontWeight: 600 }}>
                   {item.englishName}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.3, marginTop: '2px' }}>
+                <div style={{ fontSize: '0.72rem', color: '#667a73', lineHeight: 1.3, marginTop: '2px' }}>
                   {item.subtext}
                 </div>
               </button>
@@ -223,23 +209,23 @@ export const LanguagePreferenceModal: React.FC<LanguagePreferenceModalProps> = (
         </div>
 
         {/* Footer actions */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '16px' }}>
-          <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px', borderTop: '1px solid #e1e9e5', paddingTop: '16px' }}>
+          <span style={{ fontSize: '0.78rem', color: '#60716b' }}>
             ℹ️ You can change your language anytime from the top bar.
           </span>
           <button
             type="button"
             onClick={() => handleLanguagePick(currentLang || 'te')}
             style={{
-              background: '#10b981',
-              color: '#022c22',
+              background: '#176b5b',
+              color: '#ffffff',
               border: 'none',
               padding: '10px 22px',
               borderRadius: '10px',
               fontWeight: 700,
               fontSize: '0.9rem',
               cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
+              boxShadow: '0 3px 10px rgba(23, 107, 91, 0.18)',
             }}
           >
             కొనసాగించండి • Continue →

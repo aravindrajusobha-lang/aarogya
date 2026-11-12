@@ -1,3 +1,5 @@
+import { DoctorWorkspace } from './components/DoctorWorkspace';
+import { DoctorAppointmentsPanel } from './components/DoctorAppointmentsPanel';
 import React, { useState, useEffect } from 'react';
 import { SimulationBanner } from './components/SimulationBanner';
 import { OfflineStatusIndicator } from './components/OfflineStatusIndicator';
@@ -18,12 +20,14 @@ import { SpecialistDirectory } from './components/SpecialistDirectory';
 import { HospitalManager } from './components/HospitalManager';
 import { LocationAdminManager } from './components/LocationAdminManager';
 import { InvitationManager } from './components/InvitationManager';
+import { StaffFieldWorkerManagement } from './components/StaffFieldWorkerManagement';
 import { NotificationCenter } from './components/NotificationCenter';
 import { AccountRecoveryManager } from './components/AccountRecoveryManager';
 import { ConsentManager } from './components/ConsentManager';
 import { CapabilityMatrixViewer } from './components/CapabilityMatrixViewer';
 import { AadhaarMockManager } from './components/AadhaarMockManager';
 import { AuthPanel, AuthUser, AuthTokens } from './components/AuthPanel';
+import { clearStoredAuth, readStoredAuth, storeAuth, validateAccessToken } from './utils/session';
 import { AIRobotAssistant } from './components/AIRobotAssistant';
 import AarogyaDrishtiIntro from './components/AarogyaDrishtiIntro';
 import { DashboardLayout } from './components/DashboardLayout';
@@ -31,13 +35,100 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { LandingPage } from './pages/LandingPage';
 import { PatientDashboard } from './pages/dashboards/PatientDashboard';
+import { PatientLoginPage } from './pages/patient/PatientLoginPage';
+import { PatientAccountPage } from './pages/patient/PatientAccountPage';
 import { DoctorDashboard } from './pages/dashboards/DoctorDashboard';
+import { LiveVideoConsultationModal } from './components/LiveVideoConsultationModal';
 import { AdminDashboard } from './pages/dashboards/AdminDashboard';
 import { AiOralHealthEngine } from './components/AiEngine/AiOralHealthEngine';
 import { PageTransition } from './components/PageTransition';
 import { LanguagePreferenceModal } from './components/LanguagePreferenceModal';
 import { ThemeToggle } from './components/ThemeToggle';
+import { DailyConsultationPage } from './components/VideoConsultation';
+import { LiveAppointmentRoom } from './components/LiveAppointmentRoom';
+import { PATIENT_FORBIDDEN_TABS } from './config/roleNavigation';
 import { LanguageCode, translations, getClientTranslation } from './i18n';
+
+const jwtExpiryTime = (token?: string): number | null => {
+  if (!token) return null;
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const data = JSON.parse(window.atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')));
+    return typeof data.exp === 'number' ? data.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+};
+
+const DemoRoomExpiry: React.FC<{ expiresAt: number; onExpire: () => void }> = ({ expiresAt, onExpire }) => {
+  useEffect(() => {
+    const timer = window.setTimeout(onExpire, Math.max(0, expiresAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [expiresAt, onExpire]);
+  return null;
+};
+
+const PortalRedirect: React.FC<{ route: string }> = ({ route }) => {
+  useEffect(() => {
+    if (window.location.hash !== route) window.location.hash = route;
+  }, [route]);
+  return <div className="login-page-root" aria-live="polite">Opening portal…</div>;
+};
+
+const AppointmentConsultationRoute: React.FC<{
+  appointmentId: string;
+  inviteToken: string;
+  accessToken: string;
+  currentUser: AuthUser | null;
+  currentLang: LanguageCode;
+}> = ({ appointmentId, inviteToken, accessToken, currentUser, currentLang }) => {
+  const [state, setState] = useState<{ status: 'loading' | 'ready' | 'error'; patientName?: string; expiresAt?: number; message?: string }>({ status: 'loading' });
+
+  useEffect(() => {
+    if (!currentUser) {
+      sessionStorage.setItem('aarogya_post_login_route', window.location.hash);
+      return;
+    }
+    const verify = async () => {
+      try {
+        const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/video-invite/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ token: inviteToken }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) throw new Error(payload.error?.message || 'This consultation link is unavailable.');
+        setState({ status: 'ready', patientName: payload.data.patientName, expiresAt: new Date(payload.data.expiresAt).getTime() });
+      } catch (error) {
+        setState({ status: 'error', message: error instanceof Error ? error.message : 'This consultation link is unavailable.' });
+      }
+    };
+    void verify();
+  }, [appointmentId, inviteToken, accessToken, currentUser]);
+
+  if (!currentUser) return <div className="login-page-root"><div className="login-card"><h2>Sign in to join your consultation</h2><p>The doctor’s appointment response and link are required before joining.</p><button className="login-submit-btn" onClick={() => (window.location.hash = '#/login')}>Go to sign in</button></div></div>;
+  if (state.status === 'loading') return <div className="login-page-root" aria-live="polite">Checking appointment and consultation access…</div>;
+  if (state.status === 'error' || !state.expiresAt) return <div className="login-page-root"><div className="login-card"><h2>Consultation link unavailable</h2><p>{state.message || 'This invitation has expired.'}</p><button className="login-submit-btn" onClick={() => (window.location.hash = currentUser.role === 'patient' ? '#/patient' : '#/doctor')}>Return to portal</button></div></div>;
+
+  const role = currentUser.role === 'patient' ? 'patient' : 'medical_officer';
+  const close = () => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor');
+  return <>
+    <SimulationBanner />
+    <LiveVideoConsultationModal
+      consultationId={appointmentId}
+      inviteToken={inviteToken}
+      patientName={state.patientName || 'Patient'}
+      doctorName={role === 'patient' ? 'Assigned Doctor' : currentUser.fullName}
+      userRole={role}
+      currentLang={currentLang}
+      onClose={close}
+    />
+    <div style={{ position: 'fixed', top: 58, left: '50%', transform: 'translateX(-50%)', zIndex: 10001, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', borderRadius: 8, padding: '7px 12px', fontWeight: 700 }}>DEMO VIDEO CONSULTATION — appointment verified; link expires {new Date(state.expiresAt).toLocaleTimeString()}</div>
+    <DemoRoomExpiry expiresAt={state.expiresAt} onExpire={close} />
+  </>;
+};
 
 export type MainTabType =
   | 'dashboard'
@@ -50,6 +141,7 @@ export type MainTabType =
   | 'camps'
   | 'camp-planning'
   | 'assignments'
+  | 'staff-field-management'
   | 'village-groups'
   | 'specialists'
   | 'hospitals'
@@ -69,35 +161,32 @@ export const App: React.FC = () => {
   const [lang, setLang] = useState<LanguageCode>(() => {
     try {
       const saved = localStorage.getItem('aarogya_language');
-      if (saved && ['en', 'te', 'hi', 'ta', 'kn', 'ml'].includes(saved)) {
+      if (saved && ['en', 'te', 'hi'].includes(saved)) {
         return saved as LanguageCode;
       }
     } catch {}
     return 'te'; // Default to Telugu for ITDA Paderu Tribal Agency
   });
 
-  const [showLanguageModal, setShowLanguageModal] = useState<boolean>(() => {
-    try {
-      return !localStorage.getItem('aarogya_lang_prompted');
-    } catch {
-      return false;
-    }
-  });
+  // Language choice remains available in the header switcher. Avoid blocking
+  // first render with a full-screen first-run dialog.
+  const [showLanguageModal, setShowLanguageModal] = useState<boolean>(false);
 
   const dict = translations[lang] || translations.en;
   const t = (path: string) => getClientTranslation(dict, path);
 
-  // Active Main Navigation Tab (Defaulting to Command Dashboard)
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('aarogya:language-change', { detail: lang }));
+  }, [lang]);
+
+  // Active Main Navigation Tab (ASR mapping UI removed)
   const [mainTab, setMainTab] = useState<MainTabType>('dashboard');
 
   // Cinematic Intro Animation State (Plays on initial opening of website; hidden for all roles after register/login)
-  const [showIntro, setShowIntro] = useState<boolean>(() => {
-    try {
-      return !sessionStorage.getItem('aarogya_intro_seen');
-    } catch {
-      return false;
-    }
-  });
+  // Keep the intro available from its explicit launcher, but never block the
+  // first page render with a dark full-screen animation. This also lets auth
+  // deep links render immediately on a fresh browser session.
+  const [showIntro, setShowIntro] = useState<boolean>(false);
 
   // Sidebar Layout State (Preserved Side Dashboard)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
@@ -116,64 +205,97 @@ export const App: React.FC = () => {
     });
   };
 
-  // Authentication & Session State (with resilient fallback for corrupted storage)
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    try {
-      const saved = localStorage.getItem('aarogya_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      localStorage.removeItem('aarogya_user');
-      return null;
-    }
-  });
-  const [tokens, setTokens] = useState<AuthTokens | null>(() => {
-    try {
-      const saved = localStorage.getItem('aarogya_tokens');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      localStorage.removeItem('aarogya_tokens');
-      return null;
-    }
-  });
+  // Authentication & Session State: validate stored session with backend on boot
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [tokens, setTokens] = useState<AuthTokens | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const boot = async () => {
+      const stored = readStoredAuth();
+      if (!stored.user || !stored.tokens?.accessToken) {
+        if (!cancelled) { clearStoredAuth(); setAuthChecked(true); }
+        return;
+      }
+      const validated = await validateAccessToken(stored.tokens.accessToken);
+      if (cancelled) return;
+      if (validated) {
+        setCurrentUser(validated as AuthUser);
+        setTokens(stored.tokens as AuthTokens);
+        storeAuth(validated as any, stored.tokens as any);
+      } else {
+        clearStoredAuth();
+        setCurrentUser(null);
+        setTokens(null);
+      }
+      setAuthChecked(true);
+    };
+    void boot();
+    return () => { cancelled = true; };
+  }, []);
 
     const handleLoginSuccess = (user: AuthUser, userTokens: AuthTokens) => {
       setCurrentUser(user);
       setTokens(userTokens);
-      localStorage.setItem('aarogya_user', JSON.stringify(user));
-      localStorage.setItem('aarogya_tokens', JSON.stringify(userTokens));
+      storeAuth(user as any, userTokens as any);
     };
 
-    const handleLogout = async () => {
-      if (tokens?.accessToken) {
-        try {
-          await fetch('/api/v1/auth/logout', {
+    const performLogout = async (destination = '#/login', replaceRoute = false) => {
+      window.dispatchEvent(new Event('aarogya:stop-camera'));
+      const logoutRequest = tokens?.accessToken
+        ? fetch('/api/v1/auth/logout', {
             method: 'POST',
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
-          });
-        } catch {
-          // Continue clearing client credentials
-        }
-      }
+          }).catch(() => undefined)
+        : Promise.resolve();
+      clearStoredAuth();
       setCurrentUser(null);
       setTokens(null);
-      localStorage.removeItem('aarogya_user');
-      localStorage.removeItem('aarogya_tokens');
+      setIsNurseAssistantOpen(false);
+      try { localStorage.removeItem('aarogya_va_open'); } catch { /* ignore */ }
+      try { sessionStorage.removeItem('patient_booking_screening_id'); } catch { /* ignore */ }
+      await Promise.race([logoutRequest, new Promise<void>((resolve) => window.setTimeout(resolve, 1500))]);
+      if (replaceRoute) window.location.replace(`${window.location.pathname}${window.location.search}${destination}`);
+      else window.location.hash = destination;
     };
 
+    const handleLogout = () => performLogout();
+    const handlePatientLogout = () => performLogout('#/patient/login', true);
+
+    useEffect(() => {
+      const expiresAt = jwtExpiryTime(tokens?.accessToken);
+      if (!expiresAt) return;
+      const destination = currentUser?.role?.toLowerCase().includes('patient') || currentUser?.role?.toLowerCase() === 'community_volunteer'
+        ? '#/patient/login'
+        : '#/login';
+      let expired = false;
+      const checkExpiry = () => {
+        if (expired || Date.now() < expiresAt) return;
+        expired = true;
+        void performLogout(destination, destination === '#/patient/login');
+      };
+      const timer = window.setTimeout(checkExpiry, Math.max(0, expiresAt - Date.now()));
+      document.addEventListener('visibilitychange', checkExpiry);
+      return () => {
+        window.clearTimeout(timer);
+        document.removeEventListener('visibilitychange', checkExpiry);
+      };
+    }, [tokens?.accessToken, currentUser?.role]);
+
     const handleQuickDemoLogin = async (role?: 'asha' | 'doctor') => {
+      // Explicit demo-account login only when user triggers it; never automatic.
       try {
         const targetRole = role || 'asha';
         const credentials =
           targetRole === 'doctor'
             ? { username: 'doctor.paderu', password: 'Doctor@2026' }
             : { username: 'asha.pad01', password: 'Asha@2026' };
-
         const res = await fetch('/api/v1/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(credentials),
         });
-
         const json = await res.json();
         if (json.success && json.data) {
           const authTokens: AuthTokens = {
@@ -183,10 +305,10 @@ export const App: React.FC = () => {
           };
           handleLoginSuccess(json.data.user, authTokens);
         } else {
-          setMainTab('auth');
+          window.location.hash = '#/login';
         }
       } catch {
-        setMainTab('auth');
+        window.location.hash = '#/login';
       }
     };
 
@@ -199,6 +321,12 @@ export const App: React.FC = () => {
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  useEffect(() => {
+    const resetMainDashboard = () => setMainTab('dashboard');
+    window.addEventListener('aarogya:navigate-home', resetMainDashboard);
+    return () => window.removeEventListener('aarogya:navigate-home', resetMainDashboard);
   }, []);
 
   const getPageTitle = (tab: MainTabType): Record<LanguageCode, string> => {
@@ -232,7 +360,7 @@ export const App: React.FC = () => {
         onSelectLang={setLang}
         onNavigateTab={(tab) => {
           if (tab === 'home' || tab === 'landing') {
-            window.location.hash = '#/';
+            window.location.hash = currentUser?.role?.toLowerCase() === 'patient' ? '#/patient' : '#/';
           } else if (tab === 'patient') {
             window.location.hash = '#/patient';
           } else if (tab === 'doctor') {
@@ -290,6 +418,7 @@ export const App: React.FC = () => {
             />
             <Login
               currentLang={lang}
+              requireServerAuth={new URLSearchParams(currentRoute.split('?')[1] || '').get('liveVideo') === 'true'}
               onSelectLang={(chosen) => {
                 setLang(chosen);
                 try {
@@ -298,6 +427,12 @@ export const App: React.FC = () => {
               }}
               onLoginSuccess={(user, userTokens) => {
                 handleLoginSuccess(user, userTokens);
+                const returnRoute = sessionStorage.getItem('aarogya_post_login_route');
+                if (returnRoute) {
+                  sessionStorage.removeItem('aarogya_post_login_route');
+                  window.location.hash = returnRoute;
+                  return;
+                }
                 const role = (user.role || '').toUpperCase();
                 if (role.includes('ADMIN')) window.location.hash = '#/admin';
                 else if (role.includes('DOCTOR') || role.includes('MEDICAL')) window.location.hash = '#/doctor';
@@ -312,16 +447,118 @@ export const App: React.FC = () => {
       );
     }
 
-    // 1B. ROUTE: Public Landing Page (Home, Services, Camp Schedule, Why Us, Specialists)
-    if (
-      currentRoute === '#/' ||
-      currentRoute === '' ||
-      currentRoute === '#/home' ||
-      (!currentUser &&
-        !currentRoute.startsWith('#/admin') &&
-        !currentRoute.startsWith('#/doctor') &&
-        !currentRoute.startsWith('#/patient'))
-    ) {
+    const patientAuthRoute = currentRoute.split('?')[0];
+    if (['#/patient/login', '#/patient/register', '#/patient/forgot-password'].includes(patientAuthRoute)) {
+      if (currentUser) return <PortalRedirect route="#/patient/dashboard" />;
+      if (patientAuthRoute === '#/patient/login') {
+        return <PatientLoginPage
+          currentLang={lang}
+          onSelectLang={(chosen) => { setLang(chosen); try { localStorage.setItem('aarogya_language', chosen); } catch {} }}
+          onLoginSuccess={(user, userTokens) => { handleLoginSuccess(user, userTokens); window.location.hash = '#/patient/dashboard'; }}
+          onNavigateToRegister={() => (window.location.hash = '#/patient/register')}
+          onNavigateToForgotPassword={() => (window.location.hash = '#/patient/forgot-password')}
+        />;
+      }
+      return <PatientAccountPage
+        mode={patientAuthRoute === '#/patient/register' ? 'register' : 'forgot-password'}
+        currentLang={lang}
+        onSelectLang={(chosen) => { setLang(chosen); try { localStorage.setItem('aarogya_language', chosen); } catch {} }}
+        onNavigateToLogin={() => (window.location.hash = '#/patient/login')}
+        onRegistrationSuccess={(user, userTokens) => { handleLoginSuccess(user, userTokens); window.location.hash = '#/patient/dashboard'; }}
+      />;
+    }
+
+    if (currentRoute.startsWith('#/appointment-consultation/')) {
+      const [routePath, routeQuery = ''] = currentRoute.slice(2).split('?');
+      return <AppointmentConsultationRoute
+        appointmentId={decodeURIComponent(routePath.split('/')[1] || '')}
+        inviteToken={new URLSearchParams(routeQuery).get('invite') || ''}
+        accessToken={tokens?.accessToken || ''}
+        currentUser={currentUser}
+        currentLang={lang}
+      />;
+    }
+
+    if (currentRoute.startsWith('#/consultation/webrtc/')) {
+      const appointmentId = decodeURIComponent(currentRoute.slice('#/consultation/webrtc/'.length).split('?')[0] || '');
+      if (!currentUser) {
+        sessionStorage.setItem('aarogya_post_login_route', currentRoute);
+        return <div className="login-page-root"><div className="login-card"><h2>Sign in to join this appointment</h2><p>Only the assigned patient and doctor can enter the private room.</p><button className="login-submit-btn" onClick={() => (window.location.hash = '#/login')}>Go to sign in</button></div></div>;
+      }
+      const role = currentUser.role.toLowerCase();
+      if (!['patient', 'medical_officer', 'specialist_doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
+      if (!appointmentId) return <div className="login-page-root"><div className="login-card"><h2>This consultation is unavailable.</h2></div></div>;
+      return <><SimulationBanner /><LiveAppointmentRoom appointmentId={appointmentId} role={role === 'patient' ? 'patient' : 'doctor'} onClose={() => (window.location.hash = role === 'patient' ? '#/patient/consult' : '#/doctor')} /></>;
+    }
+
+  if (currentRoute.startsWith('#/consultation/direct/')) {
+    const callId = decodeURIComponent(currentRoute.slice('#/consultation/direct/'.length).split('?')[0] || '');
+    if (!currentUser) {
+      sessionStorage.setItem('aarogya_post_login_route', currentRoute);
+      return <div className="login-page-root"><div className="login-card"><h2>Sign in to join this video call</h2><p>Only the invited patient and calling doctor can enter this private room.</p><button className="login-submit-btn" onClick={() => (window.location.hash = '#/login')}>Go to sign in</button></div></div>;
+    }
+    const role = currentUser.role.toLowerCase();
+    if (!['patient', 'medical_officer', 'specialist_doctor', 'doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
+    if (!callId) return <div className="login-page-root"><div className="login-card"><h2>This video call is unavailable.</h2></div></div>;
+    return <><SimulationBanner /><DailyConsultationPage directCallId={callId} role={role === 'patient' ? 'patient' : 'doctor'} currentLang={lang} onClose={() => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor')} /></>;
+  }
+
+  if (currentRoute.startsWith('#/consultation/appointment/')) {
+    const appointmentId = decodeURIComponent(currentRoute.slice('#/consultation/appointment/'.length).split('?')[0] || '');
+    if (!currentUser) {
+      sessionStorage.setItem('aarogya_post_login_route', currentRoute);
+      return <div className="login-page-root"><div className="login-card"><h2>Sign in to join this consultation</h2><p>Only the doctor assigned to this appointment can join from the doctor portal.</p><button className="login-submit-btn" onClick={() => (window.location.hash = '#/login')}>Go to sign in</button></div></div>;
+    }
+    const role = currentUser.role.toLowerCase();
+    if (!['medical_officer', 'specialist_doctor', 'doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join as the assigned doctor.</h2></div></div>;
+    if (!appointmentId) return <div className="login-page-root"><div className="login-card"><h2>This consultation is unavailable.</h2></div></div>;
+    return <><SimulationBanner /><DailyConsultationPage appointmentId={appointmentId} role="doctor" currentLang={lang} onClose={() => (window.location.hash = '#/doctor')} /></>;
+  }
+
+  if (currentRoute.startsWith('#/consultation/join/')) {
+    const raw = decodeURIComponent(currentRoute.slice('#/consultation/join/'.length).split('?')[0] || '');
+    if (!currentUser) {
+      sessionStorage.setItem('aarogya_post_login_route', currentRoute);
+      return <div className="login-page-root"><div className="login-card"><h2>Sign in to join your consultation</h2><p>Only the appointment patient and assigned doctor can enter this private room.</p><button className="login-submit-btn" onClick={() => (window.location.hash = '#/login')}>Go to sign in</button></div></div>;
+    }
+    const role = currentUser.role.toLowerCase();
+    if (!['patient', 'medical_officer', 'specialist_doctor', 'doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
+    return <><SimulationBanner /><DailyConsultationPage token={raw} role={role === 'patient' ? 'patient' : 'doctor'} currentLang={lang} onClose={() => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor')} /></>;
+  }
+
+    if (currentRoute.startsWith('#/consultation-demo/')) {
+      return <><SimulationBanner /><div className="login-page-root"><div className="login-card" role="status"><h2>Demo video rooms are unavailable</h2><p>Open an online appointment confirmed by your assigned doctor to join a private live room.</p><button className="login-submit-btn" onClick={() => (window.location.hash = currentUser?.role?.toLowerCase() === 'patient' ? '#/patient/consult' : '#/doctor')}>Return to your portal</button></div></div></>;
+    }
+    if (!authChecked) {
+      return <div className="login-page-root" aria-live="polite">Checking session…</div>;
+    }
+
+    // Signed-out users must authenticate before accessing any dashboard/app route.
+    // Logged-in users on "/" are sent to their role's home/portal.
+    const isPatient = currentUser?.role?.toLowerCase() === 'patient';
+    const isLandingRoute = currentRoute === '#/' || currentRoute === '' || currentRoute === '#/home';
+    const getRoleHome = (role?: string) => {
+      const r = (role || '').toUpperCase();
+      if (r.includes('PATIENT') || r === 'COMMUNITY_VOLUNTEER') return '#/patient';
+      if (r === 'DOCTOR' || r === 'SPECIALIST_DOCTOR' || r === 'MEDICAL_OFFICER' || r === 'CHIEF_MEDICAL_OFFICER' || r === 'HOSPITAL_MANAGER') return '#/doctor';
+      if (r === 'SYSTEM_ADMIN' || r === 'ADMIN' || r === 'DISTRICT_OFFICER') return '#/admin';
+      // Staff/frontline roles without a dedicated portal use the authenticated main workspace.
+      return '#/';
+    };
+
+    if (!currentUser) {
+      if (!currentRoute.startsWith('#/login') && !isLandingRoute) {
+        return <PortalRedirect route="#/login" />;
+      }
+    } else if (isLandingRoute) {
+      const home = getRoleHome(currentUser.role);
+      if (home && (home as string) !== '#/' && home !== currentRoute) {
+        return <PortalRedirect route={home} />;
+      }
+      // home '#/' falls through to main authenticated workspace below
+    }
+
+    if (isLandingRoute) {
       return (
         <>
           <PageTransition routeKey="#/home">
@@ -342,9 +579,7 @@ export const App: React.FC = () => {
               currentLang={lang}
               onSelectLang={(chosen) => {
                 setLang(chosen);
-                try {
-                  localStorage.setItem('aarogya_language', chosen);
-                } catch {}
+                try { localStorage.setItem('aarogya_language', chosen); } catch {}
               }}
               currentUser={currentUser}
               onNavigateLogin={() => (window.location.hash = '#/login')}
@@ -352,11 +587,7 @@ export const App: React.FC = () => {
               onNavigateDoctor={() => (window.location.hash = '#/doctor')}
               onNavigateAdmin={() => (window.location.hash = '#/admin')}
               onOpenScreening={() => {
-                if (currentUser) {
-                  window.location.hash = '#/patient';
-                } else {
-                  window.location.hash = '#/login';
-                }
+                window.location.hash = currentUser ? '#/patient' : '#/login';
               }}
             />
           </PageTransition>
@@ -377,28 +608,15 @@ export const App: React.FC = () => {
             >
               <DashboardLayout
                 currentUser={currentUser}
-                activeNav="overview"
-                onNavSelect={(nav) => {
-                  window.location.hash = '#/';
-                  const destination: Partial<Record<string, MainTabType>> = {
-                    overview: 'dashboard',
-                    hospitals: 'hospitals',
-                    doctors: 'specialists',
-                    reports: 'asr-map',
-                    audit: 'diagnostics',
-                  };
-                  setMainTab(destination[nav] || 'dashboard');
-                }}
+                activeNav="dashboard"
+                onNavSelect={(nav) => setMainTab(nav as MainTabType)}
                 onLogout={handleLogout}
                 onToggleAIAssistant={toggleNurseAssistant}
-                title="Super Admin Command Portal"
+                title="Admin Portal"
               >
                 <AdminDashboard
                   currentUser={currentUser}
-                  onNavigateTab={(tab) => {
-                    window.location.hash = '#/';
-                    setMainTab(tab as any);
-                  }}
+                  onNavigateTab={(tab) => setMainTab(tab as any)}
                 />
               </DashboardLayout>
             </ProtectedRoute>
@@ -410,6 +628,8 @@ export const App: React.FC = () => {
 
     // 3. ROUTE: /doctor
     if (currentRoute.startsWith('#/doctor')) {
+      const requestedDoctorPage = currentRoute.split('?')[0].split('/')[2] || 'queue';
+      const doctorPage = requestedDoctorPage === 'high-risk' ? 'queue' : requestedDoctorPage;
       return (
         <>
           <PageTransition routeKey="#/doctor">
@@ -420,30 +640,18 @@ export const App: React.FC = () => {
             >
               <DashboardLayout
                 currentUser={currentUser}
-                activeNav="queue"
-                onNavSelect={(nav) => {
-                  window.location.hash = '#/';
-                  const destination: Partial<Record<string, MainTabType>> = {
-                    queue: 'screening',
-                    'high-risk': 'screening',
-                    referrals: 'screening',
-                    teleconsult: 'teleconsultation',
-                    biopsy: 'screening',
-                  };
-                  setMainTab(destination[nav] || 'screening');
-                }}
+                currentLang={lang}
+                activeNav={doctorPage}
+                onNavSelect={(nav) => { window.location.hash = `#/doctor/${nav}`; }}
                 onLogout={handleLogout}
                 onToggleAIAssistant={toggleNurseAssistant}
                 title="Doctor Clinical Review Portal"
               >
-                <DoctorDashboard
-                  currentUser={currentUser}
-                  currentLang={lang}
-                  onNavigateTab={(tab) => {
-                    window.location.hash = '#/';
-                    setMainTab(tab as any);
-                  }}
-                />
+                {doctorPage === 'appointments' ? <DoctorAppointmentsPanel onOpenRoom={id => { window.location.hash = `#/consultation/webrtc/${encodeURIComponent(id)}`; }} />
+                  : ['patients', 'availability', 'referrals', 'biopsy'].includes(doctorPage) ? <DoctorWorkspace key={doctorPage} page={doctorPage} />
+                  : doctorPage === 'ai-screening' ? <AiOralHealthEngine />
+                  : doctorPage === 'queue' ? <DoctorDashboard key={doctorPage} initialRiskFilter="ALL" currentUser={currentUser} currentLang={lang} onNavigateTab={tab => { window.location.hash = `#/doctor/${tab}`; }} />
+                  : <section className="dash-panel"><h1>Page not found</h1><a href="#/doctor/queue">Back to clinical queue</a></section>}
               </DashboardLayout>
             </ProtectedRoute>
           </PageTransition>
@@ -452,15 +660,36 @@ export const App: React.FC = () => {
       );
     }
 
-    // 4. ROUTE: /patient
-    if (currentRoute.startsWith('#/patient')) {
+    // 4. ROUTE: /patient (or patient landed on default route)
+    if (currentRoute.startsWith('#/patient') || (isPatient && isLandingRoute)) {
+      const patientPath = (currentRoute.split('?')[0].replace(/\/+$/, '') || '#/patient');
+      const patientSegments = patientPath.slice('#/patient'.length).split('/').filter(Boolean);
+      const patientTabByPath: Record<string, string> = {
+        dashboard: 'home', profile: 'profile', screening: 'screening', assessment: 'assessment',
+        consult: 'consultation', treatment: 'treatment', appointments: 'consultation',
+        reminders: 'consultation', help: 'consultation', history: 'history', reports: 'reports',
+        hospitals: 'hospitals', referrals: 'assessment', prescriptions: 'prescriptions', education: 'education', 'care-team': 'care-team',
+      };
+      const patientQueryTab = new URLSearchParams(currentRoute.split('?')[1] || '').get('tab');
+      const patientPathTab = patientSegments.length === 0
+        ? 'home'
+        : patientSegments[0] === 'screening' && patientSegments.length === 3 && patientSegments[2] === 'report'
+          ? 'report-detail'
+          : patientSegments[0] === 'reports' && patientSegments.length === 2
+            ? 'prescriptions'
+          : patientTabByPath[patientSegments[0]];
+      const validPatientTabs = new Set(['home', 'profile', 'screening', 'assessment', 'consultation', 'prescriptions', 'history', 'reports', 'hospitals', 'education', 'care-team', 'treatment', 'report-detail']);
+      const patientMenuTab = patientPath === '#/patient' && patientQueryTab
+        ? patientQueryTab
+        : patientPathTab || patientQueryTab || 'home';
+      const patientRouteNotFound = !validPatientTabs.has(patientMenuTab) || !patientPathTab;
       return (
         <>
           <PageTransition routeKey="#/patient">
             <ProtectedRoute
               allowedRoles={['PATIENT', 'COMMUNITY_VOLUNTEER']}
               currentUser={currentUser}
-              onRedirectToLogin={() => (window.location.hash = '#/login')}
+              onRedirectToLogin={() => (window.location.hash = '#/patient/login')}
             >
               <LanguagePreferenceModal
                 isOpen={showLanguageModal}
@@ -476,47 +705,79 @@ export const App: React.FC = () => {
               />
               <DashboardLayout
                 currentUser={currentUser}
-                activeNav="dashboard"
+                currentLang={lang}
+                activeNav={patientMenuTab}
                 onNavSelect={(nav) => {
-                  const destination: Partial<Record<string, MainTabType>> = {
-                    dashboard: 'dashboard',
+                  const patientTabMap: Record<string, string> = {
+                    dashboard: 'home',
                     screening: 'screening',
-                    specialists: 'specialists',
+                    history: 'history',
+                    appointments: 'consultation',
+                    referrals: 'assessment',
+                    prescriptions: 'prescriptions',
                     hospitals: 'hospitals',
-                    notifications: 'notifications',
-                    consent: 'consent',
-                    auth: 'auth',
-                    appointments: 'appointments',
-                    patients: 'patients',
-                    reports: 'reports',
-                    help: 'help',
+                    auth: 'care-team',
+                    notifications: 'consultation',
+                    help: 'education',
                   };
-                  if (nav === 'dashboard') {
-                    window.location.hash = '#/patient';
-                    return;
-                  }
-                  window.location.hash = '#/';
-                  setMainTab(destination[nav] || 'dashboard');
+                  const targetTab = patientTabMap[nav] || 'screening';
+                  window.location.hash = `#/patient?tab=${targetTab}`;
                 }}
-                onLogout={handleLogout}
+                onLogout={handlePatientLogout}
                 onToggleAIAssistant={toggleNurseAssistant}
                 title="Patient Healthcare Navigation Portal"
               >
-                <PatientDashboard
+                {patientRouteNotFound ? (
+                  <section className="patient-route-not-found" role="status">
+                    <span aria-hidden="true">404</span>
+                    <h2>Page not found</h2>
+                    <p>This patient portal page is unavailable.</p>
+                    <button type="button" className="dash-btn dash-btn-primary" onClick={() => (window.location.hash = '#/patient/dashboard')}>Return to dashboard</button>
+                  </section>
+                ) : <PatientDashboard
+                  key={patientMenuTab}
                   currentUser={currentUser}
                   currentLang={lang}
+                  initialTab={(patientMenuTab as any) || 'home'}
+                  initialResourceId={patientSegments[1]}
                   onOpenLanguageModal={() => setShowLanguageModal(true)}
                   onToggleAIAssistant={toggleNurseAssistant}
                   onNavigateTab={(tab) => {
-                    window.location.hash = '#/';
-                    setMainTab(tab as any);
+                    window.location.hash = `#/patient?tab=${tab}`;
                   }}
-                />
+                />}
               </DashboardLayout>
             </ProtectedRoute>
           </PageTransition>
           {renderAssistant()}
         </>
+      );
+    }
+
+    // Role-based Access Guard: Block Citizen Patients from Administrative & Staff Workspace Tabs
+    if (isPatient && (currentRoute.startsWith('#/admin') || currentRoute.startsWith('#/doctor') || PATIENT_FORBIDDEN_TABS.has(mainTab))) {
+      return (
+        <div className="login-page-root">
+          <div className="login-card" style={{ textAlign: 'center' }}>
+            <div className="login-logo" style={{ background: 'linear-gradient(135deg, #f43f5e, #be123c)' }}>
+              ⚠️
+            </div>
+            <h2 className="login-title">Access Restricted</h2>
+            <p className="login-sub">
+              As a citizen patient, staff management and administrative workspaces are restricted. Please return to your Patient Portal.
+            </p>
+              <button
+                type="button"
+                className="login-submit-btn"
+                onClick={() => {
+                  window.location.hash = '#/patient';
+                }}
+                style={{ marginTop: '20px' }}
+              >
+                Return to Patient Dashboard
+              </button>
+          </div>
+        </div>
       );
     }
 
@@ -591,23 +852,6 @@ export const App: React.FC = () => {
                 {currentUser?.role?.toLowerCase() === 'patient' ? (
                   /* PATIENT PORTAL: Absolutely no Admin or Doctor elements */
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span
-                      style={{
-                        fontSize: '0.78rem',
-                        color: '#6ee7b7',
-                        background: 'rgba(16, 185, 129, 0.16)',
-                        border: '1px solid rgba(16, 185, 129, 0.4)',
-                        padding: '6px 14px',
-                        borderRadius: '8px',
-                        fontWeight: 700,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <span>🌿</span>
-                      <span>{lang === 'te' ? 'రోగి పోర్టల్' : 'Citizen Patient Portal'}</span>
-                    </span>
                     <button
                       type="button"
                       className="button button-coral"
@@ -619,7 +863,7 @@ export const App: React.FC = () => {
                     </button>
                   </div>
                 ) : (currentUser?.role?.toLowerCase().includes('doctor') || currentUser?.role?.toLowerCase().includes('medical')) ? (
-                  /* DOCTOR PORTAL: Absolutely no Admin role on navbar */
+                  /* DOCTOR PORTAL: simplified topbar controls */
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span
                       style={{
@@ -640,27 +884,6 @@ export const App: React.FC = () => {
                     </span>
                     <button
                       type="button"
-                      className="button"
-                      style={{
-                        fontSize: '0.76rem',
-                        padding: '5px 11px',
-                        borderRadius: '8px',
-                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                        color: '#ffffff',
-                        border: 'none',
-                        fontWeight: 700,
-                        boxShadow: '0 2px 8px rgba(2, 132, 199, 0.4)',
-                      }}
-                      onClick={() => {
-                        window.location.hash = '#/';
-                        setMainTab('ai-screening');
-                      }}
-                      title="Launch Multi-Disease AI Screening Engine"
-                    >
-                      🔬 AI Engine
-                    </button>
-                    <button
-                      type="button"
                       className="button button-coral"
                       style={{ fontSize: '0.76rem', padding: '6px 12px', borderRadius: '8px' }}
                       onClick={handleLogout}
@@ -670,55 +893,8 @@ export const App: React.FC = () => {
                     </button>
                   </div>
                 ) : (
-                  /* ADMIN PORTAL: Super Admin elements strictly for Admin role */
+                  /* ADMIN PORTAL: simplified topbar controls */
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span
-                      style={{
-                        fontSize: '0.78rem',
-                        color: '#fbbf24',
-                        background: 'rgba(245, 158, 11, 0.16)',
-                        border: '1px solid rgba(245, 158, 11, 0.4)',
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        fontWeight: 700,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <span>🛡️</span>
-                      <span>Super Admin</span>
-                    </span>
-                    <button
-                      type="button"
-                      className="button"
-                      style={{
-                        fontSize: '0.76rem',
-                        padding: '5px 11px',
-                        borderRadius: '8px',
-                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                        color: '#ffffff',
-                        border: 'none',
-                        fontWeight: 700,
-                        boxShadow: '0 2px 8px rgba(2, 132, 199, 0.4)',
-                      }}
-                      onClick={() => {
-                        window.location.hash = '#/';
-                        setMainTab('ai-screening');
-                      }}
-                      title="Launch Multi-Disease AI Screening Engine"
-                    >
-                      🔬 AI Engine
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-outline"
-                      style={{ fontSize: '0.76rem', padding: '5px 9px', borderRadius: '8px' }}
-                      onClick={() => (window.location.hash = '#/admin')}
-                      title="Open Super Admin Command Portal"
-                    >
-                      🛡️ Admin Dashboard
-                    </button>
                     <button
                       type="button"
                       className="button button-coral"
@@ -745,11 +921,13 @@ export const App: React.FC = () => {
                 </button>
 
                 {/* Online / Offline Sync Indicator */}
-                <OfflineStatusIndicator
-                  onlineLabel={t('app.onlineNotice') || 'Online (Synced)'}
-                  offlineLabel={t('app.offlineNotice') || 'Offline (Local Dexie)'}
-                  accessToken={tokens?.accessToken || null}
-                />
+                {currentUser?.role?.toLowerCase() !== 'patient' && (
+                  <OfflineStatusIndicator
+                    onlineLabel={t('app.onlineNotice') || 'Online (Synced)'}
+                    offlineLabel={t('app.offlineNotice') || 'Offline (Local Dexie)'}
+                    accessToken={tokens?.accessToken || null}
+                  />
+                )}
 
                 {/* Theme Mode Toggle (Light / Dark) */}
                 <ThemeToggle currentLang={lang} />
@@ -761,26 +939,17 @@ export const App: React.FC = () => {
 
             {/* Active Workspace View */}
             <div className="workspace-container">
-              {/* VIEW: OPERATIONS DASHBOARD (Role conditional: PatientDashboard for Patients, DashboardOverview for Clinical/Admin) */}
+              {/* Keep the existing operations overview available to clinical and administrative staff. */}
               {mainTab === 'dashboard' && (
-                currentUser?.role?.toLowerCase() === 'patient' ? (
-                  <PatientDashboard
-                    currentUser={currentUser}
-                    onNavigateTab={(tab) => setMainTab(tab as MainTabType)}
-                    currentLang={lang}
-                    onOpenLanguageModal={() => setShowLanguageModal(true)}
-                  />
-                ) : (
-                  <DashboardOverview
-                    currentUser={currentUser}
-                    onNavigate={(tab) => setMainTab(tab as MainTabType)}
-                    onOpenVoiceAssistant={toggleNurseAssistant}
-                    currentLang={lang}
-                  />
-                )
+                <DashboardOverview
+                  currentUser={currentUser}
+                  onNavigate={(tab) => setMainTab(tab as MainTabType)}
+                  onOpenVoiceAssistant={toggleNurseAssistant}
+                  currentLang={lang}
+                />
               )}
 
-              {/* VIEW: ASR DISTRICT GIS MAP */}
+              {/* Keep the existing ASR district GIS map and camp-planning actions. */}
               {mainTab === 'asr-map' && (
                 <AsrDistrictMap
                   currentLang={lang}
@@ -792,26 +961,26 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {/* VIEW: CLINICAL SCREENING & MO QUEUE */}
+{/* VIEW: CLINICAL SCREENING & MO QUEUE */}
               {mainTab === 'screening' && (
                 <ScreeningManager
                   accessToken={tokens?.accessToken || null}
                   currentUser={currentUser}
-                  onRequireLogin={handleQuickDemoLogin}
-                  onGoToAuth={() => setMainTab('auth')}
+                  onRequireLogin={() => { window.location.hash = '#/login'; }}
+                  onGoToAuth={() => { window.location.hash = '#/login'; }}
                 />
               )}
 
               {/* VIEW: AI ORAL HEALTH SCREENING ENGINE (MODULE A + B + C) */}
               {mainTab === 'ai-screening' && (
                 <AiOralHealthEngine
-                  patientId="DEMO-PAD-8492"
-                  patientName="Balaraju Somulu"
-                  hospitalId={currentUser?.hospitalId || 'HOSP-PADERU-01'}
-                  userRole={currentUser?.role?.toLowerCase() || 'asha'}
+                  patientId={currentUser?.patientId || ''}
+                  patientName={currentUser?.fullName || ''}
+                  hospitalId={currentUser?.hospitalId}
+                  userRole={currentUser?.role?.toLowerCase() || ''}
                   token={tokens?.accessToken || ''}
                   currentLang={lang}
-                  onClose={() => setMainTab('dashboard')}
+                  onClose={() => setMainTab('hospitals')}
                 />
               )}
 
@@ -830,6 +999,7 @@ export const App: React.FC = () => {
                 <PatientManager
                   accessToken={tokens?.accessToken || null}
                   currentUser={currentUser}
+                  currentLang={lang}
                   onRequireLogin={handleQuickDemoLogin}
                   onGoToAuth={() => setMainTab('auth')}
                 />
@@ -866,9 +1036,20 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {/* VIEW: WORKER JURISDICTION ASSIGNMENTS */}
+              {/* Preserve jurisdiction management as its own existing workflow. */}
               {mainTab === 'assignments' && (
                 <AssignmentManager
+                  accessToken={tokens?.accessToken || null}
+                  currentUser={currentUser}
+                  onRequireLogin={handleQuickDemoLogin}
+                  onGoToAuth={() => setMainTab('auth')}
+                />
+              )}
+
+              {/* Additional combined staff management remains available alongside the existing workflows. */}
+              {/* VIEW: STAFF & FIELD WORKER MANAGEMENT */}
+              {mainTab === 'staff-field-management' && (
+                <StaffFieldWorkerManagement
                   accessToken={tokens?.accessToken || null}
                   currentUser={currentUser}
                   onRequireLogin={handleQuickDemoLogin}
@@ -915,7 +1096,7 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {/* VIEW: INVITATIONS */}
+              {/* Preserve the existing staff invitation and onboarding workflow. */}
               {mainTab === 'invitations' && (
                 <InvitationManager
                   accessToken={tokens?.accessToken || null}
@@ -942,7 +1123,7 @@ export const App: React.FC = () => {
               {/* VIEW: DPDP CONSENT */}
               {mainTab === 'consent' && (
                 <ConsentManager
-                  patientId="DEMO-PAD-8492"
+                  patientId={currentUser?.patientId || ''}
                   accessToken={tokens?.accessToken || ''}
                 />
               )}

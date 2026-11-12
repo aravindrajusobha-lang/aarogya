@@ -95,9 +95,9 @@ describe('Phase 16: Aadhaar Verification Mock Service (MOCK Badge & Non-Custodia
   });
 
   // ==========================================
-  // 1. The 4 Endpoints & MOCK Flag Verification
+  // 1. The 5 Endpoints & MOCK Flag Verification
   // ==========================================
-  describe('1. The 4 Endpoints & Unstrippable MOCK Flag in Response Bodies', () => {
+  describe('1. The 5 Endpoints & Unstrippable MOCK Flag in Response Bodies', () => {
     let testTransactionId = '';
     const rawFakeNumber = '987654321098'; // Fake 12-digit number for demonstration
 
@@ -261,7 +261,7 @@ describe('Phase 16: Aadhaar Verification Mock Service (MOCK Badge & Non-Custodia
   // 3. Central Authorization Matrix Coverage
   // ==========================================
   describe('3. Central Authorization Matrix & Role Access Control', () => {
-    it('verifies all 4 Aadhaar mock endpoints are covered in ENDPOINT_CAPABILITY_TABLE', () => {
+    it('verifies all 5 Aadhaar mock endpoints are covered in ENDPOINT_CAPABILITY_TABLE', () => {
       const coverage = verifyAllExpressRoutesCovered(app);
       expect(coverage.missingRoutes).toEqual([]);
     });
@@ -290,6 +290,16 @@ describe('Phase 16: Aadhaar Verification Mock Service (MOCK Badge & Non-Custodia
         .set('Authorization', `Bearer ${patientToken}`);
 
       expect(res.status).toBe(403);
+    });
+
+    it('keeps the legacy OCR URL but blocks server-side card processing', async () => {
+      const res = await request(app)
+        .post('/api/v1/mock/aadhaar/ocr-extract')
+        .set('Authorization', `Bearer ${ashaToken}`)
+        .send({});
+
+      expect(res.status).toBe(410);
+      expect(res.body.error.code).toBe('AADHAAR_OCR_BLOCKED');
     });
 
     it('rejects unauthenticated requests with 401', async () => {

@@ -113,34 +113,19 @@ router.get(
   }
 );
 
-const OcrExtractSchema = z.object({
-  frontImage: z.string().min(1, 'Aadhaar front card image is required'),
-  backImage: z.string().optional(),
-  consentObtained: z.boolean().refine((val) => val === true, {
-    message: 'Patient informed consent is mandatory for Aadhaar OCR extraction',
-  }),
-});
-
-// 5. POST /api/v1/mock/aadhaar/ocr-extract (Workflow 1)
+// Keep the legacy URL available for existing clients while enforcing browser-only
+// OCR. The request body is deliberately not validated, read, logged, or persisted.
 router.post(
   '/ocr-extract',
   requireAuth,
   authorizeCapability('patient:create'),
-  auditTag('aadhaar.ocr_extract', 'aadhaar_mock'),
-  validate(OcrExtractSchema),
-  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const { frontImage, backImage, consentObtained } = req.body;
-      const result = await AadhaarMockService.extractOcrData(
-        frontImage,
-        backImage,
-        consentObtained,
-        getActor(req)
-      );
-      res.envelope(result, 'Aadhaar OCR extraction completed (masked privacy demo)');
-    } catch (err) {
-      next(err);
-    }
+  (_req: Request, res: Response): void => {
+    res.envelopeError(
+      'AADHAAR_OCR_BLOCKED',
+      'Aadhaar card OCR is browser-only. Use local browser extraction and submit only the consented profile fields.',
+      undefined,
+      410
+    );
   }
 );
 

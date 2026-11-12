@@ -8,6 +8,8 @@ import { TeleconsultationService } from './teleconsultationService.js';
 import { Teleconsultation } from './teleconsultationModel.js';
 import { User } from '../auth/userModel.js';
 import { VideoSignalingService } from './videoSignaling.js';
+import crypto from 'crypto';
+import { Appointment } from '../appointment/appointmentModel.js';
 
 export const teleconsultationRouter = Router();
 
@@ -76,6 +78,56 @@ async function resolveCaller(req: Request) {
     hospitalId: req.user!.hospitalId,
     name,
   };
+}
+
+async function authorizeAppointmentVideoRoom(appointmentId: string, caller: { userId: string; role: string; hospitalId?: string }, token?: string): Promise<void> {
+  const appointment = await Appointment.findOne({ appointmentId });
+  if (!appointment) {
+    if (appointmentId.startsWith('apt_')) {
+      const error: any = new Error('Appointment consultation room not found.');
+      error.statusCode = 404;
+      error.code = 'APPOINTMENT_NOT_FOUND';
+      throw error;
+    }
+    return; // Preserve existing non-appointment teleconsultation discussion rooms.
+  }
+  if (!['confirmed', 'rescheduled', 'checked_in'].includes(appointment.status)) {
+    const error: any = new Error('Doctor confirmation is required before joining this consultation.');
+    error.statusCode = 403;
+    error.code = 'APPOINTMENT_NOT_CONFIRMED';
+    throw error;
+  }
+  if (['medical_officer', 'specialist_doctor'].includes(caller.role)) {
+    if (caller.hospitalId !== appointment.destinationHospitalId ||
+        (appointment.assignedDoctorId && appointment.assignedDoctorId !== caller.userId) ||
+        (!appointment.assignedDoctorId && appointment.videoInvite?.issuedBy !== caller.userId)) {
+      const error: any = new Error('Only the doctor assigned to this appointment can join.');
+      error.statusCode = 403;
+      error.code = 'DOCTOR_NOT_ASSIGNED';
+      throw error;
+    }
+    return;
+  }
+  if (caller.role !== 'patient') {
+    const error: any = new Error('Only the patient and assigned doctor can join this consultation.');
+    error.statusCode = 403;
+    error.code = 'CONSULTATION_ACCESS_DENIED';
+    throw error;
+  }
+  const dbUser: any = await User.findOne({ userId: caller.userId }).lean();
+  const patientIds = [caller.userId, dbUser?.patientId].filter(Boolean);
+  const invite = appointment.videoInvite;
+  const expectedHash = invite?.tokenHash || '';
+  const suppliedHash = token ? crypto.createHash('sha256').update(token).digest('hex') : '';
+  const tokenMatches = expectedHash.length === suppliedHash.length && expectedHash.length > 0 &&
+    crypto.timingSafeEqual(Buffer.from(expectedHash), Buffer.from(suppliedHash));
+  if (!patientIds.includes(appointment.patientId) || !invite?.tokenHash || invite.revokedAt ||
+      !invite.expiresAt || new Date(invite.expiresAt).getTime() <= Date.now() || !token || !tokenMatches) {
+    const error: any = new Error('The patient-specific consultation link is invalid or expired.');
+    error.statusCode = 403;
+    error.code = 'VIDEO_INVITE_INVALID';
+    throw error;
+  }
 }
 
 // 1. Request Consultation
@@ -469,6 +521,7 @@ teleconsultationRouter.post(
     try {
       const consultationId = req.params.id as string;
       const caller = await resolveCaller(req);
+      await authorizeAppointmentVideoRoom(consultationId, caller, req.header('X-Consultation-Invite'));
       const roomInfo = VideoSignalingService.joinRoom(consultationId, caller.userId, caller.role);
       res.envelope({
         ...roomInfo,
@@ -490,6 +543,7 @@ teleconsultationRouter.post(
     try {
       const consultationId = req.params.id as string;
       const caller = await resolveCaller(req);
+      await authorizeAppointmentVideoRoom(consultationId, caller, req.header('X-Consultation-Invite'));
       const { type, data } = req.body;
       const result = VideoSignalingService.postSignal(consultationId, caller.userId, caller.role, type, data);
       res.envelope(result);
@@ -507,6 +561,7 @@ teleconsultationRouter.get(
     try {
       const consultationId = req.params.id as string;
       const caller = await resolveCaller(req);
+      await authorizeAppointmentVideoRoom(consultationId, caller, req.header('X-Consultation-Invite'));
       const since = Number(req.query.since) || 0;
       const signals = VideoSignalingService.getSignals(consultationId, caller.userId, since);
       res.envelope(signals);
@@ -524,6 +579,7 @@ teleconsultationRouter.post(
     try {
       const consultationId = req.params.id as string;
       const caller = await resolveCaller(req);
+      await authorizeAppointmentVideoRoom(consultationId, caller, req.header('X-Consultation-Invite'));
       const result = VideoSignalingService.leaveRoom(consultationId, caller.userId);
       res.envelope(result);
     } catch (err) {

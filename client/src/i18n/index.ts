@@ -11,9 +11,9 @@ export const translations: Record<LanguageCode, typeof en> = {
   en,
   te,
   hi,
-  ta,
-  kn,
-  ml,
+  ta: ta as typeof en,
+  kn: kn as typeof en,
+  ml: ml as typeof en,
 };
 
 export function getClientTranslation(dict: typeof en, path: string): string {

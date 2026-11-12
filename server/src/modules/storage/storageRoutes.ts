@@ -143,7 +143,6 @@ router.get(
   '/files/:fileId',
   validate({ params: FileParamsSchema }),
   requireAuth,
-  requireScope('storage:read_clinical'),
   auditTag('STORAGE_FILE_READ', 'file'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {

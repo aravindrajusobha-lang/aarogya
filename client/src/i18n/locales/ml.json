@@ -133,7 +133,32 @@
     "staffDiscussionTitle": "ആരോഗ്യ പ്രവർത്തകരുടെ ചർച്ച",
     "notesTitle": "ക്ലിനിക്കൽ കൺസൾട്ടേഷൻ കുറിപ്പുകൾ",
     "notReleased": "കുറിപ്പുകൾ രോഗിയുടെ കാഴ്‌ചയ്ക്കായി ഇതുവരെ നൽകിയിട്ടില്ല.",
-    "onlyAssignedClinician": "നിയോഗിക്കപ്പെട്ട ക്ലിനിക്കൽ സ്പെഷ്യലിസ്റ്റിന് മാത്രമേ കുറിപ്പുകൾ നൽകാൻ കഴിയൂ."
+    "onlyAssignedClinician": "നിയോഗിക്കപ്പെട്ട ക്ലിനിക്കൽ സ്പെഷ്യലിസ്റ്റിന് മാത്രമേ കുറിപ്പുകൾ നൽകാൻ കഴിയൂ.",
+    "directCallTitle": "ഡോക്ടർ-രോഗി നേരിട്ടുള്ള വീഡിയോ കോൾ",
+    "liveVideoChecking": "തത്സമയ വീഡിയോ ലഭ്യത പരിശോധിക്കുന്നു...",
+    "liveVideoReady": "തത്സമയ വീഡിയോ സേവനം ക്രമീകരിച്ചിട്ടുണ്ട്.",
+    "liveVideoBlocked": "തത്സമയ വീഡിയോ ലഭ്യമല്ല. അഡ്മിനിസ്ട്രേറ്റർ Daily സേവനം ക്രമീകരിക്കണം.",
+    "liveVideoUnavailable": "തത്സമയ വീഡിയോ ലഭ്യത പരിശോധിക്കാനായില്ല. പിന്നീട് വീണ്ടും ശ്രമിക്കുക.",
+    "directCallPatient": "രോഗി",
+    "directCallChoosePatient": "ഒരു രോഗിയെ തിരഞ്ഞെടുക്കുക",
+    "directCallNoPatients": "നിങ്ങളുടെ ആശുപത്രിയിലേക്ക് ഇതുവരെ സ്ഥിരീകരിച്ച രോഗി അക്കൗണ്ടുകൾ നൽകിയിട്ടില്ല.",
+    "directCallCalling": "വിളിക്കുന്നു...",
+    "directCallStart": "രോഗിയെ വിളിക്കുക",
+    "directCallOutgoing": "പുറത്തേക്കുള്ള കോളുകൾ",
+    "directCallIncoming": "ഇൻകമിംഗ് കോൾ",
+    "directCallNoOutgoing": "സജീവമായ പുറത്തേക്കുള്ള കോളുകളില്ല.",
+    "directCallNoIncoming": "ഇൻകമിംഗ് കോളുകളില്ല.",
+    "directCallWaiting": "രോഗിയുടെ മറുപടിക്കായി കാത്തിരിക്കുന്നു",
+    "directCallPatientReady": "രോഗി തയ്യാറാണ്",
+    "directCallConnected": "ബന്ധിപ്പിച്ചു",
+    "directCallOpen": "കോൾ തുറക്കുക",
+    "directCallAnswer": "വീഡിയോ കോൾ സ്വീകരിക്കുക",
+    "directCallReject": "നിരസിക്കുക",
+    "directCallRejected": "കോൾ നിരസിച്ചു.",
+    "directCallSent": "കോൾ അഭ്യർത്ഥന അയച്ചു. രോഗിക്ക് അവരുടെ ഡാഷ്ബോർഡിൽ നിന്ന് സ്വീകരിക്കാം.",
+    "directCallSessionExpired": "നിങ്ങളുടെ സെഷൻ കാലഹരണപ്പെട്ടു. വീണ്ടും സൈൻ ഇൻ ചെയ്യുക.",
+    "directCallSignIn": "വീണ്ടും സൈൻ ഇൻ ചെയ്യുക",
+    "directCallDemoLogin": "നിങ്ങൾ ഡെമോ മോഡിലാണ്. തത്സമയ വീഡിയോ കോളുകൾക്കായി സെർവർ പരിശോധിച്ച ഡോക്ടർ അല്ലെങ്കിൽ രോഗി അക്കൗണ്ട് ഉപയോഗിച്ച് സൈൻ ഇൻ ചെയ്യുക."
   },
   "aadhaarMock": {
     "title": "മോക്ക് - ആധാർ സിമുലേഷൻ അഡാപ്റ്റർ",
@@ -156,6 +181,22 @@
     "deviceRevokedWipe": "ഉപകരണ സെഷൻ റദ്ദാക്കി. പ്രാദേശിക റെക്കോർഡുകൾ മായ്ച്ചു.",
     "queueLimitReached": "പരമാവധി പരിധിയിലെത്തി (500 പ്രവർത്തനങ്ങൾ). ദയവായി സിങ്ക് ചെയ്യുക.",
     "photoLimitNotice": "ഫോട്ടോ വലുപ്പ പരിധി 5 എംബി വരെ മാത്രം."
+  },
+  "patientOcr": {
+    "title": "Identity Card OCR",
+    "privacyNote": "OCR runs in this browser. Card images and full ID numbers are not uploaded. DEMO / MOCK only; this does not verify Aadhaar or ABHA.",
+    "aadhaarCard": "Aadhaar Card (MOCK)",
+    "abhaCard": "ABHA Health Card (MOCK)",
+    "frontImage": "Front Side Image",
+    "backImage": "Back Side Image",
+    "scanning": "Scanning on this device...",
+    "extractButton": "Extract Details on Device",
+    "maskedAadhaar": "Masked Aadhaar",
+    "maskedAbha": "Masked ABHA",
+    "consentRequired": "Obtain informed consent before scanning an identity card.",
+    "selectImage": "Select at least one card image first.",
+    "noFields": "No readable identity details were found. Try a clearer image or enter details manually.",
+    "reviewExtracted": "Details were read on this device. Review and correct every field before registering. OCR is not identity verification.",
+    "ocrFailed": "On-device OCR could not read this image. Try a clearer image or enter details manually."
   }
 }
-

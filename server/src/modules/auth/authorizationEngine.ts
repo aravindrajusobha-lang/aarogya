@@ -127,6 +127,7 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRole, string[]> = {
     'patient:create',
     'patient:read',
     'patient:manage',
+    'patient:verify',
     'patient:duplicate_review',
     'sync:submit',
     'notification:read_own',
@@ -184,6 +185,7 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRole, string[]> = {
     'reference:villages',
     'patient:create',
     'patient:read',
+    'patient:verify',
     'sync:submit',
     'notification:read_own',
     'notification:manage_own',
@@ -228,6 +230,7 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRole, string[]> = {
     'reference:villages',
     'patient:create',
     'patient:read',
+    'patient:verify',
     'sync:submit',
     'notification:read_own',
     'notification:manage_own',
@@ -266,6 +269,10 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRole, string[]> = {
     'specialist:read',
     'reference:villages',
     'patient:read_own',
+    'patient:support_own',
+    'patient:chat_own',
+    'patient:treatment_own',
+    'patient:profile_own',
     'notification:read_own',
     'notification:manage_own',
     'recovery:initiate',
@@ -373,6 +380,7 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
 
   // Auth - Public Authentication & Flow
   { method: 'POST', path: '/api/v1/auth/login', requiredCapability: 'public', description: 'Staff & Patient password login' },
+  { method: 'POST', path: '/api/v1/auth/register-aadhaar-photo', requiredCapability: 'public', description: 'OTP-free patient registration with browser-extracted demographics only' },
   { method: 'POST', path: '/api/v1/auth/register', requiredCapability: 'public', description: 'Patient & community registration' },
   { method: 'POST', path: '/api/v1/auth/mfa/verify', requiredCapability: 'public', description: 'TOTP 2FA verification challenge' },
   { method: 'POST', path: '/api/v1/auth/refresh', requiredCapability: 'public', description: 'Refresh token rotation & exchange' },
@@ -410,7 +418,7 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
 
   // Storage
   { method: 'POST', path: '/api/v1/storage/upload', requiredCapability: 'storage:upload', description: 'Upload clinical photo / file' },
-  { method: 'GET', path: '/api/v1/storage/files/:fileId', requiredCapability: 'storage:read_clinical', description: 'Stream authorized clinical file' },
+  { method: 'GET', path: '/api/v1/storage/files/:fileId', requiredCapability: 'storage:read_clinical', description: 'Stream a clinical file for authorized staff or a file owned by the authenticated patient' },
 
   // Append-Only Audit Log
   { method: 'GET', path: '/api/v1/audit/logs', requiredCapability: 'audit:read', description: 'Query append-only audit trail' },
@@ -464,6 +472,7 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
   // Phase 4: Patients and Sync
   { method: 'POST', path: '/api/v1/patients', requiredCapability: 'patient:create', description: 'Register patient (OTP-free, idempotency ledger, duplicate detection)' },
   { method: 'GET', path: '/api/v1/patients', requiredCapability: 'patient:read', description: 'Query patient records (worker scope partitioned)' },
+  { method: 'PATCH', path: '/api/v1/patients/:id/verify', requiredCapability: 'patient:verify', description: 'Verify a patient account after in-person confirmation' },
   { method: 'GET', path: '/api/v1/patients/duplicates/review', requiredCapability: 'patient:duplicate_review', description: 'List pending duplicate review tickets' },
   { method: 'POST', path: '/api/v1/patients/duplicates/:reviewId/resolve', requiredCapability: 'patient:duplicate_review', description: 'Resolve duplicate review ticket' },
   { method: 'POST', path: '/api/v1/patients/sync', requiredCapability: 'sync:submit', description: 'Batch idempotent sync for offline encrypted queue' },
@@ -615,6 +624,7 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
   { method: 'POST', path: '/api/v1/mock/aadhaar/verify-otp', requiredCapability: 'aadhaar:mock_auth', description: 'Evaluate simulated OTP code' },
   { method: 'POST', path: '/api/v1/mock/aadhaar/demographic-auth', requiredCapability: 'aadhaar:mock_auth', description: 'Evaluate simulated demographic match' },
   { method: 'GET', path: '/api/v1/mock/aadhaar/status', requiredCapability: 'aadhaar:mock_read', description: 'Get Aadhaar mock adapter operational and blocked status' },
+  { method: 'POST', path: '/api/v1/mock/aadhaar/ocr-extract', requiredCapability: 'patient:create', description: 'Legacy browser-only OCR compatibility endpoint; always blocked' },
 
   // Phase 17: Offline and PWA Hardening (2 endpoints)
   { method: 'POST', path: '/api/v1/sync/batch', requiredCapability: 'sync:submit', description: 'Batch idempotent sync for offline encrypted queue' },
@@ -622,6 +632,23 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
 
   // Intelligent 2D Multilingual Robotic AI Assistant
   { method: 'POST', path: '/api/v1/assistant/query', requiredCapability: 'public', description: 'Intelligent Multilingual 2D AI Robotic Assistant Query' },
+  // Patient account lifecycle
+  { method: 'POST', path: '/api/v1/patient/auth/register', requiredCapability: 'public', description: 'Register a patient account with explicit consent and a UUID mutation ID' },
+  { method: 'POST', path: '/api/v1/patient/auth/login', requiredCapability: 'public', description: 'Authenticate a patient account with OTP or password' },
+  { method: 'POST', path: '/api/v1/patient/auth/forgot-password', requiredCapability: 'public', description: 'Request the patient password reset flow' },
+  { method: 'POST', path: '/api/v1/patient/auth/reset-password', requiredCapability: 'public', description: 'Reset the patient password with a verified OTP' },
+  { method: 'GET', path: '/api/patient/support-tickets', requiredCapability: 'patient:read_own', description: 'List support tickets for the authenticated patient' },
+  { method: 'POST', path: '/api/patient/support-tickets', requiredCapability: 'patient:support_own', description: 'Create an idempotent patient support ticket' },
+  { method: 'GET', path: '/api/patient/screenings/:screeningId/chat', requiredCapability: 'patient:read_own', description: 'Read report chat history for the authenticated patient' },
+  { method: 'POST', path: '/api/patient/screenings/:screeningId/chat', requiredCapability: 'patient:chat_own', description: 'Send a report scoped patient chat message' },
+  { method: 'GET', path: '/api/patient/treatment-plans', requiredCapability: 'patient:read_own', description: 'List treatment plans owned by the authenticated patient' },
+  { method: 'POST', path: '/api/patient/treatment-plans/from-prescription', requiredCapability: 'patient:treatment_own', description: 'Start treatment tracking from the patient’s own prescription' },
+  { method: 'GET', path: '/api/patient/treatment-plans/:treatmentPlanId', requiredCapability: 'patient:read_own', description: 'Read an owned treatment plan' },
+  { method: 'GET', path: '/api/patient/treatment-plans/:treatmentPlanId/logs', requiredCapability: 'patient:read_own', description: 'List logs for an owned treatment plan' },
+  { method: 'POST', path: '/api/patient/treatment-plans/:treatmentPlanId/photos', requiredCapability: 'patient:treatment_own', description: 'Upload a consented, private treatment progress photo for an owned plan' },
+  { method: 'POST', path: '/api/patient/treatment-logs', requiredCapability: 'patient:treatment_own', description: 'Save an idempotent treatment check-in for an owned plan' },
+  { method: 'GET', path: '/api/patient/profile', requiredCapability: 'patient:read_own', description: 'Read the authenticated patient’s profile fields' },
+  { method: 'PUT', path: '/api/patient/profile', requiredCapability: 'patient:profile_own', description: 'Update an authenticated patient profile with explicit consent and idempotency' },
 ];
 
 /**

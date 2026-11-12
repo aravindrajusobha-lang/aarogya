@@ -59,6 +59,17 @@ const HospitalParamsSchema = z.object({
   hospitalId: z.string().min(1, 'Hospital ID required'),
 });
 
+function hasHospitalScope(req: Request, res: Response, hospitalId: string): boolean {
+  if (req.user?.role === 'system_admin' || req.user?.hospitalId === hospitalId) return true;
+  res.status(403).envelopeError(
+    'CROSS_HOSPITAL_FORBIDDEN',
+    'Access denied to a facility outside your assigned hospital.',
+    undefined,
+    403
+  );
+  return false;
+}
+
 // POST /api/v1/hospitals
 router.post(
   '/',
@@ -281,6 +292,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const hospitalId = req.params.hospitalId as string;
+      if (!hasHospitalScope(req, res, hospitalId)) return;
       const hospital = await Hospital.findOne({ hospitalId });
       if (!hospital) {
         res.envelopeError('HOSPITAL_NOT_FOUND', 'Hospital not found', undefined, 404);
@@ -377,6 +389,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const hospitalId = req.params.hospitalId as string;
+      if (!hasHospitalScope(req, res, hospitalId)) return;
       const doctors = await User.find({
         hospitalId,
         role: 'medical_officer',
@@ -405,12 +418,16 @@ router.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { hospitalId, doctorId } = req.params;
+      if (!hasHospitalScope(req, res, hospitalId)) return;
       const doctor = await User.findOne({ userId: doctorId, hospitalId, role: 'medical_officer' });
       if (!doctor) {
         res.envelopeError('DOCTOR_NOT_FOUND', 'Doctor account not found in this facility', undefined, 404);
         return;
       }
 
+      if (!doctor.verificationDetails?.qualificationDocuments?.length || !doctor.verificationDetails?.councilRegistrationNumber) {
+        res.envelopeError('DOCUMENTS_REQUIRED', 'Review qualification documents and council registration before approving this doctor.', undefined, 400); return;
+      }
       doctor.verificationStatus = 'verified';
       if (!doctor.verificationDetails) {
         doctor.verificationDetails = {};
@@ -444,6 +461,7 @@ router.get(
   validate({ params: HospitalParamsSchema }),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      if (!hasHospitalScope(req, res, req.params.hospitalId)) return;
       const hospital = await Hospital.findOne({ hospitalId: req.params.hospitalId }).lean();
       if (!hospital) {
         res.envelopeError('HOSPITAL_NOT_FOUND', 'Hospital not found', undefined, 404);
@@ -468,6 +486,7 @@ router.put(
   auditTag('HOSPITAL_UPDATE', 'hospital'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      if (!hasHospitalScope(req, res, req.params.hospitalId)) return;
       const hospital = await Hospital.findOneAndUpdate(
         { hospitalId: req.params.hospitalId },
         { $set: req.body },
@@ -505,6 +524,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const hospitalId = req.params.hospitalId as string;
+      if (!hasHospitalScope(req, res, hospitalId)) return;
       const hospital = await Hospital.findOne({ hospitalId });
       if (!hospital) {
         res.envelopeError('HOSPITAL_NOT_FOUND', 'Hospital not found', undefined, 404);

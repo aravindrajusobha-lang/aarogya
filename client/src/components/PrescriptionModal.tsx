@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { LanguageCode } from '../i18n';
 
 export interface IMedicineItem {
@@ -24,47 +24,19 @@ export interface PrescriptionModalProps {
 export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
   patientId,
   patientName,
-  doctorName = 'Dr. K. Somasekhar (MO)',
+  doctorName = 'Treating clinician',
   doctorSpecialty = 'Dental Surgeon & Oral Medicine',
-  hospitalName = 'Community Health Centre (CHC) Paderu',
+  hospitalName = 'Treating facility',
   consultationId,
   currentLang: _currentLang = 'te',
   onClose,
   onPrescriptionCreated,
 }) => {
-  const [clinicalObservations, setClinicalObservations] = useState<string>(
-    'Patient presents with white superficial curd-like mucosal plaques on lower lip, erythematous base with burning sensation.'
-  );
-  const [diagnosisImpression, setDiagnosisImpression] = useState<string>(
-    'Oral Pseudomembranous Candidiasis (Oral Thrush) / Benign Mucosal Stomatitis'
-  );
-  const [medicines, setMedicines] = useState<IMedicineItem[]>([
-    {
-      medicineName: 'Clotrimazole 1% Oral Mouth Paint',
-      dosage: '10 to 15 drops',
-      frequency: '3-4 times daily (Apply locally)',
-      durationDays: 7,
-      instructions: 'Swish and hold over lesions for 2 minutes after meals; do not drink water for 30 mins.',
-    },
-    {
-      medicineName: 'Vitamin B-Complex + Zinc Tablets',
-      dosage: '1 Tablet',
-      frequency: '1-0-0 (Once daily after breakfast)',
-      durationDays: 14,
-      instructions: 'Take with warm water.',
-    },
-    {
-      medicineName: 'Warm Saline (Salt-Water) Gargle',
-      dosage: '1 Glass warm water + 1/2 tsp salt',
-      frequency: '3 times daily',
-      durationDays: 10,
-      instructions: 'Rinse thoroughly after each meal to soothe inflamed oral lining.',
-    },
-  ]);
-
-  const [lifestyleAdvice, setLifestyleAdvice] = useState<string>(
-    'Strict 100% cessation of gutka, khaini, and tobacco. Avoid very hot, spicy, or crunchy foods.'
-  );
+  const mutationId = useRef(crypto.randomUUID());
+  const [clinicalObservations, setClinicalObservations] = useState('');
+  const [diagnosisImpression, setDiagnosisImpression] = useState('');
+  const [medicines, setMedicines] = useState<IMedicineItem[]>([]);
+  const [lifestyleAdvice, setLifestyleAdvice] = useState('');
   const [followUpDays, setFollowUpDays] = useState<number>(7);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
@@ -72,8 +44,8 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
 
   // New Medicine Row Inputs
   const [newMedName, setNewMedName] = useState<string>('');
-  const [newMedDosage, setNewMedDosage] = useState<string>('1 Tablet');
-  const [newMedFreq, setNewMedFreq] = useState<string>('1-0-1 (After Food)');
+  const [newMedDosage, setNewMedDosage] = useState<string>('');
+  const [newMedFreq, setNewMedFreq] = useState<string>('');
   const [newMedDays, setNewMedDays] = useState<number>(5);
   const [newMedInstr, setNewMedInstr] = useState<string>('');
 
@@ -111,6 +83,7 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
     followUpDate.setDate(followUpDate.getDate() + followUpDays);
 
     const payload = {
+      mutationId: mutationId.current,
       patientId,
       patientName,
       consultationId,
@@ -122,7 +95,7 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
     };
 
     try {
-      const token = localStorage.getItem('aarogya_token') || '';
+      const token = JSON.parse(localStorage.getItem('aarogya_tokens') || '{}').accessToken || localStorage.getItem('aarogya_token') || '';
       const res = await fetch('/api/v1/prescriptions', {
         method: 'POST',
         headers: {

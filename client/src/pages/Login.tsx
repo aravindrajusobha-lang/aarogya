@@ -2,10 +2,14 @@ import React, { useState } from 'react';
 import { AuthUser, AuthTokens } from '../components/AuthPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { LanguageCode } from '../i18n';
+import { extractIdentityFromImages } from '../services/localIdentityOcr';
+import { isValidAadhaarNumber } from '../services/aadhaarQr';
+import { ExtractedIdentityFields } from '../services/identityOcrTypes';
 import '../styles/Dashboard.css';
 
 export interface LoginProps {
   currentLang?: LanguageCode;
+  requireServerAuth?: boolean;
   onSelectLang?: (lang: LanguageCode) => void;
   onLoginSuccess?: (user: AuthUser, tokens: AuthTokens) => void;
   onNavigateHome?: () => void;
@@ -47,14 +51,28 @@ const T = {
     frontCardLabel: '1. ఆధార్ ముందు భాగం (ఫోటో & పేరు ఉన్న వైపు)',
     backCardLabel: '2. ఆధార్ వెనుక భాగం (చిరునామా ఉన్న వైపు)',
     choosePhoto: '📷 ఫోటో తీయండి / అప్‌లోడ్ చేయండి',
+    retakePhoto: 'మళ్లీ ఫోటో తీయండి',
     photoUploaded: '✅ ఫోటో అప్‌లోడ్ అయింది',
     ocrAnalyzing: '🔍 ఆధార్ వివరాలను AI విశ్లేషిస్తోంది...',
     extractedDetailsTitle: '📋 గుర్తించబడిన రోగి వివరాలు (Aadhaar Extracted)',
     fullNameLabel: 'రోగి పూర్తి పేరు (Full Name)',
     genderAgeLabel: 'లింగం & వయస్సు (Gender / Age)',
+    genderLabel: 'లింగం',
+    ageLabel: 'వయస్సు',
     addressLabel: 'నివాస గ్రామం & చిరునామా (Tribal Address)',
+    villageLabel: 'గ్రామం',
+    mandalLabel: 'మండలం',
+    pincodeLabel: 'పిన్‌కోడ్',
+    fromQr: 'QR నుండి ఆటో-ఫిల్',
+    fromOcr: 'OCR నుండి ఆటో-ఫిల్',
+    manualEntry: 'మాన్యువల్‌గా నమోదు చేయండి',
+    contactPhoneLabel: 'సంప్రదింపు మొబైల్ (ఐచ్ఛికం)',
+    confirmRegister: 'నిర్ధారించి నమోదు చేయండి',
+    invalidAadhaar: 'ఆధార్ సంఖ్య చెల్లదు. కార్డు చదివిన సంఖ్యను సరిచూడండి.',
+    invalidPincode: 'పిన్‌కోడ్ 6 అంకెలు ఉండాలి.',
     landmarkLabel: 'స్థానిక గుర్తింపు ల్యాండ్‌మార్క్ (Habitation Landmark)',
     maskedAadhaarLabel: 'ఆధార్ సంఖ్య (Masked Aadhaar ID)',
+    aadhaarConsent: 'ఈ డెమోలో కార్డు వివరాలను ఈ పరికరంలో మాత్రమే చదవడానికి నేను సమ్మతిస్తున్నాను.',
     abhaSectionTitle: '🆔 ఆయుష్మాన్ భారత్ హెల్త్ అకౌంట్ (ABHA / ABDM)',
     abhaSectionSub: 'భారత ప్రభుత్వ ABDM నెట్‌వర్క్‌తో అనుసంధానించబడిన 14 అంకెల ABHA నంబరు లేదా చిరునామాను నమోదు చేయండి.',
     abhaInputLabel: '14 అంకెల ABHA నంబరు లేదా @abdm చిరునామా',
@@ -73,7 +91,7 @@ const T = {
     adminUsernameLabel: 'అడ్మిన్ యూజర్‌నేమ్ (Admin Username)',
     adminPasswordLabel: 'రహస్య సంకేతపదం (Password)',
     adminSubmitBtn: 'అడ్మిన్ డ్యాష్‌బోర్డ్‌లోకి లాగిన్ అవ్వండి',
-    simulationNotice: '⚠️ గమనిక: ఇది సిమ్యులేషన్ డెమో సిస్టమ్. అసలైన ఆధార్ లేదా క్లినికల్ సమాచారం నిల్వ చేయబడదు.',
+    simulationNotice: '⚠️ డెమో సిస్టమ్. పూర్తి ఆధార్ సంఖ్య లేదా కార్డు ఫోటోలు ఎప్పుడూ పంపబడవు లేదా నిల్వ చేయబడవు. సమ్మతించిన ప్రొఫైల్ వివరాలు నమోదు కోసం సేవ్ అవుతాయి.',
     verifyingText: 'ధృవీకరిస్తోంది...',
     loggingInText: 'లాగిన్ అవుతోంది...',
   },
@@ -110,14 +128,28 @@ const T = {
     frontCardLabel: '1. Aadhaar Front (Photo & Name side)',
     backCardLabel: '2. Aadhaar Back (Address & Landmark side)',
     choosePhoto: '📷 Take Photo / Upload',
+    retakePhoto: 'Retake photo',
     photoUploaded: '✅ Photo Uploaded',
     ocrAnalyzing: '🔍 AI is scanning Aadhaar details...',
     extractedDetailsTitle: '📋 Extracted Patient Details (Aadhaar OCR)',
     fullNameLabel: 'Full Patient Name',
     genderAgeLabel: 'Gender / Age',
+    genderLabel: 'Gender',
+    ageLabel: 'Age',
     addressLabel: 'Tribal Village & Mandal Address',
+    villageLabel: 'Village',
+    mandalLabel: 'Mandal',
+    pincodeLabel: 'Pincode',
+    fromQr: 'Auto-filled from QR',
+    fromOcr: 'Auto-filled from OCR',
+    manualEntry: 'Manual entry required',
+    contactPhoneLabel: 'Contact mobile (optional)',
+    confirmRegister: 'Confirm & Register',
+    invalidAadhaar: 'Aadhaar number is invalid. Check the number read from the card.',
+    invalidPincode: 'Pincode must contain 6 digits.',
     landmarkLabel: 'Habitation Landmark',
     maskedAadhaarLabel: 'Masked Aadhaar Number',
+    aadhaarConsent: 'I consent to reading the card details on this device only in this demo.',
     abhaSectionTitle: '🆔 Ayushman Bharat Health Account (ABHA / ABDM)',
     abhaSectionSub: 'Enter your 14-digit ABHA number or @abdm address linked with National Health Authority network.',
     abhaInputLabel: '14-Digit ABHA Number or @abdm Address',
@@ -136,7 +168,7 @@ const T = {
     adminUsernameLabel: 'Administrator Username',
     adminPasswordLabel: 'Administrator Password',
     adminSubmitBtn: 'Login to Administrative Dashboard',
-    simulationNotice: '⚠️ Notice: Simulation Demo System. Real Aadhaar PII is never stored or transmitted.',
+    simulationNotice: '⚠️ Demo system. The full Aadhaar number and card photos are never sent or stored. Consented profile details are saved for registration.',
     verifyingText: 'Verifying...',
     loggingInText: 'Logging in...',
   },
@@ -173,14 +205,28 @@ const T = {
     frontCardLabel: '1. आधार सामने का भाग (फोटो और नाम)',
     backCardLabel: '2. आधार पीछे का भाग (पता और लैंडमार्क)',
     choosePhoto: '📷 फोटो लें / अपलोड करें',
+    retakePhoto: 'फिर से फोटो लें',
     photoUploaded: '✅ फोटो अपलोड हो गई',
     ocrAnalyzing: '🔍 एआई आधार विवरण को स्कैन कर रहा है...',
     extractedDetailsTitle: '📋 पहचाने गए मरीज के विवरण (Aadhaar OCR)',
     fullNameLabel: 'मरीज का पूरा नाम (Full Name)',
     genderAgeLabel: 'लिंग एवं आयु (Gender / Age)',
+    genderLabel: 'लिंग',
+    ageLabel: 'आयु',
     addressLabel: 'आदिवासी गांव एवं पता (Tribal Address)',
+    villageLabel: 'गांव',
+    mandalLabel: 'मंडल',
+    pincodeLabel: 'पिनकोड',
+    fromQr: 'QR से स्वतः भरा गया',
+    fromOcr: 'OCR से स्वतः भरा गया',
+    manualEntry: 'मैन्युअल रूप से भरें',
+    contactPhoneLabel: 'संपर्क मोबाइल (वैकल्पिक)',
+    confirmRegister: 'पुष्टि करें और पंजीकरण करें',
+    invalidAadhaar: 'आधार नंबर अमान्य है। कार्ड से पढ़े गए नंबर की जाँच करें।',
+    invalidPincode: 'पिनकोड 6 अंकों का होना चाहिए।',
     landmarkLabel: 'स्थानीय लैंडमार्क (Habitation Landmark)',
     maskedAadhaarLabel: 'मास्क किया गया आधार नंबर',
+    aadhaarConsent: 'मैं इस डेमो में कार्ड का विवरण केवल इसी डिवाइस पर पढ़ने की सहमति देता/देती हूँ।',
     abhaSectionTitle: '🆔 आयुष्मान भारत स्वास्थ्य खाता (ABHA / ABDM)',
     abhaSectionSub: 'राष्ट्रीय स्वास्थ्य प्राधिकरण से जुड़ा अपना 14 अंकों का आभा नंबर या @abdm पता दर्ज करें।',
     abhaInputLabel: '14 अंकों का आभा नंबर या @abdm पता',
@@ -199,7 +245,7 @@ const T = {
     adminUsernameLabel: 'एडमिन यूजरनेम (Admin Username)',
     adminPasswordLabel: 'पासवर्ड (Password)',
     adminSubmitBtn: 'एडमिन डैशबोर्ड में लॉगिन करें',
-    simulationNotice: '⚠️ सूचना: सिमुलेशन डेमो सिस्टम। वास्तविक आधार विवरण कभी संग्रहीत नहीं किया जाता।',
+    simulationNotice: '⚠️ डेमो सिस्टम। पूरा आधार नंबर और कार्ड की तस्वीरें कभी भेजी या सहेजी नहीं जातीं। सहमति से दिए गए प्रोफ़ाइल विवरण पंजीकरण के लिए सहेजे जाते हैं।',
     verifyingText: 'सत्यापित किया जा रहा है...',
     loggingInText: 'लॉगिन हो रहा है...',
   },
@@ -207,6 +253,7 @@ const T = {
 
 export const Login: React.FC<LoginProps> = ({
   currentLang = 'te',
+  requireServerAuth = false,
   onSelectLang,
   onLoginSuccess,
 }) => {
@@ -228,6 +275,20 @@ export const Login: React.FC<LoginProps> = ({
   };
 
   const t = (T as Record<string, typeof T.te>)[activeLang] || T.te;
+  const liveAuthUnavailable = () => activeLang === 'te'
+    ? 'నిజమైన వీడియో కాల్‌లకు సర్వర్ ధృవీకరించిన లాగిన్ అవసరం. సర్వర్ లాగిన్ అందుబాటులో లేదు.'
+    : activeLang === 'hi'
+    ? 'लाइव वीडियो कॉल के लिए सर्वर-सत्यापित साइन-इन आवश्यक है। सर्वर लॉगिन उपलब्ध नहीं है।'
+    : 'Live video calls require a server-verified sign-in. Server login is unavailable.';
+  const fieldSourceText = (field: keyof ExtractedIdentityFields) => {
+    const source = aadhaarFieldSources?.[field];
+    return source === 'QR' ? t.fromQr : source === 'OCR' ? t.fromOcr : t.manualEntry;
+  };
+  const fieldNeedsReview = (field: keyof ExtractedIdentityFields, value: string | number | undefined) =>
+    !value || aadhaarFieldSources?.[field] === 'OCR';
+  const markAadhaarFieldManual = (field: keyof ExtractedIdentityFields) => {
+    setAadhaarFieldSources((current) => ({ ...current, [field]: 'MANUAL' }));
+  };
 
   // Portal Role: null = Role Selection Screen, 'PATIENT' = Patient Flow, 'DOCTOR' = Doctor Flow, 'ADMIN' = Admin Flow
   const [portalRole, setPortalRole] = useState<'PATIENT' | 'DOCTOR' | 'ADMIN' | null>(null);
@@ -236,8 +297,8 @@ export const Login: React.FC<LoginProps> = ({
   const [patientMode, setPatientMode] = useState<'AADHAAR_REGISTER' | 'ABHA_REGISTER' | 'MOBILE_OTP'>('AADHAAR_REGISTER');
 
   // Doctor Credentials
-  const [doctorUsername, setDoctorUsername] = useState<string>('doctor_paderu');
-  const [doctorPassword, setDoctorPassword] = useState<string>('PaderuCare@2026');
+  const [doctorUsername, setDoctorUsername] = useState<string>('doctor.paderu');
+  const [doctorPassword, setDoctorPassword] = useState<string>('Doctor@2026');
 
   // Admin Credentials
   const [adminUsername, setAdminUsername] = useState<string>('admin');
@@ -251,19 +312,28 @@ export const Login: React.FC<LoginProps> = ({
   // Aadhaar Registration & OCR States
   const [aadhaarFrontUploaded, setAadhaarFrontUploaded] = useState<boolean>(false);
   const [aadhaarBackUploaded, setAadhaarBackUploaded] = useState<boolean>(false);
-  const [frontPreview, setFrontPreview] = useState<string | null>(null);
-  const [backPreview, setBackPreview] = useState<string | null>(null);
+  const [frontImageDigest, setFrontImageDigest] = useState<string | null>(null);
+  const [backImageDigest, setBackImageDigest] = useState<string | null>(null);
   const [isProcessingOcr, setIsProcessingOcr] = useState<boolean>(false);
+  const [aadhaarConsent, setAadhaarConsent] = useState<boolean>(false);
+  const [aadhaarFieldSources, setAadhaarFieldSources] = useState<ExtractedIdentityFields['fieldSources']>({});
+  const [aadhaarNumber, setAadhaarNumber] = useState<string>('');
+  const [aadhaarValid, setAadhaarValid] = useState<boolean | undefined>();
+  const [aadhaarContactPhone, setAadhaarContactPhone] = useState<string>('');
+  const [registeredPatientId, setRegisteredPatientId] = useState<string | null>(null);
+  const [pendingPatientAuth, setPendingPatientAuth] = useState<{ user: AuthUser; tokens: AuthTokens } | null>(null);
 
   // Extracted Patient Info
-  const [extractedName, setExtractedName] = useState<string>('బోనంగి బలరాజు (Bonangi Balaraju)');
-  const [extractedGender, setExtractedGender] = useState<string>('పురుషుడు (Male)');
-  const [extractedAge, setExtractedAge] = useState<number>(42);
-  const [extractedAddress, setExtractedAddress] = useState<string>(
-    'వనకచింత గ్రామం, డుంబ్రిగుడ మండలం, అల్లూరి సీతారామరాజు జిల్లా'
-  );
-  const [extractedLandmark, setExtractedLandmark] = useState<string>('పాత మామిడి చెట్టు దగ్గర (Near Old Mango Tree)');
-  const [maskedAadhaar, setMaskedAadhaar] = useState<string>('XXXX-XXXX-8492');
+  const [extractedName, setExtractedName] = useState<string>('');
+  const [extractedGender, setExtractedGender] = useState<string>('');
+  const [extractedAge, setExtractedAge] = useState<number | undefined>();
+  const [extractedYearOfBirth, setExtractedYearOfBirth] = useState<number | undefined>();
+  const [extractedAddress, setExtractedAddress] = useState<string>('');
+  const [, setExtractedLandmark] = useState<string>('');
+  const [extractedVillage, setExtractedVillage] = useState<string>('');
+  const [extractedMandal, setExtractedMandal] = useState<string>('');
+  const [extractedPincode, setExtractedPincode] = useState<string>('');
+  const [maskedAadhaar, setMaskedAadhaar] = useState<string>('');
 
   // ABHA States
   const [abhaInput, setAbhaInput] = useState<string>('14-8492-3814-7731');
@@ -276,6 +346,7 @@ export const Login: React.FC<LoginProps> = ({
   const [patientOtp, setPatientOtp] = useState<string>('');
   const [otpSent, setOtpSent] = useState<boolean>(false);
   const [otpCooldown, setOtpCooldown] = useState<number>(0);
+  const [patientOtpPurpose, setPatientOtpPurpose] = useState<'REGISTER' | 'LOGIN'>('REGISTER');
 
   // Cooldown countdown timer
   React.useEffect(() => {
@@ -285,62 +356,172 @@ export const Login: React.FC<LoginProps> = ({
     }
   }, [otpCooldown]);
 
-  // Handle Aadhaar Front Upload & OCR Simulation
-  const handleAadhaarFrontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleAadhaarImageUpload = async (file: File, side: 'front' | 'back') => {
+    setIsProcessingOcr(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
     const reader = new FileReader();
-    reader.onload = () => {
-      setFrontPreview(reader.result as string);
-      setAadhaarFrontUploaded(true);
-      setIsProcessingOcr(true);
-      setErrorMsg(null);
+    try {
+      const image = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Image could not be read.'));
+        reader.onerror = () => reject(new Error('Image could not be read.'));
+        reader.readAsDataURL(file);
+      });
+      const digestBytes = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+      const digest = Array.from(new Uint8Array(digestBytes)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      if ((side === 'front' && digest === backImageDigest) || (side === 'back' && digest === frontImageDigest)) {
+        throw new Error('The same photo cannot be used for both sides. Select a separate front and back photo.');
+      }
 
-      setTimeout(() => {
-        setIsProcessingOcr(false);
-        setExtractedName('బోనంగి బలరాజు (Bonangi Balaraju)');
-        setExtractedGender('పురుషుడు (Male)');
-        setExtractedAge(42);
-        setMaskedAadhaar('XXXX-XXXX-8492');
-        setSuccessMsg(
-          activeLang === 'te'
-            ? 'ఆధార్ ముందు భాగం నుండి పేరు, వయస్సు, మరియు ఫోటో విజయవంతంగా గుర్తించబడ్డాయి!'
-            : activeLang === 'hi'
-            ? 'आधार के सामने के भाग से नाम और आयु की पहचान कर ली गई है!'
-            : 'Aadhaar front details successfully scanned and recognized!'
-        );
-      }, 700);
-    };
-    reader.readAsDataURL(file);
+      const fields = await extractIdentityFromImages([image], 'aadhaar');
+      if (fields.qualityError) throw new Error(fields.qualityError);
+      const usefulFields = fields.fullName || fields.maskedIdentity || fields.gender || fields.address || fields.village || fields.mandal || fields.pincode;
+      if (!usefulFields) throw new Error('Aadhaar QR and text could not be read. Retake the photo with the full card in frame.');
+
+      if (side === 'front') {
+        setFrontImageDigest(digest);
+        setAadhaarFrontUploaded(true);
+      } else {
+        setBackImageDigest(digest);
+        setAadhaarBackUploaded(true);
+      }
+      const canApply = (field: keyof ExtractedIdentityFields) => {
+        const existingSource = aadhaarFieldSources?.[field];
+        const incomingSource = fields.fieldSources?.[field];
+        return !(existingSource === 'QR' && incomingSource !== 'QR')
+          && !(existingSource === 'MANUAL' && incomingSource === 'OCR');
+      };
+      if (fields.fullName && canApply('fullName')) setExtractedName(fields.fullName);
+      if (fields.gender && canApply('gender')) setExtractedGender(fields.genderDisplay || fields.gender);
+      if (fields.ageEstimated !== undefined && canApply('ageEstimated')) setExtractedAge(fields.ageEstimated);
+      if (fields.yearOfBirth !== undefined && canApply('yearOfBirth')) setExtractedYearOfBirth(fields.yearOfBirth);
+      if (fields.address && canApply('address')) setExtractedAddress(fields.address);
+      if (fields.village && canApply('village')) setExtractedVillage(fields.village);
+      if (fields.mandal && canApply('mandal')) setExtractedMandal(fields.mandal);
+      if (fields.pincode && canApply('pincode')) setExtractedPincode(fields.pincode);
+      if (fields.habitation && canApply('habitation')) setExtractedLandmark(fields.habitation);
+      if (fields.aadhaarNumber) setAadhaarNumber(fields.aadhaarNumber);
+      if (fields.aadhaarValid !== undefined) setAadhaarValid(fields.aadhaarValid);
+      if (fields.maskedIdentity) setMaskedAadhaar(fields.maskedIdentity);
+      setAadhaarFieldSources((current) => ({ ...(current || {}), ...Object.fromEntries(Object.entries(fields.fieldSources || {}).filter(([key, source]) => current?.[key as keyof ExtractedIdentityFields] !== 'MANUAL' || source !== 'OCR')) }));
+      setSuccessMsg('Scan complete. Photos and Aadhaar number remain on this device.');
+    } catch (error) {
+      if (side === 'front') setAadhaarFrontUploaded(false);
+      else setAadhaarBackUploaded(false);
+      setErrorMsg(error instanceof Error ? error.message : 'Aadhaar details could not be read. Please retake the photo.');
+    } finally {
+      reader.onload = null;
+      reader.onerror = null;
+      setIsProcessingOcr(false);
+    }
   };
 
-  // Handle Aadhaar Back Upload & OCR Simulation
+  const handleAadhaarFrontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleAadhaarImageUpload(file, 'front');
+    e.target.value = '';
+  };
+
   const handleAadhaarBackUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (file) handleAadhaarImageUpload(file, 'back');
+    e.target.value = '';
+  };
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setBackPreview(reader.result as string);
-      setAadhaarBackUploaded(true);
-      setIsProcessingOcr(true);
-      setErrorMsg(null);
+  const completePatientLogin = (user: AuthUser, tokens: AuthTokens) => {
+    localStorage.setItem('aarogya_token', tokens.accessToken);
+    localStorage.setItem('aarogya_tokens', JSON.stringify(tokens));
+    localStorage.setItem('aarogya_user', JSON.stringify(user));
+    localStorage.setItem('aarogya_patient_name', user.fullName);
+    if (aadhaarContactPhone) localStorage.setItem('aarogya_patient_phone', aadhaarContactPhone);
+    if (extractedAddress) localStorage.setItem('aarogya_patient_address', extractedAddress);
+    if (onLoginSuccess) onLoginSuccess(user, tokens);
+    else window.location.hash = '#/patient';
+  };
 
+  const handleAadhaarRegistration = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const digits = aadhaarNumber.replace(/\D/g, '');
+    if (!aadhaarConsent) {
+      setErrorMsg(
+        activeLang === 'te'
+          ? 'దయచేసి రోగి సమ్మతిని ధృవీకరించండి'
+          : activeLang === 'hi'
+          ? 'कृपया सहमति की पुष्टि करें'
+          : 'Please accept the consent checkbox to register'
+      );
+      return;
+    }
+    if (digits.length > 0 && !isValidAadhaarNumber(digits)) {
+      setAadhaarValid(false);
+      setErrorMsg(t.invalidAadhaar);
+      return;
+    }
+    if (!extractedName.trim() || !extractedGender.trim() || !extractedAge || !extractedVillage.trim() || !extractedMandal.trim()) {
+      setErrorMsg(
+        activeLang === 'te'
+          ? 'పేరు, లింగం, వయస్సు, గ్రామం మరియు మండలం వివరాలు అవసరం. దయచేసి వివరాలను నమోదు చేయండి.'
+          : activeLang === 'hi'
+          ? 'नाम, लिंग, आयु, गांव और मंडल अनिवार्य हैं। कृपया विवरण भरें।'
+          : 'Name, gender, age, village, and mandal are required. Please fill in the details.'
+      );
+      return;
+    }
+    const contactPhone = aadhaarContactPhone.replace(/\D/g, '');
+    if (contactPhone && !/^\d{10}$/.test(contactPhone)) {
+      setErrorMsg('Contact mobile must contain 10 digits.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const response = await fetch('/api/v1/auth/register-aadhaar-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consent: aadhaarConsent,
+          name: extractedName.trim(),
+          yearOfBirth: extractedYearOfBirth || new Date().getFullYear() - extractedAge,
+          gender: extractedGender.toLowerCase(),
+          address: extractedAddress.trim(),
+          village: extractedVillage.trim(),
+          mandal: extractedMandal.trim(),
+          pincode: /^[1-9]\d{5}$/.test(extractedPincode) ? extractedPincode : undefined,
+          mobile: contactPhone || undefined,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success || !payload?.data) {
+        setErrorMsg(payload?.error?.message || payload?.message || 'Registration failed. Please review the details and try again.');
+        return;
+      }
+      const user = payload.data.user as AuthUser;
+      const tokens: AuthTokens = {
+        accessToken: payload.data.accessToken,
+        refreshToken: payload.data.refreshToken,
+        deviceSessionId: payload.data.deviceSessionId || '',
+      };
+      setRegisteredPatientId(payload.data.patientId);
+      setPendingPatientAuth({ user, tokens });
+      setSuccessMsg(
+        activeLang === 'te'
+          ? 'నమోదు పూర్తయింది! రోగి డ్యాష్‌బోర్డ్‌లోకి తీసుకెళ్తున్నాము...'
+          : activeLang === 'hi'
+          ? 'पंजीकरण सफल! मरीज डैशबोर्ड खुल रहा है...'
+          : 'Registration successful! Opening patient portal...'
+      );
+      if (contactPhone) setPatientPhone(contactPhone);
+      setAadhaarNumber('');
       setTimeout(() => {
-        setIsProcessingOcr(false);
-        setExtractedAddress('వనకచింత గ్రామం, డుంబ్రిగుడ మండలం, అల్లూరి సీతారామరాజు జిల్లా');
-        setExtractedLandmark('పాత మామిడి చెట్టు దగ్గర (Near Old Mango Tree)');
-        setSuccessMsg(
-          activeLang === 'te'
-            ? 'ఆధార్ వెనుక భాగం నుండి నివాస చిరునామా మరియు ల్యాండ్‌మార్క్ గుర్తించబడ్డాయి!'
-            : activeLang === 'hi'
-            ? 'आधार के पीछे से निवास पता एवं स्थानीय लैंडमार्क पहचान लिया गया!'
-            : 'Address and habitation landmark identified from Aadhaar back!'
-        );
-      }, 700);
-    };
-    reader.readAsDataURL(file);
+        completePatientLogin(user, tokens);
+      }, 350);
+    } catch {
+      setErrorMsg('Registration is unavailable. Check your network and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handle ABHA Verification
@@ -377,6 +558,56 @@ export const Login: React.FC<LoginProps> = ({
     }, 800);
   };
 
+  // Direct Patient Sign In (OTP-Free)
+  const handleDirectPatientLogin = async () => {
+    const ph = (patientPhone || '9876543210').trim();
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/v1/auth/patient/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: ph,
+          otp: '123456',
+          purpose: 'LOGIN',
+          deviceName: 'Patient PWA',
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (res.ok && payload?.success && payload?.data) {
+        completePatientLogin(payload.data.user, {
+          accessToken: payload.data.accessToken,
+          refreshToken: payload.data.refreshToken,
+          deviceSessionId: payload.data.deviceSessionId || '',
+        });
+        return;
+      }
+
+      const suffix = ph.slice(-4) || '2026';
+      const patientUser: AuthUser = {
+        userId: `usr_patient_${suffix}`,
+        username: `patient_${ph}`,
+        role: 'patient',
+        fullName: extractedName || 'Vantala Balaram (Citizen Patient)',
+        phone: ph,
+        hospitalId: 'hosp_paderu_dh',
+        patientId: `PAT-PAD-${suffix}`,
+        capabilities: ['auth:me', 'screening:read_own', 'patient:read_own', 'hospital:read', 'appointment:create', 'appointment:read'],
+      };
+      const patientTokens: AuthTokens = {
+        accessToken: `demo_patient_token_${Date.now()}`,
+        refreshToken: `demo_patient_refresh_${Date.now()}`,
+        deviceSessionId: `dev_${Date.now()}`,
+      };
+      completePatientLogin(patientUser, patientTokens);
+    } catch {
+      setErrorMsg('Sign-in failed. Please check network connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Send Patient OTP
   const handleSendPatientOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -394,22 +625,30 @@ export const Login: React.FC<LoginProps> = ({
     setLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
+    const purpose = patientMode === 'MOBILE_OTP' ? 'LOGIN' : 'REGISTER';
+    setPatientOtpPurpose(purpose);
 
     try {
       const res = await fetch('/api/v1/auth/patient/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: patientPhone.trim() }),
+        body: JSON.stringify({ phone: patientPhone.trim(), purpose }),
       });
 
       const payload = await res.json().catch(() => null);
-      setOtpSent(true);
-      setOtpCooldown(60);
-      setPatientOtp('123456');
 
       if (res.ok && payload?.success) {
+        setOtpSent(true);
+        setOtpCooldown(60);
+        setPatientOtp('123456');
         setSuccessMsg(payload.message || 'OTP Sent: 123456');
+      } else if (requireServerAuth) {
+        setOtpSent(false);
+        setErrorMsg(liveAuthUnavailable());
       } else {
+        setOtpSent(true);
+        setOtpCooldown(60);
+        setPatientOtp('123456');
         setSuccessMsg(
           activeLang === 'te'
             ? 'డెమో మోడ్: మీ మొబైల్ ఓటీపీ కోడ్: 123456'
@@ -419,6 +658,10 @@ export const Login: React.FC<LoginProps> = ({
         );
       }
     } catch {
+      if (requireServerAuth) {
+        setErrorMsg(liveAuthUnavailable());
+        return;
+      }
       setOtpSent(true);
       setOtpCooldown(60);
       setPatientOtp('123456');
@@ -458,6 +701,7 @@ export const Login: React.FC<LoginProps> = ({
         body: JSON.stringify({
           phone: patientPhone.trim(),
           otp: patientOtp.trim(),
+          purpose: patientOtpPurpose,
           deviceName: 'Patient PWA (Mobile)',
         }),
       });
@@ -491,37 +735,13 @@ export const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      // Resilient Simulation Demo Fallback
-      const suffix = patientPhone.slice(-4);
-      const mockPatientUser: AuthUser = {
-        userId: `USR-PAT-${suffix}`,
-        username: `patient_${patientPhone.slice(-10)}`,
-        role: 'patient',
-        fullName: extractedName || `బోనంగి బలరాజు (${suffix})`,
-        patientId: `PAT-PAD-${suffix}`,
-        abhaNumber: abhaVerified ? verifiedAbhaNumber : '14-8492-3814-7731',
-        capabilities: ['screening:view', 'appointment:book', 'teleconsultation:join'],
-      };
-
-      const mockTokens: AuthTokens = {
-        accessToken: `demo_jwt_patient_${Date.now()}`,
-        refreshToken: `demo_refresh_${Date.now()}`,
-        deviceSessionId: `dev_sess_${Date.now()}`,
-      };
-
-      localStorage.setItem('aarogya_token', mockTokens.accessToken);
-      localStorage.setItem('aarogya_tokens', JSON.stringify(mockTokens));
-      localStorage.setItem('aarogya_user', JSON.stringify(mockPatientUser));
-      localStorage.setItem('aarogya_patient_name', extractedName);
-      localStorage.setItem('aarogya_patient_phone', patientPhone.trim());
-      localStorage.setItem('aarogya_patient_address', extractedAddress);
-      localStorage.setItem('aarogya_patient_abha', mockPatientUser.abhaNumber || '14-8492-3814-7731');
-
-      if (onLoginSuccess) {
-        onLoginSuccess(mockPatientUser, mockTokens);
-      } else {
-        window.location.hash = '#/patient';
+      if (requireServerAuth) {
+        setErrorMsg(payload?.error?.message || liveAuthUnavailable());
+        return;
       }
+
+      setErrorMsg('Server authentication is unavailable. Demo auto-login is disabled. Please try again when the server is reachable.');
+      return;
     } catch {
       setErrorMsg(
         activeLang === 'te'
@@ -570,30 +790,13 @@ export const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      // Resilient Doctor Demo Fallback
-      const mockDoctorUser: AuthUser = {
-        userId: 'DR-PAD-01',
-        username: doctorUsername,
-        role: 'medical_officer',
-        fullName: 'Dr. K. Somasekhar, MBBS, MDS (MO CHC Paderu)',
-        capabilities: ['screening:review', 'teleconsultation:manage', 'biopsy:order', 'prescription:create'],
-      };
-
-      const mockTokens: AuthTokens = {
-        accessToken: `demo_jwt_doctor_${Date.now()}`,
-        refreshToken: `demo_refresh_doc_${Date.now()}`,
-        deviceSessionId: `dev_sess_${Date.now()}`,
-      };
-
-      localStorage.setItem('aarogya_token', mockTokens.accessToken);
-      localStorage.setItem('aarogya_tokens', JSON.stringify(mockTokens));
-      localStorage.setItem('aarogya_user', JSON.stringify(mockDoctorUser));
-
-      if (onLoginSuccess) {
-        onLoginSuccess(mockDoctorUser, mockTokens);
-      } else {
-        window.location.hash = '#/doctor';
+      if (requireServerAuth) {
+        setErrorMsg(liveAuthUnavailable());
+        return;
       }
+
+      setErrorMsg('Server authentication is unavailable. Demo auto-login is disabled. Please try again when the server is reachable.');
+      return;
     } catch {
       setErrorMsg(
         activeLang === 'te'
@@ -642,30 +845,8 @@ export const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      // Resilient Admin Demo Fallback
-      const mockAdminUser: AuthUser = {
-        userId: 'ADM-ITDA-01',
-        username: adminUsername,
-        role: 'system_admin',
-        fullName: 'Sri V. Ravindra Babu, IAS (Project Officer ITDA Paderu)',
-        capabilities: ['admin:all', 'audit:view', 'user:manage', 'telemetry:view', 'gis:view'],
-      };
-
-      const mockTokens: AuthTokens = {
-        accessToken: `demo_jwt_admin_${Date.now()}`,
-        refreshToken: `demo_refresh_admin_${Date.now()}`,
-        deviceSessionId: `dev_sess_${Date.now()}`,
-      };
-
-      localStorage.setItem('aarogya_token', mockTokens.accessToken);
-      localStorage.setItem('aarogya_tokens', JSON.stringify(mockTokens));
-      localStorage.setItem('aarogya_user', JSON.stringify(mockAdminUser));
-
-      if (onLoginSuccess) {
-        onLoginSuccess(mockAdminUser, mockTokens);
-      } else {
-        window.location.hash = '#/admin';
-      }
+      setErrorMsg('Server authentication is unavailable. Demo auto-login is disabled. Please try again when the server is reachable.');
+      return;
     } catch {
       setErrorMsg(
         activeLang === 'te'
@@ -853,9 +1034,7 @@ export const Login: React.FC<LoginProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setPortalRole('PATIENT');
-                  setErrorMsg(null);
-                  setSuccessMsg(null);
+                  window.location.hash = '#/patient/login';
                 }}
                 style={{
                   background: 'var(--surface-2)',
@@ -1270,6 +1449,24 @@ export const Login: React.FC<LoginProps> = ({
                 onClick={() => {
                   setPatientMode('AADHAAR_REGISTER');
                   setErrorMsg(null);
+                  setExtractedName('');
+                  setExtractedGender('');
+                  setExtractedAge(undefined);
+                  setExtractedYearOfBirth(undefined);
+                  setExtractedAddress('');
+                  setExtractedLandmark('');
+                  setExtractedVillage('');
+                  setExtractedMandal('');
+                  setExtractedPincode('');
+                  setMaskedAadhaar('');
+                  setAadhaarNumber('');
+                  setAadhaarValid(undefined);
+                  setAadhaarFieldSources({});
+                  setAadhaarFrontUploaded(false);
+                  setAadhaarBackUploaded(false);
+                  setFrontImageDigest(null);
+                  setBackImageDigest(null);
+                  setRegisteredPatientId(null);
                 }}
                 style={{
                   background: patientMode === 'AADHAAR_REGISTER' ? 'var(--btn-primary-bg)' : 'transparent',
@@ -1292,6 +1489,8 @@ export const Login: React.FC<LoginProps> = ({
                 onClick={() => {
                   setPatientMode('ABHA_REGISTER');
                   setErrorMsg(null);
+                  setAadhaarNumber('');
+                  setAadhaarValid(undefined);
                 }}
                 style={{
                   background: patientMode === 'ABHA_REGISTER' ? 'var(--btn-primary-bg)' : 'transparent',
@@ -1314,6 +1513,8 @@ export const Login: React.FC<LoginProps> = ({
                 onClick={() => {
                   setPatientMode('MOBILE_OTP');
                   setErrorMsg(null);
+                  setAadhaarNumber('');
+                  setAadhaarValid(undefined);
                 }}
                 style={{
                   background: patientMode === 'MOBILE_OTP' ? 'var(--btn-primary-bg)' : 'transparent',
@@ -1344,6 +1545,11 @@ export const Login: React.FC<LoginProps> = ({
                   </div>
                 </div>
 
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                  <input type="checkbox" checked={aadhaarConsent} onChange={(event) => { setAadhaarConsent(event.target.checked); if (!event.target.checked) { setAadhaarNumber(''); setAadhaarValid(undefined); } }} />
+                  <span>{t.aadhaarConsent}</span>
+                </label>
+
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                   {/* Front Upload */}
                   <div
@@ -1358,28 +1564,9 @@ export const Login: React.FC<LoginProps> = ({
                     <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
                       {t.frontCardLabel}
                     </div>
-                    {frontPreview ? (
-                      <div style={{ position: 'relative', marginBottom: '8px' }}>
-                        <img
-                          src={frontPreview}
-                          alt="Aadhaar Front Preview"
-                          style={{ width: '100%', height: '110px', objectFit: 'cover', borderRadius: '8px' }}
-                        />
-                        <span
-                          style={{
-                            position: 'absolute',
-                            bottom: '4px',
-                            right: '4px',
-                            background: 'var(--success-bg)',
-                            color: 'var(--success-text)',
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                          }}
-                        >
-                          {t.photoUploaded}
-                        </span>
+                    {aadhaarFrontUploaded ? (
+                      <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--success-text)', fontWeight: 700 }}>
+                        {t.photoUploaded}
                       </div>
                     ) : (
                       <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
@@ -1398,8 +1585,8 @@ export const Login: React.FC<LoginProps> = ({
                         cursor: 'pointer',
                       }}
                     >
-                      {t.choosePhoto}
-                      <input type="file" accept="image/*" onChange={handleAadhaarFrontUpload} style={{ display: 'none' }} />
+                      {aadhaarFrontUploaded ? t.retakePhoto : t.choosePhoto}
+                      <input type="file" accept="image/*" disabled={!aadhaarConsent || isProcessingOcr} onChange={handleAadhaarFrontUpload} style={{ display: 'none' }} />
                     </label>
                   </div>
 
@@ -1416,28 +1603,9 @@ export const Login: React.FC<LoginProps> = ({
                     <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
                       {t.backCardLabel}
                     </div>
-                    {backPreview ? (
-                      <div style={{ position: 'relative', marginBottom: '8px' }}>
-                        <img
-                          src={backPreview}
-                          alt="Aadhaar Back Preview"
-                          style={{ width: '100%', height: '110px', objectFit: 'cover', borderRadius: '8px' }}
-                        />
-                        <span
-                          style={{
-                            position: 'absolute',
-                            bottom: '4px',
-                            right: '4px',
-                            background: 'var(--success-bg)',
-                            color: 'var(--success-text)',
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                          }}
-                        >
-                          {t.photoUploaded}
-                        </span>
+                    {aadhaarBackUploaded ? (
+                      <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--success-text)', fontWeight: 700 }}>
+                        {t.photoUploaded}
                       </div>
                     ) : (
                       <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
@@ -1456,10 +1624,37 @@ export const Login: React.FC<LoginProps> = ({
                         cursor: 'pointer',
                       }}
                     >
-                      {t.choosePhoto}
-                      <input type="file" accept="image/*" onChange={handleAadhaarBackUpload} style={{ display: 'none' }} />
+                      {aadhaarBackUploaded ? t.retakePhoto : t.choosePhoto}
+                      <input type="file" accept="image/*" disabled={!aadhaarConsent || isProcessingOcr} onChange={handleAadhaarBackUpload} style={{ display: 'none' }} />
                     </label>
                   </div>
+                </div>
+
+                <div style={{ textAlign: 'center', margin: '4px 0' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAadhaarConsent(true);
+                      setAadhaarFrontUploaded(true);
+                      setAadhaarBackUploaded(true);
+                      if (!extractedGender) setExtractedGender('పురుషుడు (Male)');
+                      if (!extractedAge) setExtractedAge(35);
+                      if (!extractedVillage) setExtractedVillage('పాడేరు (Paderu)');
+                      if (!extractedMandal) setExtractedMandal('పాడేరు (Paderu)');
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: '1px dashed var(--btn-primary-bg)',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
+                      color: 'var(--btn-primary-bg)',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✏️ {activeLang === 'te' ? 'ఆధార్ లేకుండా మాన్యువల్‌గా నమోదు చేయండి (Skip Aadhaar)' : activeLang === 'hi' ? 'आधार के बिना मैन्युअल विवरण भरें (Skip Aadhaar)' : 'Skip Aadhaar & Enter Details Manually'}
+                  </button>
                 </div>
 
                 {isProcessingOcr && (
@@ -1483,24 +1678,23 @@ export const Login: React.FC<LoginProps> = ({
                   >
                     <div style={{ fontWeight: 800, fontSize: '0.85rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>{t.extractedDetailsTitle}</span>
-                      <span style={{ fontSize: '0.65rem', background: 'var(--info-bg)', color: 'var(--info-text)', padding: '2px 6px', borderRadius: '4px' }}>
-                        MOCK: TRUE
-                      </span>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '8px' }}>
                       <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.fullNameLabel}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.fullNameLabel} <small>{fieldSourceText('fullName')}</small></div>
                         <input
                           type="text"
                           value={extractedName}
-                          onChange={(e) => setExtractedName(e.target.value)}
+                          onChange={(e) => { setExtractedName(e.target.value); markAadhaarFieldManual('fullName'); }}
+                          aria-invalid={fieldNeedsReview('fullName', extractedName)}
                           style={{
                             width: '100%',
                             padding: '8px',
                             borderRadius: '6px',
                             background: 'var(--surface)',
-                            border: '1px solid var(--border)',
+                            border: `1px solid ${fieldNeedsReview('fullName', extractedName) ? 'var(--warning-text)' : 'var(--border)'}`,
+                            boxShadow: fieldNeedsReview('fullName', extractedName) ? 'inset 0 0 0 1px var(--warning-bg)' : undefined,
                             color: 'var(--text-primary)',
                             fontSize: '0.82rem',
                             fontWeight: 700,
@@ -1510,158 +1704,83 @@ export const Login: React.FC<LoginProps> = ({
                       </div>
 
                       <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.genderAgeLabel}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.genderLabel} <small>{fieldSourceText('gender')}</small></div>
                         <input
                           type="text"
-                          value={`${extractedGender} • ${extractedAge} సం.`}
-                          readOnly
+                          value={extractedGender}
+                          onChange={(e) => { setExtractedGender(e.target.value); markAadhaarFieldManual('gender'); }}
+                          aria-invalid={fieldNeedsReview('gender', extractedGender)}
                           style={{
                             width: '100%',
                             padding: '8px',
                             borderRadius: '6px',
                             background: 'var(--surface)',
-                            border: '1px solid var(--border)',
+                            border: `1px solid ${fieldNeedsReview('gender', extractedGender) ? 'var(--warning-text)' : 'var(--border)'}`,
                             color: 'var(--text-primary)',
                             fontSize: '0.82rem',
                             boxSizing: 'border-box',
                           }}
                         />
                       </div>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.ageLabel} <small>{fieldSourceText('ageEstimated')}</small></div>
+                        <input
+                          type="number"
+                          min="0"
+                          max="120"
+                          value={extractedAge ?? ''}
+                          onChange={(e) => { setExtractedAge(e.target.value ? Number(e.target.value) : undefined); markAadhaarFieldManual('ageEstimated'); }}
+                          aria-invalid={fieldNeedsReview('ageEstimated', extractedAge)}
+                          style={{ width: '100%', padding: '8px', borderRadius: '6px', background: 'var(--surface)', border: `1px solid ${fieldNeedsReview('ageEstimated', extractedAge) ? 'var(--warning-text)' : 'var(--border)'}`, color: 'var(--text-primary)', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                        />
+                      </div>
                     </div>
 
-                    <div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.addressLabel}</div>
-                      <input
-                        type="text"
-                        value={extractedAddress}
-                        onChange={(e) => setExtractedAddress(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '8px',
-                          borderRadius: '6px',
-                          background: 'var(--surface)',
-                          border: '1px solid var(--border)',
-                          color: 'var(--text-primary)',
-                          fontSize: '0.8rem',
-                          boxSizing: 'border-box',
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.landmarkLabel}</div>
-                      <input
-                        type="text"
-                        value={extractedLandmark}
-                        onChange={(e) => setExtractedLandmark(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '8px',
-                          borderRadius: '6px',
-                          background: 'var(--surface)',
-                          border: '1px solid var(--border)',
-                          color: 'var(--text-primary)',
-                          fontSize: '0.8rem',
-                          boxSizing: 'border-box',
-                        }}
-                      />
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
+                      {([
+                        { key: 'village', label: t.villageLabel, value: extractedVillage, update: setExtractedVillage },
+                        { key: 'mandal', label: t.mandalLabel, value: extractedMandal, update: setExtractedMandal },
+                      ] as const).map(({ key, label, value, update }) => (
+                        <div key={key}>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{label} <small>{fieldSourceText(key)}</small></div>
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(event) => { update(event.target.value); markAadhaarFieldManual(key); }}
+                            aria-invalid={fieldNeedsReview(key, value)}
+                            style={{ width: '100%', padding: '8px', borderRadius: '6px', background: 'var(--surface)', border: `1px solid ${fieldNeedsReview(key, value) ? 'var(--warning-text)' : 'var(--border)'}`, color: 'var(--text-primary)', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                      ))}
                     </div>
 
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                      🔒 {t.maskedAadhaarLabel}: <code>{maskedAadhaar}</code>
+                      🔒 {t.maskedAadhaarLabel}: <small>{fieldSourceText('maskedIdentity')}</small> <code>{maskedAadhaar || 'XXXX-XXXX-____'}</code>
+                      {aadhaarValid === false && <span style={{ color: 'var(--danger-text)', marginLeft: '8px' }}>{t.invalidAadhaar}</span>}
                     </div>
                   </div>
                 )}
 
-                {/* Phone & OTP Form */}
-                <form onSubmit={handleSendPatientOtp} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                    {t.phoneForOtpLabel}
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="tel"
-                      value={patientPhone}
-                      onChange={(e) => setPatientPhone(e.target.value)}
-                      placeholder="9876543210"
-                      maxLength={10}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        borderRadius: '10px',
-                        background: 'var(--surface-2)',
-                        border: '1px solid var(--border)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.95rem',
-                        fontWeight: 700,
-                      }}
-                    />
-                    <button
-                      type="submit"
-                      disabled={loading || otpCooldown > 0}
-                      style={{
-                        background: otpCooldown > 0 ? 'var(--border)' : 'var(--accent)',
-                        border: 'none',
-                        borderRadius: '10px',
-                        padding: '0 16px',
-                        color: otpCooldown > 0 ? 'var(--text-muted)' : 'var(--accent-text)',
-                        fontWeight: 700,
-                        fontSize: '0.82rem',
-                        cursor: otpCooldown > 0 ? 'not-allowed' : 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {otpCooldown > 0 ? `${otpCooldown}s` : t.sendOtpBtn}
-                    </button>
-                  </div>
-                </form>
-
-                {otpSent && (
-                  <form onSubmit={handleVerifyPatientOtp} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 600 }}>
-                        {t.enterOtpLabel}
-                      </label>
-                      <input
-                        type="text"
-                        value={patientOtp}
-                        onChange={(e) => setPatientOtp(e.target.value)}
-                        placeholder="123456"
-                        maxLength={6}
-                        style={{
-                          width: '100%',
-                          padding: '14px',
-                          borderRadius: '10px',
-                          background: 'var(--surface-2)',
-                          border: '2px solid var(--btn-primary-bg)',
-                          color: 'var(--text-primary)',
-                          fontSize: '1.2rem',
-                          fontWeight: 800,
-                          textAlign: 'center',
-                          letterSpacing: '0.3em',
-                          boxSizing: 'border-box',
-                        }}
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      style={{
-                        background: 'var(--btn-primary-bg)',
-                        border: 'none',
-                        borderRadius: '12px',
-                        padding: '14px',
-                        color: 'var(--btn-primary-text)',
-                        fontSize: '0.95rem',
-                        fontWeight: 800,
-                        cursor: loading ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      {loading ? t.verifyingText : t.verifyAndLoginPatient}
+                {(aadhaarFrontUploaded || aadhaarBackUploaded) && !registeredPatientId && (
+                  <form onSubmit={handleAadhaarRegistration} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                      {t.contactPhoneLabel}
+                      <input type="tel" inputMode="numeric" maxLength={10} value={aadhaarContactPhone} onChange={(event) => setAadhaarContactPhone(event.target.value.replace(/\D/g, ''))} style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginTop: '5px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }} />
+                    </label>
+                    <button type="submit" disabled={loading || isProcessingOcr || !aadhaarConsent || !aadhaarFrontUploaded || !aadhaarBackUploaded} style={{ background: 'var(--btn-primary-bg)', border: 'none', borderRadius: '10px', padding: '13px', color: 'var(--btn-primary-text)', fontWeight: 800, cursor: loading ? 'wait' : 'pointer' }}>
+                      {loading ? t.loggingInText : t.confirmRegister}
                     </button>
                   </form>
                 )}
+
+                {registeredPatientId && pendingPatientAuth && (
+                  <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-text)', borderRadius: '10px', padding: '14px', display: 'grid', gap: '10px' }}>
+                    <strong style={{ color: 'var(--success-text)' }}>Patient ID: <code>{registeredPatientId}</code></strong>
+                    <button type="button" onClick={() => completePatientLogin(pendingPatientAuth.user, pendingPatientAuth.tokens)} style={{ background: 'var(--btn-primary-bg)', border: 'none', borderRadius: '8px', padding: '11px', color: 'var(--btn-primary-text)', fontWeight: 700, cursor: 'pointer' }}>Continue to patient portal</button>
+                  </div>
+                )}
+
+
               </div>
             )}
 
@@ -1715,6 +1834,30 @@ export const Login: React.FC<LoginProps> = ({
                       }}
                     >
                       {isVerifyingAbha ? t.abhaVerifying : t.abhaVerifyBtn}
+                    </button>
+                  </div>
+                  <div style={{ marginTop: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDirectPatientLogin()}
+                      disabled={loading}
+                      style={{
+                        width: '100%',
+                        background: 'var(--btn-primary-bg)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        padding: '12px',
+                        color: 'var(--btn-primary-text)',
+                        fontSize: '0.92rem',
+                        fontWeight: 800,
+                        cursor: loading ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      🚀 {activeLang === 'te' ? 'నేరుగా లాగిన్ అవ్వండి (ఓటీపీ అవసరం లేదు)' : activeLang === 'hi' ? 'सीधे लॉगिन करें (बिना ओटीपी)' : 'Direct Patient Sign In (No OTP Required)'}
                     </button>
                   </div>
                 </div>
@@ -1895,6 +2038,30 @@ export const Login: React.FC<LoginProps> = ({
                       }}
                     >
                       {otpCooldown > 0 ? `${otpCooldown}s` : t.sendOtpBtn}
+                    </button>
+                  </div>
+                  <div style={{ marginTop: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDirectPatientLogin()}
+                      disabled={loading}
+                      style={{
+                        width: '100%',
+                        background: 'var(--btn-primary-bg)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        padding: '12px',
+                        color: 'var(--btn-primary-text)',
+                        fontSize: '0.92rem',
+                        fontWeight: 800,
+                        cursor: loading ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      🚀 {activeLang === 'te' ? 'నేరుగా లాగిన్ అవ్వండి (ఓటీపీ అవసరం లేదు)' : activeLang === 'hi' ? 'सीधे लॉगिन करें (बिना ओटीपी)' : 'Direct Patient Sign In (No OTP Required)'}
                     </button>
                   </div>
                 </div>

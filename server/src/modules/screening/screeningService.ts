@@ -1,10 +1,10 @@
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { ScreeningPhoto, IScreeningPhoto } from './screeningPhotoModel.js';
-import { ScreeningCase, IScreeningCase, IDemoAiResult } from './screeningCaseModel.js';
+import { ScreeningCase, IScreeningCase } from './screeningCaseModel.js';
 import { ClinicalAssessment, IClinicalAssessment } from './clinicalAssessmentModel.js';
 import { ResultRelease, IResultRelease } from './resultReleaseModel.js';
-import { Consent } from '../consent/consentModel.js';
+import { Consent, ConsentPurpose } from '../consent/consentModel.js';
 import { User } from '../auth/userModel.js';
 import { AuditLog } from '../audit/auditModel.js';
 import { savePrivateFile } from '../storage/storageService.js';
@@ -18,31 +18,52 @@ export interface UploadPhotoInput {
   patientId: string;
   hospitalId: string;
   isDemo?: boolean;
+  consentPurpose?: ConsentPurpose;
   user: AuthenticatedUser;
 }
 
 export class ScreeningService {
+  private static assertCaseAuthorization(caseRecord: IScreeningCase, user: AuthenticatedUser): void {
+    if (user.role === 'system_admin') return;
+    if (user.hospitalId && user.hospitalId !== caseRecord.hospitalId) {
+      const error = new Error('Cross-hospital access denied.');
+      (error as Error & { statusCode: number }).statusCode = 403;
+      throw error;
+    }
+    if (['medical_officer', 'specialist_doctor'].includes(user.role) && caseRecord.assignedMoId !== (user.userId || user.id)) {
+      const error = new Error('This screening case is not assigned to this clinician.');
+      (error as Error & { statusCode: number }).statusCode = 403;
+      throw error;
+    }
+  }
+
   /**
-   * 1. Photo upload (demo or consented images only).
-   * Verifies that the patient has an active granted consent OR is tagged as a demo image.
+   * 1. Photo upload for a saved patient record.
+   * Verifies that the patient has active consent for the requested photo purpose.
    * Computes SHA-256 hash and records the initial version.
    */
   static async uploadPhoto(input: UploadPhotoInput): Promise<IScreeningPhoto> {
-    const isDemo = Boolean(input.isDemo);
+    const isDemo = false;
     let consentId: string | undefined;
 
-    if (!isDemo) {
+    if (input.isDemo) {
+      const error = new Error('Simulation photos cannot be attached to a patient screening record.');
+      (error as Error & { statusCode: number }).statusCode = 400;
+      throw error;
+    }
+
+    {
       // Must have active, unexpired consent for screening analysis
       const activeConsent = await Consent.findOne({
         patientId: input.patientId,
-        purpose: 'screening_ai_analysis',
+        purpose: input.consentPurpose || 'screening_ai_analysis',
         status: 'granted',
         validUntil: { $gt: new Date() },
       });
 
       if (!activeConsent) {
         const error = new Error(
-          'Photo upload requires active patient informed consent or demo simulation tag.'
+          'Photo upload requires active patient informed consent.'
         );
         (error as Error & { statusCode: number }).statusCode = 403;
         throw error;
@@ -173,73 +194,6 @@ export class ScreeningService {
   }
 
   /**
-   * 3. DEMO AI:
-   * Returns a risk-support label with no clinical assertions or staging.
-   * Positioning, obstruction and missing-area checks return "unavailable".
-   * Includes SIMULATION banner on every AI output.
-   */
-  static runDemoAi(photoSha256?: string): IDemoAiResult {
-    // Deterministic risk tier mapping for demonstration reproducibility
-    const riskTiers: Array<
-      'low_risk_support' | 'moderate_risk_support' | 'high_risk_support'
-    > = ['low_risk_support', 'moderate_risk_support', 'high_risk_support'];
-
-    let chosenTier: 'low_risk_support' | 'moderate_risk_support' | 'high_risk_support' =
-      'moderate_risk_support';
-
-    if (photoSha256) {
-      const charCode = photoSha256.charCodeAt(0);
-      chosenTier = riskTiers[charCode % riskTiers.length];
-    }
-
-    const doctorSpecialties = {
-      low_risk_support: {
-        specialty: 'Dental Surgeon',
-        facility: 'Community Health Centre (CHC) Paderu',
-        urgency: 'routine',
-        timelineDays: 30,
-        consultationReason: 'Routine preventive oral cavity examination and hygiene review.',
-      },
-      moderate_risk_support: {
-        specialty: 'Dental Surgeon / Oral & Maxillofacial Specialist',
-        facility: 'Community Health Centre (CHC) Paderu / Area Hospital Araku',
-        urgency: 'priority',
-        timelineDays: 14,
-        consultationReason: 'Evaluation of localized oral mucosal alteration / keratosis.',
-      },
-      high_risk_support: {
-        specialty: 'Oral & Maxillofacial Surgeon / ENT Specialist',
-        facility: 'Area Hospital Araku / King George Hospital Visakhapatnam',
-        urgency: 'urgent',
-        timelineDays: 7,
-        consultationReason: 'Priority assessment of persistent non-healing or erythroplakic mucosal patch.',
-      },
-    };
-
-    return {
-      riskSupportLabel: chosenTier,
-      confidenceScore: 0.84,
-      qualityChecks: {
-        positioning: 'unavailable',
-        obstruction: 'unavailable',
-        missingArea: 'unavailable',
-      },
-      disclaimer:
-        'DEMO AI SCREENING SUPPORT ONLY - CONTAINS NO CONFIRMED FINDINGS OR CLINICAL STAGING. REQUIRES CLINICIAN REVIEW.',
-      simulationBanner:
-        '⚠️ SIMULATION SYSTEM - DEMO DATA ONLY - NOT FOR CLINICAL USE',
-      analyzedAt: new Date(),
-      observedCondition:
-        chosenTier === 'high_risk_support'
-          ? 'Erythroplakic / Ulcerative Area'
-          : chosenTier === 'moderate_risk_support'
-          ? 'Keratotic White Patch / Plaque'
-          : 'Benign Mucosa / Low-Risk Variant',
-      recommendedDoctor: doctorSpecialties[chosenTier],
-    };
-  }
-
-  /**
    * 4. Create Screening Case for the MO Queue
    */
   static async createCase(input: {
@@ -255,15 +209,8 @@ export class ScreeningService {
     const caseId = `sc_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
     const photoIds = input.photoIds || [];
 
-    // Run Demo AI on the primary photo if attached
-    let demoAiResult: IDemoAiResult | undefined;
-    if (photoIds.length > 0) {
-      const primaryPhoto = await ScreeningPhoto.findOne({ photoId: photoIds[0] });
-      demoAiResult = this.runDemoAi(primaryPhoto?.currentSha256);
-    } else {
-      demoAiResult = this.runDemoAi();
-    }
-
+    const clinicianCreated = input.user.role === 'medical_officer';
+    const assignedMoId = clinicianCreated ? (input.user.userId || input.user.id) : undefined;
     const newCase = await ScreeningCase.create({
       caseId,
       patientId: input.patientId,
@@ -272,10 +219,13 @@ export class ScreeningService {
       villageName: input.villageName,
       hospitalId: input.hospitalId,
       createdBy: input.user.id,
-      status: 'pending_assignment',
+      status: clinicianCreated ? 'assigned' : 'pending_assignment',
       priority: input.priority || 'routine',
       photoIds,
-      demoAiResult,
+      assignedMoId,
+      assignedMoName: clinicianCreated ? input.user.fullName : undefined,
+      assignedBy: clinicianCreated ? input.user.id : undefined,
+      assignedAt: clinicianCreated ? new Date() : undefined,
       resultReleased: false,
       simulation: true,
     });
@@ -399,12 +349,7 @@ export class ScreeningService {
       throw error;
     }
 
-    // Hospital guard
-    if (evaluator.role !== 'system_admin' && evaluator.hospitalId && evaluator.hospitalId !== caseRecord.hospitalId) {
-      const error = new Error('Cross-hospital access denied. Clinician belongs to a different hospital.');
-      (error as Error & { statusCode: number }).statusCode = 403;
-      throw error;
-    }
+    this.assertCaseAuthorization(caseRecord, evaluator);
 
     const assessmentId = `ca_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
 
@@ -470,18 +415,13 @@ export class ScreeningService {
       throw error;
     }
 
+    this.assertCaseAuthorization(caseRecord, releaser);
+
     if (!caseRecord.clinicalAssessmentId) {
       const error = new Error(
         'Cannot release results before a clinical evaluation has been recorded.'
       );
       (error as Error & { statusCode: number }).statusCode = 400;
-      throw error;
-    }
-
-    // Hospital guard
-    if (releaser.role !== 'system_admin' && releaser.hospitalId && releaser.hospitalId !== caseRecord.hospitalId) {
-      const error = new Error('Cross-hospital access denied.');
-      (error as Error & { statusCode: number }).statusCode = 403;
       throw error;
     }
 
@@ -541,6 +481,8 @@ export class ScreeningService {
       throw error;
     }
 
+    this.assertCaseAuthorization(caseRecord, user);
+
     caseRecord.status = 'escalated';
     caseRecord.escalationDetails = {
       escalatedBy: user.id,
@@ -585,6 +527,8 @@ export class ScreeningService {
       (error as Error & { statusCode: number }).statusCode = 404;
       throw error;
     }
+
+    this.assertCaseAuthorization(caseRecord, user);
 
     caseRecord.status = 'referral_requested';
     caseRecord.referralDetails = {
@@ -692,5 +636,11 @@ export class ScreeningService {
    */
   static async getCaseById(caseId: string): Promise<IScreeningCase | null> {
     return ScreeningCase.findOne({ caseId });
+  }
+
+  static async getAuthorizedCaseById(caseId: string, user: AuthenticatedUser): Promise<IScreeningCase | null> {
+    const caseRecord = await ScreeningCase.findOne({ caseId });
+    if (caseRecord) this.assertCaseAuthorization(caseRecord, user);
+    return caseRecord;
   }
 }

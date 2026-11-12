@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthUser } from './AuthPanel';
 import { db, EncryptedQueueItem } from '../db/aarogyaDb';
 import { enqueueOfflinePatient, syncOfflineQueue } from '../offline/cryptoQueue';
 import { LoginRequiredView } from './UIStateViews';
+import { LanguageCode, getClientTranslation, translations } from '../i18n';
+import { extractIdentityFromImages, IdentityDocumentKind } from '../services/localIdentityOcr';
 
 interface Patient {
   patientId: string;
@@ -41,6 +43,7 @@ interface PatientManagerProps {
   currentUser: AuthUser | null;
   onRequireLogin?: (role?: 'asha' | 'doctor') => void;
   onGoToAuth?: () => void;
+  currentLang?: LanguageCode;
 }
 
 export const PatientManager: React.FC<PatientManagerProps> = ({
@@ -48,6 +51,7 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
   currentUser,
   onRequireLogin,
   onGoToAuth,
+  currentLang = 'en',
 }) => {
   const [activeTab, setActiveTab] = useState<'register' | 'patients' | 'duplicates' | 'queue'>('register');
 
@@ -57,9 +61,14 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
   const [aadhaarBack, setAadhaarBack] = useState<string | null>(null);
   const [extractingOcr, setExtractingOcr] = useState<boolean>(false);
   const [maskedAadhaar, setMaskedAadhaar] = useState<string>('');
+  const [maskedAbha, setMaskedAbha] = useState<string>('');
+  const [identityDocKind, setIdentityDocKind] = useState<IdentityDocumentKind>('aadhaar');
+  const [ocrProgress, setOcrProgress] = useState<number>(0);
+  const uiLanguage = currentLang === 'te' || currentLang === 'hi' ? currentLang : 'en';
+  const ocrText = (key: string) => getClientTranslation(translations[uiLanguage], `patientOcr.${key}`);
   const [dob, setDob] = useState<string>('');
   const [stateName, setStateName] = useState<string>('Andhra Pradesh');
-  const [district, setDistrict] = useState<string>('Alluri Sitharama Raju');
+  const [district] = useState<string>('Alluri Sitharama Raju');
   const [emergencyName, setEmergencyName] = useState<string>('');
   const [emergencyPhone, setEmergencyPhone] = useState<string>('');
   const [caregiverName, setCaregiverName] = useState<string>('');
@@ -96,6 +105,8 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
   const [queueItems, setQueueItems] = useState<EncryptedQueueItem[]>([]);
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [queueMsg, setQueueMsg] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(() => navigator.onLine);
+  const registrationFormRef = useRef<HTMLFormElement>(null);
 
   const fetchPatients = async () => {
     if (!accessToken) return;
@@ -163,6 +174,43 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
     }
   }, [currentUser]);
 
+  useEffect(() => {
+    const updateConnection = () => setIsOnline(navigator.onLine);
+    window.addEventListener('online', updateConnection);
+    window.addEventListener('offline', updateConnection);
+    return () => {
+      window.removeEventListener('online', updateConnection);
+      window.removeEventListener('offline', updateConnection);
+    };
+  }, []);
+
+  const buildPatientPayload = () => ({
+    fullName: fullName.trim(),
+    gender,
+    ageEstimated: Number(ageEstimated),
+    phone: phone.trim() || undefined,
+    guardianName: guardianName.trim() || undefined,
+    villageName: villageName.trim(),
+    mandal: mandal.trim(),
+    district: district.trim(),
+    originalAddressText: originalAddressText.trim(),
+    hospitalId,
+    maskedAadhaar: maskedAadhaar || undefined,
+    registrationMethod: regMethod,
+    consentObtained,
+    emergencyContact: emergencyName.trim() ? { name: emergencyName.trim(), phone: emergencyPhone.trim() } : undefined,
+    caregiverDetails: caregiverName.trim() ? { name: caregiverName.trim(), phone: caregiverPhone.trim() } : undefined,
+  });
+
+  const saveRegistrationOffline = async () => {
+    const queuedItem = await enqueueOfflinePatient(buildPatientPayload());
+    await refreshQueue();
+    setRegMsg({
+      type: 'success',
+      text: `Saved securely on this device. Registration is pending sync (Mutation ID: ${queuedItem.clientMutationId.slice(0, 12)}…). It is not yet registered on the server.`,
+    });
+  };
+
 // Client-side image compressor to prevent 413 Payload Too Large on mobile photo uploads
 function compressCardImage(file: File, maxDim = 1200): Promise<string> {
   return new Promise((resolve) => {
@@ -200,93 +248,62 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
   });
 }
 
-// Aadhaar OCR Extraction
+// On-device identity-card OCR. Card pixels and full OCR text never leave this browser.
   const handleExtractOcr = async () => {
-    let token = accessToken;
-    if (!token) {
-      try {
-        const stored = localStorage.getItem('aarogya_tokens');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          token = parsed.accessToken || null;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!token) {
-      // Auto-authenticate as frontline demo worker if unauthenticated in demo mode
-      try {
-        const authRes = await fetch('/api/v1/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'asha.pad01', password: 'Asha@2026' }),
-        });
-        const authData = await authRes.json();
-        if (authData.success && authData.data?.tokens?.accessToken) {
-          token = authData.data.tokens.accessToken;
-        } else if (authData.success && authData.data?.accessToken) {
-          token = authData.data.accessToken;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!token) {
-      setRegMsg({ type: 'error', text: 'Authentication token required for OCR extraction. Please log in as an ASHA worker or Medical Officer.' });
+    if (!consentObtained) {
+      setRegMsg({ type: 'error', text: ocrText('consentRequired') });
       return;
     }
+    const images = [aadhaarFront, aadhaarBack].filter((image): image is string => Boolean(image));
+    if (!images.length) {
+      setRegMsg({ type: 'error', text: ocrText('selectImage') });
+      return;
+    }
+
     setExtractingOcr(true);
+    setOcrProgress(0);
     setRegMsg(null);
     try {
-      const res = await fetch('/api/v1/mock/aadhaar/ocr-extract', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          frontImage: aadhaarFront || 'data:image/jpeg;base64,demo_front',
-          backImage: aadhaarBack || 'data:image/jpeg;base64,demo_back',
-          consentObtained: true,
-        }),
-      });
-      const payload = await res.json();
-      if (res.ok && payload.success) {
-        const ext = payload.data?.extractedData || payload.data?.extracted || payload.data;
-        if (ext && typeof ext === 'object') {
-          if (ext.fullName) setFullName(ext.fullName);
-          if (ext.gender && ['male', 'female', 'other'].includes(ext.gender)) setGender(ext.gender);
-          if (ext.ageEstimated) setAgeEstimated(Number(ext.ageEstimated) || 0);
-          if (ext.dob) setDob(ext.dob);
-          if (ext.guardianName) setGuardianName(ext.guardianName);
-          if (ext.villageName) setVillageName(ext.villageName);
-          if (ext.mandal) setMandal(ext.mandal);
-          if (ext.district) setDistrict(ext.district);
-          if (ext.originalAddressText) setOriginalAddressText(ext.originalAddressText);
-          if (ext.maskedAadhaar) setMaskedAadhaar(ext.maskedAadhaar);
-          setRegMsg({
-            type: 'success',
-            text: `✓ OCR extracted successfully for ${ext.fullName || 'Patient'}! Permitted demographic fields populated. Zero raw Aadhaar stored.`,
-          });
-        } else {
-          throw new Error('No demographic data returned from OCR extraction');
-        }
-      } else {
-        throw new Error(payload.error?.message || payload.message || 'OCR extraction failed');
+      const fields = await extractIdentityFromImages(images, identityDocKind, setOcrProgress);
+      const foundAnyField = Boolean(fields.fullName || fields.dob || fields.address || fields.gender || fields.guardianName);
+      if (!foundAnyField) throw new Error(ocrText('noFields'));
+
+      if (fields.fullName) setFullName(fields.fullName);
+      if (fields.gender) setGender(fields.gender === 'transgender' ? 'other' : fields.gender);
+      if (fields.ageEstimated) setAgeEstimated(fields.ageEstimated);
+      if (fields.dob) setDob(fields.dob);
+      if (fields.guardianName) setGuardianName(fields.guardianName);
+      if (fields.address) setOriginalAddressText(fields.address);
+      if (identityDocKind === 'aadhaar' && fields.maskedIdentity) {
+        setMaskedAadhaar(fields.maskedIdentity);
+        setMaskedAbha('');
+      } else if (identityDocKind === 'abha' && fields.maskedIdentity) {
+        setMaskedAbha(fields.maskedIdentity);
+        setMaskedAadhaar('');
       }
+
+      setRegMsg({ type: 'warning', text: ocrText('reviewExtracted') });
     } catch (err: any) {
-      setRegMsg({ type: 'error', text: `OCR scan notice: ${err.message}` });
+      setRegMsg({ type: 'error', text: err.message || ocrText('ocrFailed') });
     } finally {
       setExtractingOcr(false);
     }
   };
-
   // Online Registration
   const handleRegisterOnline = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!navigator.onLine) {
+      setSubmitting(true);
+      setRegMsg(null);
+      try {
+        await saveRegistrationOffline();
+      } catch (err: any) {
+        setRegMsg({ type: 'error', text: `Could not save registration offline: ${err.message}` });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
     if (!accessToken) {
       setRegMsg({ type: 'error', text: 'Authentication token required for online registration' });
       return;
@@ -302,23 +319,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({
-          fullName: fullName.trim(),
-          gender,
-          ageEstimated: Number(ageEstimated),
-          phone: phone.trim() || undefined,
-          guardianName: guardianName.trim() || undefined,
-          villageName: villageName.trim(),
-          mandal: mandal.trim(),
-          district: district.trim(),
-          originalAddressText: originalAddressText.trim(),
-          hospitalId,
-          maskedAadhaar: maskedAadhaar || undefined,
-          registrationMethod: regMethod,
-          consentObtained,
-          emergencyContact: emergencyName.trim() ? { name: emergencyName.trim(), phone: emergencyPhone.trim() } : undefined,
-          caregiverDetails: caregiverName.trim() ? { name: caregiverName.trim(), phone: caregiverPhone.trim() } : undefined,
-        }),
+        body: JSON.stringify(buildPatientPayload()),
       });
 
       const payload = await res.json();
@@ -345,7 +346,15 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
         throw new Error(payload.error?.message || 'Registration failed');
       }
     } catch (err: any) {
-      setRegMsg({ type: 'error', text: err.message });
+      if (err instanceof TypeError || !navigator.onLine) {
+        try {
+          await saveRegistrationOffline();
+        } catch (queueErr: any) {
+          setRegMsg({ type: 'error', text: `Network unavailable and offline save failed: ${queueErr.message}` });
+        }
+      } else {
+        setRegMsg({ type: 'error', text: err.message });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -353,6 +362,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
 
   // Offline Encrypted Queue Save
   const handleSaveToEncryptedQueue = async () => {
+    if (!registrationFormRef.current?.reportValidity()) return;
     try {
       const patientPayload = {
         fullName: fullName.trim(),
@@ -528,7 +538,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
       {/* TAB 1: OTP-FREE REGISTRATION */}
       {activeTab === 'register' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-          <form onSubmit={handleRegisterOnline} className="card">
+          <form ref={registrationFormRef} onSubmit={handleRegisterOnline} className="card">
             <div className="card-header">
               <div>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
@@ -539,6 +549,16 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                 </p>
               </div>
               <span className="badge badge-mock">Zero-Connectivity Ready</span>
+            </div>
+
+            <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: `1px solid ${isOnline ? 'var(--color-status-success)' : 'var(--color-status-warning)'}`, background: isOnline ? 'rgba(6, 214, 160, 0.10)' : 'rgba(255, 183, 3, 0.12)' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--color-text-primary)' }}>
+                {isOnline ? 'Online: registrations can be submitted to the server.' : 'Offline: submit to save this registration securely on this device; sync it when connected.'}
+                {' '}Pending registrations: {queueItems.filter((item) => item.type === 'patient_registration' && ['pending', 'failed'].includes(item.status)).length}
+              </span>
+              <button type="button" className="button-outline" onClick={() => setActiveTab('queue')} style={{ fontSize: '0.8rem', padding: '6px 10px' }}>
+                Review offline queue
+              </button>
             </div>
 
             {/* 3-Method Registration Selector */}
@@ -575,17 +595,35 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                 <div style={{ padding: '12px', background: 'rgba(56, 189, 248, 0.08)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <strong style={{ fontSize: '0.86rem', color: 'var(--color-brand-primary)' }}>
-                      🪪 Aadhaar Card Image OCR Scanner
+                      {ocrText('title')}
                     </strong>
-                    <span className="badge badge-mock">MOCK OCR / ZERO RAW RETENTION</span>
+                    <span className="badge badge-mock">MOCK · ON-DEVICE OCR</span>
                   </div>
                   <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)', margin: '0 0 10px' }}>
-                    Upload or capture card front and back. Permitted demographic fields will be automatically extracted. Complete card numbers and photos are discarded immediately after field extraction (Invariant 5).
+                    {ocrText('privacyNote')}
                   </p>
+
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                    {(['aadhaar', 'abha'] as const).map((kind) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        className={`auth-tab ${identityDocKind === kind ? 'active' : ''}`}
+                        onClick={() => {
+                          setIdentityDocKind(kind);
+                          setMaskedAadhaar('');
+                          setMaskedAbha('');
+                        }}
+                        style={{ fontSize: '0.78rem', padding: '6px 10px' }}
+                      >
+                        {kind === 'aadhaar' ? ocrText('aadhaarCard') : ocrText('abhaCard')}
+                      </button>
+                    ))}
+                  </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div style={{ border: '1px dashed rgba(255,255,255,0.25)', padding: '10px', borderRadius: '6px', textAlign: 'center', background: 'rgba(255,255,255,0.03)' }}>
-                      <span style={{ fontSize: '0.78rem', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Front Side Image</span>
+                      <span style={{ fontSize: '0.78rem', display: 'block', marginBottom: '4px', fontWeight: 600 }}>{ocrText('frontImage')}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -610,7 +648,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                       )}
                     </div>
                     <div style={{ border: '1px dashed rgba(255,255,255,0.25)', padding: '10px', borderRadius: '6px', textAlign: 'center', background: 'rgba(255,255,255,0.03)' }}>
-                      <span style={{ fontSize: '0.78rem', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Back Side Image</span>
+                      <span style={{ fontSize: '0.78rem', display: 'block', marginBottom: '4px', fontWeight: 600 }}>{ocrText('backImage')}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -644,11 +682,16 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                       onClick={handleExtractOcr}
                       disabled={extractingOcr}
                     >
-                      {extractingOcr ? '⏳ Scanning & Extracting...' : '🔍 Extract Details with OCR'}
+                      {extractingOcr ? `${ocrText('scanning')} ${ocrProgress}%` : ocrText('extractButton')}
                     </button>
                     {maskedAadhaar && (
                       <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 600 }}>
-                        🔒 Masked Aadhaar: {maskedAadhaar}
+                        🔒 {ocrText('maskedAadhaar')}: {maskedAadhaar}
+                      </span>
+                    )}
+                    {maskedAbha && (
+                      <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 600 }}>
+                        🔒 {ocrText('maskedAbha')}: {maskedAbha}
                       </span>
                     )}
                   </div>

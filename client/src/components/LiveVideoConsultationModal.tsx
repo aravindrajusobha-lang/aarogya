@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LanguageCode } from '../i18n';
 
+const getAccessToken = () => {
+  try {
+    const tokens = JSON.parse(localStorage.getItem('aarogya_tokens') || '{}');
+    return tokens.accessToken || localStorage.getItem('aarogya_token') || '';
+  } catch {
+    return localStorage.getItem('aarogya_token') || '';
+  }
+};
+
 export interface LiveVideoConsultationModalProps {
   consultationId: string;
+  inviteToken?: string;
   patientName: string;
   doctorName?: string;
   doctorSpecialty?: string;
@@ -15,6 +25,7 @@ export interface LiveVideoConsultationModalProps {
 
 export const LiveVideoConsultationModal: React.FC<LiveVideoConsultationModalProps> = ({
   consultationId,
+  inviteToken,
   patientName,
   doctorName = 'Dr. K. Somasekhar (MO)',
   doctorSpecialty = 'Dental Surgeon & Oral Medicine',
@@ -42,12 +53,12 @@ export const LiveVideoConsultationModal: React.FC<LiveVideoConsultationModalProp
   const t = {
     title: {
       te: 'ప్రత్యక్ష వీడియో సంప్రదింపు (Live Video Consultation)',
-      en: 'Live Telemedicine Video Consultation',
+      en: 'Demo Video Consultation',
       hi: 'लाइव टेलीमेडिसिन वीडियो परामर्श',
     }[currentLang as 'te' | 'en' | 'hi'] || 'Live Video Consultation',
     waitingDoctor: {
       te: 'వైద్యుడు కనెక్ట్ అవ్వడానికి వేచి చూస్తున్నారు...',
-      en: 'Waiting for Doctor to join the secure consultation room...',
+      en: 'Waiting for the other participant to join this demo room...',
       hi: 'डॉक्टर के जुड़ने की प्रतीक्षा की जा रही है...',
     }[currentLang as 'te' | 'en' | 'hi'] || 'Waiting for Doctor...',
     connected: {
@@ -115,12 +126,13 @@ export const LiveVideoConsultationModal: React.FC<LiveVideoConsultationModalProp
 
     // Notify backend
     try {
-      const token = localStorage.getItem('aarogya_token') || '';
+      const token = getAccessToken();
       fetch(`/api/v1/teleconsultation/rooms/${consultationId}/leave`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          ...(inviteToken ? { 'X-Consultation-Invite': inviteToken } : {}),
         },
       }).catch(() => {});
     } catch {}
@@ -186,12 +198,13 @@ export const LiveVideoConsultationModal: React.FC<LiveVideoConsultationModalProp
       };
 
       // 3. Join room on backend
-      const token = localStorage.getItem('aarogya_token') || '';
+      const token = getAccessToken();
       const joinRes = await fetch(`/api/v1/teleconsultation/rooms/${consultationId}/join`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          ...(inviteToken ? { 'X-Consultation-Invite': inviteToken } : {}),
         },
       });
 
@@ -218,12 +231,13 @@ export const LiveVideoConsultationModal: React.FC<LiveVideoConsultationModalProp
 
   const sendSignal = async (type: string, data: any) => {
     try {
-      const token = localStorage.getItem('aarogya_token') || '';
+      const token = getAccessToken();
       await fetch(`/api/v1/teleconsultation/rooms/${consultationId}/signal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          ...(inviteToken ? { 'X-Consultation-Invite': inviteToken } : {}),
         },
         body: JSON.stringify({ type, data }),
       });
@@ -246,11 +260,14 @@ export const LiveVideoConsultationModal: React.FC<LiveVideoConsultationModalProp
 
     pollTimerRef.current = setInterval(async () => {
       try {
-        const token = localStorage.getItem('aarogya_token') || '';
+        const token = getAccessToken();
         const res = await fetch(
           `/api/v1/teleconsultation/rooms/${consultationId}/signal?since=${lastSignalTsRef.current}`,
           {
-            headers: { Authorization: `Bearer ${token}` },
+            headers: {
+              Authorization: `Bearer ${token}`,
+              ...(inviteToken ? { 'X-Consultation-Invite': inviteToken } : {}),
+            },
           }
         );
 

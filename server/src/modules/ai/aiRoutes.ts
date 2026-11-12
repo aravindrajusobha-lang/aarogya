@@ -10,13 +10,13 @@ import { Patient } from '../patient/patientModel.js';
 import {
   AiScreening,
   IAiScreening,
-  AiLabel,
   IDentalFinding,
   ICombinedRecommendation,
 } from './aiScreeningModel.js';
 import { calculateRiskScore, IRiskQuestionnaireAnswers } from './riskScore.js';
 import { logger } from '../../config/logger.js';
-import { isGeminiConfigured, analyzeOralPhotoWithGemini } from '../assistant/geminiService.js';
+import { Consent } from '../consent/consentModel.js';
+import { analyzeOralScreeningImage, AiProviderUnavailableError, InvalidScreeningImageError } from './aiAnalysisService.js';
 
 export const aiRouter = Router();
 
@@ -84,11 +84,54 @@ function requireClinicianRole(req: Request, res: Response, next: NextFunction): 
   next();
 }
 
+async function validatePatientScreeningAccess(
+  req: Request,
+  res: Response,
+  patientId: string,
+  requestedHospitalId?: string
+): Promise<string | undefined> {
+  const actor = req.user!;
+  let hospitalId: string | undefined;
+
+  if (actor.role === 'patient') {
+    if (!actor.patientId || actor.patientId !== patientId) {
+      res.envelopeError('FORBIDDEN', 'Patients may only analyze and view their own health records.', undefined, 403);
+      return undefined;
+    }
+    hospitalId = actor.hospitalId;
+  } else if (actor.role !== 'system_admin') {
+    if (!actor.hospitalId) {
+      res.envelopeError('HOSPITAL_REQUIRED', 'Your account must be assigned to a facility before screening.', undefined, 403);
+      return undefined;
+    }
+    if (requestedHospitalId && requestedHospitalId !== actor.hospitalId) {
+      res.envelopeError('FORBIDDEN', 'Screening records outside your assigned facility are not accessible.', undefined, 403);
+      return undefined;
+    }
+    hospitalId = actor.hospitalId;
+  } else {
+    hospitalId = requestedHospitalId || actor.hospitalId;
+  }
+
+  const activeConsent = await Consent.findOne({
+    patientId,
+    purpose: 'screening_ai_analysis',
+    status: 'granted',
+    validUntil: { $gt: new Date() },
+  }).lean();
+  if (!activeConsent) {
+    res.envelopeError('CONSENT_REQUIRED', 'Current patient consent for oral photo analysis is required.', undefined, 403);
+    return undefined;
+  }
+
+  return hospitalId;
+}
+
 // -----------------------------------------------------------------------------
 // Helper: Compute Combined Recommendation (A + B + C)
 // -----------------------------------------------------------------------------
 export function computeCombinedRecommendation(
-  moduleA: { label?: string | null; confidence?: number } | null | undefined,
+  moduleA: { label?: string | null; confidence?: number; referToSpecialist?: boolean } | null | undefined,
   moduleB: { findings?: IDentalFinding[]; seeDentistRecommended?: boolean } | null | undefined,
   moduleC: { level?: string; score?: number; flaggedSymptoms?: string[]; flaggedHabits?: string[] } | null | undefined
 ): ICombinedRecommendation {
@@ -97,7 +140,7 @@ export function computeCombinedRecommendation(
   // Module A rules
   const labelA = moduleA?.label || '';
   const confA = typeof moduleA?.confidence === 'number' ? moduleA.confidence : 1.0;
-  const isHighRiskLesion = ['opmd', 'suspected_malignant', 'osmf', 'non_healing_ulcer'].includes(labelA);
+  const isHighRiskLesion = Boolean(moduleA?.referToSpecialist) || ['opmd', 'suspected_malignant', 'osmf', 'non_healing_ulcer'].includes(labelA);
   const isLowConfidence = labelA ? confA < 0.60 : false;
 
   if (isHighRiskLesion) {
@@ -173,20 +216,23 @@ aiRouter.post(
         return;
       }
 
-      const consentGiven = req.body.consentGiven !== 'false' && req.body.consentGiven !== false;
-      if (!consentGiven) {
-        res.envelopeError(
-          'CONSENT_REQUIRED',
-          'Informed patient consent is mandatory prior to capturing and analyzing oral mucosal screening photographs.',
-          undefined,
-          400
-        );
+      if (req.body.consentGiven !== 'true' && req.body.consentGiven !== true) {
+        res.envelopeError('CONSENT_REQUIRED', 'Explicit patient consent is required before oral photo analysis.', undefined, 400);
         return;
       }
 
-      const patientId = req.body.patientId || `PAT-PAD-${Date.now().toString().slice(-4)}`;
-      const hospitalId = req.body.hospitalId || req.user!.hospitalId || 'HOSP-PADERU-01';
+      const patientId = typeof req.body.patientId === 'string' ? req.body.patientId.trim() : '';
+      if (!patientId) {
+        res.envelopeError('PATIENT_ID_REQUIRED', 'A saved patient record is required.', undefined, 400);
+        return;
+      }
+      const hospitalId = await validatePatientScreeningAccess(req, res, patientId, req.body.hospitalId);
+      if (res.headersSent) return;
       const clientId = req.body.clientId || uuidv4();
+      if (typeof clientId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+        res.envelopeError('INVALID_MUTATION_ID', 'clientId must be a UUID v4.', undefined, 400);
+        return;
+      }
 
       const existing = await AiScreening.findOne({ clientId });
       if (existing) {
@@ -194,104 +240,22 @@ aiRouter.post(
         return;
       }
 
-      // 1. Analyze disease image using Google Gemini Multimodal Vision when configured
-      let aiResponseData: any;
-      if (isGeminiConfigured()) {
-        try {
-          const geminiResult = await analyzeOralPhotoWithGemini({
-            imageBase64: req.file.buffer.toString('base64'),
-            mimeType: req.file.mimetype,
-            patientNote: req.body.patientNote || req.body.clinicalNote || 'Oral mucosal lesion screening',
-            language: req.body.language || 'en',
-          });
-
-          // Map Gemini visual findings to platform screening taxonomy
-          let mappedLabel: AiLabel = 'normal';
-          if (geminiResult.riskTier === 'high_risk_support') {
-            mappedLabel = 'opmd';
-          } else if (geminiResult.riskTier === 'moderate_risk_support') {
-            mappedLabel = 'benign_inflammatory';
-          } else {
-            mappedLabel = 'normal';
-          }
-
-          const conf = geminiResult.confidenceScore || 0.88;
-          aiResponseData = {
-            label: mappedLabel,
-            confidence: conf,
-            probabilities: {
-              normal: mappedLabel === 'normal' ? conf : 0.05,
-              benign_inflammatory: mappedLabel === 'benign_inflammatory' ? conf : 0.08,
-              opmd: mappedLabel === 'opmd' ? conf : 0.06,
-              suspected_malignant: 0.01,
-            },
-            refer_to_specialist:
-              geminiResult.recommendedDoctor?.urgency === 'urgent' ||
-              geminiResult.riskTier === 'high_risk_support',
-            model_version: `gemini-vision-${geminiResult.analyzedByModel}`,
-            is_placeholder: false,
-            geminiAnalysis: geminiResult,
-            image_quality: {
-              ok: true,
-              reason: null,
-              blur_score: 95,
-              brightness: 120,
-            },
-          };
-          logger.info(
-            { model: geminiResult.analyzedByModel, condition: geminiResult.observedCondition },
-            'Oral disease image analyzed with Google Gemini Vision API'
-          );
-        } catch (geminiErr: any) {
-          logger.warn(
-            { err: geminiErr.message },
-            'Gemini Vision analysis error, attempting FastAPI / calibrated fallback'
-          );
-        }
-      }
-
-      // If not analyzed by Gemini, attempt FastAPI or fallback model
-      if (!aiResponseData) {
-        try {
-          const formData = new FormData();
-          formData.append('image', req.file.buffer, {
-            filename: req.file.originalname || 'screening.jpg',
-            contentType: req.file.mimetype,
-          });
-
-          const fastApiResponse = await axios.post(`${AI_SERVICE_URL}/predict`, formData, {
-            headers: formData.getHeaders(),
-            timeout: 12000,
-          });
-
-          aiResponseData = fastApiResponse.data;
-        } catch (axiosErr: any) {
-          logger.warn(
-            { err: axiosErr.message, serviceUrl: AI_SERVICE_URL },
-            'FastAPI AI microservice unreachable. Using server-calibrated fallback screening model.'
-          );
-
-          aiResponseData = {
-            label: 'benign_inflammatory',
-            confidence: 0.89,
-            probabilities: {
-              normal: 0.08,
-              benign_inflammatory: 0.89,
-              opmd: 0.02,
-              suspected_malignant: 0.01,
-            },
-            refer_to_specialist: false,
-            model_version: 'v2.0.0-server-calibrated',
-            is_placeholder: true,
-            image_quality: {
-              ok: true,
-              reason: null,
-              blur_score: 110,
-              brightness: 125,
-            },
-          };
-        }
-      }
+      const analysis = await analyzeOralScreeningImage({
+        buffer: req.file.buffer,
+        filename: req.file.originalname || 'oral_screening.jpg',
+        mimeType: req.file.mimetype,
+        patientNote: req.body.patientNote || req.body.clinicalNote,
+        language: req.body.language || 'en',
+      });
+      const aiResponseData = {
+        label: analysis.label,
+        confidence: analysis.confidence,
+        probabilities: analysis.probabilities,
+        refer_to_specialist: analysis.referToSpecialist,
+        model_version: analysis.modelVersion,
+        image_quality: analysis.imageQuality,
+        geminiAnalysis: analysis.geminiAnalysis,
+      };
 
       // 2. Store image in private storage
       let imageRef: string | undefined;
@@ -308,11 +272,12 @@ aiRouter.post(
         imageRef = storedFile.fileId;
       } catch (storageErr) {
         logger.error({ err: storageErr }, 'Failed saving private image');
+        throw new Error('The screening photo could not be stored securely. No result was saved.');
       }
 
       // Compute standalone recommendation for Module A
       const combinedRec = computeCombinedRecommendation(
-        { label: aiResponseData.label, confidence: aiResponseData.confidence },
+        { label: aiResponseData.label, confidence: aiResponseData.confidence, referToSpecialist: aiResponseData.refer_to_specialist },
         null,
         null
       );
@@ -334,15 +299,15 @@ aiRouter.post(
         modelVersion: aiResponseData.model_version || 'v1.0.0-efficientnet_b0',
         source: 'server',
         imageRef,
-        imageQuality: aiResponseData.image_quality || { ok: true, reason: null },
+        imageQuality: aiResponseData.image_quality,
         moduleA: {
           label: aiResponseData.label,
-          confidence: aiResponseData.confidence || 0.0,
+          confidence: aiResponseData.confidence,
           probabilities: aiResponseData.probabilities || {},
-          modelVersion: aiResponseData.model_version || 'v1.0.0-efficientnet_b0',
+          modelVersion: aiResponseData.model_version,
           source: 'server',
           imageRef,
-          imageQuality: aiResponseData.image_quality,
+          ...(aiResponseData.image_quality ? { imageQuality: aiResponseData.image_quality } : {}),
         },
         combinedRecommendation: combinedRec,
         clinicianReview: { status: 'PENDING' },
@@ -374,7 +339,8 @@ aiRouter.post(
       );
     } catch (err: any) {
       logger.error({ err }, 'Error in /api/ai/analyze');
-      res.envelopeError('AI_ANALYSIS_ERROR', err.message, undefined, 500);
+      const statusCode = err instanceof AiProviderUnavailableError || err instanceof InvalidScreeningImageError ? err.statusCode : Number(err?.statusCode) || 500;
+      res.envelopeError(err?.code || 'AI_ANALYSIS_ERROR', err.message || 'Oral screening could not be completed.', undefined, statusCode);
     }
   }
 );
@@ -394,8 +360,17 @@ aiRouter.post(
         return;
       }
 
-      const patientId = req.body.patientId || `PAT-PAD-${Date.now().toString().slice(-4)}`;
-      const hospitalId = req.body.hospitalId || req.user!.hospitalId || 'HOSP-PADERU-01';
+      if (req.body.consentGiven !== 'true' && req.body.consentGiven !== true) {
+        res.envelopeError('CONSENT_REQUIRED', 'Explicit patient consent is required before dental photo analysis.', undefined, 400);
+        return;
+      }
+      const patientId = typeof req.body.patientId === 'string' ? req.body.patientId.trim() : '';
+      if (!patientId) {
+        res.envelopeError('PATIENT_ID_REQUIRED', 'A saved patient record is required.', undefined, 400);
+        return;
+      }
+      const hospitalId = await validatePatientScreeningAccess(req, res, patientId, req.body.hospitalId);
+      if (res.headersSent) return;
 
       // 1. Forward to FastAPI Module B
       let dentalData: any;
@@ -413,21 +388,13 @@ aiRouter.post(
 
         dentalData = fastApiResponse.data;
       } catch (axiosErr: any) {
-        logger.warn({ err: axiosErr.message }, 'Dental AI service unreachable. Using server-calibrated fallback model.');
-        dentalData = {
-          findings: [
-            { label: 'gingivitis', probability: 0.92, threshold: 0.45, flagged: true },
-            { label: 'plaque_soft_deposit', probability: 0.86, threshold: 0.50, flagged: true },
-            { label: 'calculus', probability: 0.78, threshold: 0.50, flagged: true },
-            { label: 'discoloration', probability: 0.74, threshold: 0.55, flagged: true },
-            { label: 'caries', probability: 0.18, threshold: 0.50, flagged: false },
-          ],
-          see_dentist_recommended: true,
-          model_version: 'v2.0.0-server-calibrated',
-          is_placeholder: true,
-          image_quality: { ok: true, reason: null, blur_score: 110, brightness: 125 },
-        };
+        logger.error({ err: axiosErr.message }, 'Configured dental screening model is unavailable');
+        throw new AiProviderUnavailableError('Dental screening is temporarily unavailable. No result was saved; please try again when the screening service is online.');
       }
+
+      if (dentalData?.is_placeholder === true) throw new AiProviderUnavailableError('The configured dental screening model is not trained and cannot analyze this image.');
+      if (dentalData?.image_quality?.ok === false) throw new InvalidScreeningImageError(dentalData.image_quality.reason || 'The image is not clear enough. Please capture it again.');
+      if (!Array.isArray(dentalData?.findings)) throw new AiProviderUnavailableError('The dental screening model did not return usable findings.');
 
       // 2. Store image in private storage
       let imageRef: string | undefined;
@@ -444,6 +411,7 @@ aiRouter.post(
         imageRef = storedFile.fileId;
       } catch (storageErr) {
         logger.error({ err: storageErr }, 'Failed saving private dental image');
+        throw new Error('The dental photo could not be stored securely. No result was saved.');
       }
 
       // Audit Log
@@ -474,7 +442,8 @@ aiRouter.post(
       );
     } catch (err: any) {
       logger.error({ err }, 'Error in /api/ai/analyze-dental');
-      res.envelopeError('DENTAL_ANALYSIS_ERROR', err.message, undefined, 500);
+      const statusCode = err instanceof AiProviderUnavailableError || err instanceof InvalidScreeningImageError ? err.statusCode : Number(err?.statusCode) || 500;
+      res.envelopeError(err?.code || 'DENTAL_ANALYSIS_ERROR', err.message || 'Dental screening could not be completed.', undefined, statusCode);
     }
   }
 );
@@ -559,18 +528,21 @@ aiRouter.post(
   requireScreeningRole,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const {
-        patientId,
-        hospitalId = req.user!.hospitalId || 'HOSP-PADERU-01',
-        clientId = uuidv4(),
-        moduleA,
-        moduleB,
-        moduleC,
-        consentGiven = true,
-      } = req.body;
+      const { patientId, moduleA, moduleB, moduleC } = req.body;
 
       if (!patientId) {
         res.envelopeError('PATIENT_ID_REQUIRED', 'patientId is required.', undefined, 400);
+        return;
+      }
+      if (req.body.consentGiven !== true) {
+        res.envelopeError('CONSENT_REQUIRED', 'Explicit patient consent is required before saving a screening report.', undefined, 400);
+        return;
+      }
+      const hospitalId = await validatePatientScreeningAccess(req, res, String(patientId), req.body.hospitalId);
+      if (res.headersSent) return;
+      const clientId = req.body.clientId;
+      if (typeof clientId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+        res.envelopeError('INVALID_MUTATION_ID', 'clientId must be a UUID v4.', undefined, 400);
         return;
       }
 
@@ -636,7 +608,7 @@ aiRouter.post(
           : undefined,
         combinedRecommendation: combinedRec,
         clinicianReview: { status: 'PENDING' },
-        consentGiven: Boolean(consentGiven),
+        consentGiven: true,
         consentTimestamp: new Date(),
         syncStatus: 'SYNCED',
         clientId,
@@ -773,9 +745,21 @@ aiRouter.post(
       const results: IAiScreening[] = [];
 
       for (const item of items) {
-        if (!item.clientId) {
-          continue;
+        if (typeof item.clientId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.clientId)) {
+          res.envelopeError('INVALID_MUTATION_ID', 'Each offline screening requires a UUID v4 clientId.', undefined, 400);
+          return;
         }
+        if (typeof item.patientId !== 'string' || !item.patientId.trim()) {
+          res.envelopeError('PATIENT_ID_REQUIRED', 'Each offline screening must reference a saved patient record.', undefined, 400);
+          return;
+        }
+        if (item.consentGiven !== true) {
+          res.envelopeError('CONSENT_REQUIRED', 'Each offline screening must include explicit patient consent.', undefined, 400);
+          return;
+        }
+
+        const hospitalId = await validatePatientScreeningAccess(req, res, item.patientId, item.hospitalId);
+        if (res.headersSent) return;
 
         const existing = await AiScreening.findOne({ clientId: item.clientId });
         if (existing) {
@@ -788,28 +772,28 @@ aiRouter.post(
         const combinedRec = item.combinedRecommendation || computeCombinedRecommendation(item.moduleA || item, item.moduleB, item.moduleC);
 
         const newScreening = await AiScreening.create({
-          patientId: item.patientId || 'PAT-DEMO-01',
+          patientId: item.patientId,
           performedBy: {
             userId: req.user!.id,
             username: (req.user as any).username || req.user!.id,
             role: req.user!.role,
             fullName: (req.user as any).fullName,
           },
-          hospitalId: item.hospitalId || req.user!.hospitalId || 'HOSP-PADERU-01',
+          hospitalId,
           label: item.label || item.moduleA?.label || null,
           confidence: item.confidence || item.moduleA?.confidence || 0.0,
           probabilities: item.probabilities || item.moduleA?.probabilities || {},
           referToSpecialist: Boolean(combinedRec.referToSpecialist),
-          modelVersion: item.modelVersion || 'v1.0.0-onnx-on-device',
-          source: item.source || 'on-device',
+          modelVersion: item.modelVersion || item.moduleA?.modelVersion || item.moduleB?.modelVersion || 'offline-screening-model',
+          source: 'on-device',
           imageRef: item.imageRef,
-          imageQuality: item.imageQuality || { ok: true, reason: null },
+          imageQuality: item.imageQuality,
           moduleA: item.moduleA,
           moduleB: item.moduleB,
           moduleC: item.moduleC,
           combinedRecommendation: combinedRec,
-          clinicianReview: item.clinicianReview || { status: 'PENDING' },
-          consentGiven: Boolean(item.consentGiven !== false),
+          clinicianReview: { status: 'PENDING' },
+          consentGiven: true,
           consentTimestamp: item.consentTimestamp ? new Date(item.consentTimestamp) : new Date(),
           syncStatus: 'SYNCED',
           clientId: item.clientId,
@@ -910,3 +894,43 @@ aiRouter.patch(
     }
   }
 );
+
+import { suggestDoctors } from './suggestDoctorsService.js';
+
+/**
+ * POST /api/ai/suggest-doctors
+ * Rule-based doctor suggestions help patients find the right clinician; care decisions remain with qualified staff.
+ * Configurable provider hook point; falls back to specialization/district matching.
+ */
+aiRouter.post('/suggest-doctors', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { symptomText, conditionCategory, riskLevel, location, limit } = req.body || {};
+    const result = await suggestDoctors({ symptomText, conditionCategory, riskLevel, location, limit });
+    if (AuditLog.db.readyState === 1) {
+      await AuditLog.create({
+        action: 'AI_SUGGEST_DOCTORS',
+        actorId: req.user!.id,
+        actorRole: req.user!.role,
+        resourceType: 'ai_suggestion',
+        resourceId: 'doctor_suggestions',
+        ip: req.ip || '127.0.0.1',
+        statusCode: 200,
+        metadata: { category: result.category, urgent: result.urgent, count: result.suggestions.length },
+        simulation: true,
+      });
+    }
+    res.envelope(result, 'Doctor suggestions generated for screening support and care navigation.');
+  } catch (err: any) {
+    logger.error({ err }, 'Error in /api/ai/suggest-doctors');
+    // Never block booking: deterministic fallback
+    res.envelope({
+      category: 'general check',
+      doctorType: 'Dentist / Medical Officer',
+      suggestions: [{ doctorId: 'LET_ADMIN_DECIDE', name: 'Let admin decide', specialization: 'Dentist', hospital: 'Nearest facility', distance: 'To be assigned', nextAvailability: 'Pending assignment' }],
+      urgent: false,
+      redFlags: [],
+      disclaimer: 'This is a care navigation suggestion. A qualified clinician makes personal care decisions.',
+      fallbackUsed: true,
+    }, 'Fallback doctor suggestions returned.');
+  }
+});

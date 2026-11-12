@@ -133,7 +133,32 @@
     "staffDiscussionTitle": "சுகாதார வழங்குநர் கலந்துரையாடல்",
     "notesTitle": "ஆலோசனை குறிப்புகள்",
     "notReleased": "மருத்துவக் குறிப்புகள் நோயாளி பார்வைக்கு இன்னும் வெளியிடப்படவில்லை.",
-    "onlyAssignedClinician": "ஒதுக்கப்பட்ட மருத்துவ நிபுணர் மட்டுமே குறிப்புகளைப் பதிவு செய்ய முடியும்."
+    "onlyAssignedClinician": "ஒதுக்கப்பட்ட மருத்துவ நிபுணர் மட்டுமே குறிப்புகளைப் பதிவு செய்ய முடியும்.",
+    "directCallTitle": "மருத்துவர்-நோயாளி நேரடி வீடியோ அழைப்பு",
+    "liveVideoChecking": "நேரடி வீடியோ கிடைப்பது சரிபார்க்கப்படுகிறது...",
+    "liveVideoReady": "நேரடி வீடியோ சேவை அமைக்கப்பட்டுள்ளது.",
+    "liveVideoBlocked": "நேரடி வீடியோ கிடைக்கவில்லை. நிர்வாகி Daily சேவையை அமைக்க வேண்டும்.",
+    "liveVideoUnavailable": "நேரடி வீடியோ கிடைப்பதைச் சரிபார்க்க முடியவில்லை. பின்னர் மீண்டும் முயற்சிக்கவும்.",
+    "directCallPatient": "நோயாளி",
+    "directCallChoosePatient": "நோயாளியைத் தேர்ந்தெடுக்கவும்",
+    "directCallNoPatients": "உங்கள் மருத்துவமனைக்கு இன்னும் சரிபார்க்கப்பட்ட நோயாளர் கணக்குகள் ஒதுக்கப்படவில்லை.",
+    "directCallCalling": "அழைக்கிறது...",
+    "directCallStart": "நோயாளியை அழைக்கவும்",
+    "directCallOutgoing": "வெளிச்செல்லும் அழைப்புகள்",
+    "directCallIncoming": "உள்வரும் அழைப்பு",
+    "directCallNoOutgoing": "செயலில் உள்ள வெளிச்செல்லும் அழைப்புகள் இல்லை.",
+    "directCallNoIncoming": "உள்வரும் அழைப்புகள் இல்லை.",
+    "directCallWaiting": "நோயாளி பதிலளிக்கக் காத்திருக்கிறது",
+    "directCallPatientReady": "நோயாளி தயாராக உள்ளார்",
+    "directCallConnected": "இணைக்கப்பட்டது",
+    "directCallOpen": "அழைப்பைத் திறக்கவும்",
+    "directCallAnswer": "வீடியோ அழைப்பிற்கு பதிலளிக்கவும்",
+    "directCallReject": "நிராகரிக்கவும்",
+    "directCallRejected": "அழைப்பு நிராகரிக்கப்பட்டது.",
+    "directCallSent": "அழைப்பு கோரிக்கை அனுப்பப்பட்டது. நோயாளி தனது டாஷ்போர்டில் பதிலளிக்கலாம்.",
+    "directCallSessionExpired": "உங்கள் அமர்வு காலாவதியானது. மீண்டும் உள்நுழையவும்.",
+    "directCallSignIn": "மீண்டும் உள்நுழையவும்",
+    "directCallDemoLogin": "நீங்கள் டெமோ முறையில் உள்ளீர்கள். நேரடி வீடியோ அழைப்புகளுக்கு சேவையகத்தால் சரிபார்க்கப்பட்ட மருத்துவர் அல்லது நோயாளி கணக்கில் உள்நுழையவும்."
   },
   "aadhaarMock": {
     "title": "மாதிரி - ஆதார் உருவகப்படுத்துதல் அடாப்டர்",
@@ -156,6 +181,22 @@
     "deviceRevokedWipe": "சாதன அமர்வு ரத்து செய்யப்பட்டது. நோயாளி தனியுரிமைக்காக உள்ளூர் பதிவுகள் அழிக்கப்பட்டன.",
     "queueLimitReached": "அதிகபட்ச வரிசை திறன் எட்டப்பட்டது (500 செயல்கள்). ஒத்திசைக்கவும்.",
     "photoLimitNotice": "புகைப்பட அளவு வரம்பு 5 எம்பி வரை மட்டுமே அனுமதிக்கப்படுகிறது."
+  },
+  "patientOcr": {
+    "title": "Identity Card OCR",
+    "privacyNote": "OCR runs in this browser. Card images and full ID numbers are not uploaded. DEMO / MOCK only; this does not verify Aadhaar or ABHA.",
+    "aadhaarCard": "Aadhaar Card (MOCK)",
+    "abhaCard": "ABHA Health Card (MOCK)",
+    "frontImage": "Front Side Image",
+    "backImage": "Back Side Image",
+    "scanning": "Scanning on this device...",
+    "extractButton": "Extract Details on Device",
+    "maskedAadhaar": "Masked Aadhaar",
+    "maskedAbha": "Masked ABHA",
+    "consentRequired": "Obtain informed consent before scanning an identity card.",
+    "selectImage": "Select at least one card image first.",
+    "noFields": "No readable identity details were found. Try a clearer image or enter details manually.",
+    "reviewExtracted": "Details were read on this device. Review and correct every field before registering. OCR is not identity verification.",
+    "ocrFailed": "On-device OCR could not read this image. Try a clearer image or enter details manually."
   }
 }
-

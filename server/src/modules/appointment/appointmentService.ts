@@ -1,3 +1,5 @@
+import { DoctorSlot } from '../consultation/doctorSlotModel.js';
+import { User as BookingDoctor } from '../auth/userModel.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import {
@@ -8,7 +10,13 @@ import {
 } from './appointmentModel.js';
 import { NotificationQueue } from '../notification/notificationQueue.js';
 import { AuditLog } from '../audit/auditModel.js';
+import { User } from '../auth/userModel.js';
 import { logger } from '../../config/logger.js';
+
+async function notifyAppointmentPatient(appointment: IAppointmentDocument, title: string, body: string) {
+  const patient: any = await User.findOne({ role: 'patient', $or: [{ patientId: appointment.patientId }, { userId: appointment.patientId }] }).select('userId').lean();
+  await NotificationQueue.enqueue({ recipientId: patient?.userId || appointment.patientId, recipientRole: 'patient', customTitle: title, customBody: body, category: 'referral', priority: 'normal', channels: ['in_app'], metadata: { appointmentId: appointment.appointmentId, status: appointment.status } });
+}
 
 export const WORKING_HOURS = {
   startHour: 9,
@@ -114,6 +122,24 @@ export class AppointmentService {
       err.statusCode = 400;
       throw err;
     }
+
+    // OPD bookings use fixed 20-minute slots. Keeping these on the published
+    // grid lets MongoDB's unique facility/start/end index act as the atomic
+    // conflict guard when the database is a standalone server without transactions.
+    const slotDurationMs = WORKING_HOURS.slotDurationMinutes * 60_000;
+    const minutesFromOpening =
+      slotStartTime.getHours() * 60 + slotStartTime.getMinutes() -
+      (WORKING_HOURS.startHour * 60 + WORKING_HOURS.startMinute);
+    if (
+      slotEndTime.getTime() - slotStartTime.getTime() !== slotDurationMs ||
+      minutesFromOpening < 0 ||
+      minutesFromOpening % WORKING_HOURS.slotDurationMinutes !== 0
+    ) {
+      const err: any = new Error('Appointment must use an available 20-minute OPD slot');
+      err.code = 'INVALID_APPOINTMENT_SLOT';
+      err.statusCode = 400;
+      throw err;
+    }
   }
 
   /**
@@ -196,7 +222,7 @@ export class AppointmentService {
    * Requests an appointment idempotently, verifying slot conflicts within an ACID transaction
    */
   static async requestAppointment(
-    data: CreateAppointmentDTO,
+    data: CreateAppointmentDTO & any,
     requester: { userId: string; role: string; name?: string }
   ): Promise<{
     appointment: IAppointmentDocument;
@@ -210,7 +236,12 @@ export class AppointmentService {
       : new Date(slotStart.getTime() + durationMinutes * 60000);
 
     // 1. Slot validation
-    this.validateSlot(slotStart, slotEnd);
+    if (data.assignedDoctorId) {
+      const doctor = await BookingDoctor.findOne({ userId: data.assignedDoctorId, hospitalId: data.destinationHospitalId, status: 'active', verificationStatus: { $in: ['verified', 'VERIFIED'] }, role: { $in: ['medical_officer', 'specialist_doctor'] } });
+      const published = await DoctorSlot.findOne({ doctorId: data.assignedDoctorId, hospitalId: data.destinationHospitalId, startTime: slotStart, endTime: slotEnd });
+      if (!doctor || !published || slotStart.getTime() <= Date.now()) throw Object.assign(new Error('Choose a future slot published by an approved doctor.'), { statusCode: 400, code: 'DOCTOR_SLOT_UNAVAILABLE' });
+      data.assignedDoctorName = doctor.fullName;
+    } else this.validateSlot(slotStart, slotEnd);
 
     // 2. Check for idempotent replay if idempotencyKey is supplied
     if (data.idempotencyKey) {
@@ -227,17 +258,30 @@ export class AppointmentService {
       }
     }
 
-    // 3. Slot conflict verification inside a MongoDB session transaction
+    // 3. Use transactions on replica sets/sharded MongoDB. Standalone MongoDB
+    // does not support them, so use the atomic appointment indexes instead.
+    // The fixed slot validation above ensures same-slot requests collide on
+    // the unique active-slot index even when two requests arrive together.
     let session: mongoose.ClientSession | null = null;
     let inTransaction = false;
 
-    try {
-      session = await mongoose.startSession();
-      session.startTransaction();
-      inTransaction = true;
-    } catch (_) {
-      session = null;
-      inTransaction = false;
+    const topologyType = (mongoose.connection as any).client?.topology?.description?.type;
+    const supportsTransactions =
+      typeof topologyType === 'string' &&
+      (topologyType.startsWith('ReplicaSet') || topologyType === 'Sharded' || topologyType === 'LoadBalanced');
+    if (supportsTransactions) {
+      try {
+        session = await mongoose.startSession();
+        session.startTransaction();
+        inTransaction = true;
+      } catch (sessionError: any) {
+        if (session) await session.endSession().catch(() => undefined);
+        session = null;
+        logger.warn(
+          { error: sessionError?.message, topologyType },
+          'MongoDB transaction unavailable; using atomic single-document appointment booking'
+        );
+      }
     }
 
     try {
@@ -263,9 +307,20 @@ export class AppointmentService {
       }
 
       const appointmentId = `apt_${crypto.randomBytes(6).toString('hex')}`;
+      const count = await Appointment.countDocuments();
+      const appointmentCode = data.appointmentCode || `APT-${String(count + 1).padStart(4, '0')}`;
 
       const appointmentRecord = new Appointment({
         appointmentId,
+        appointmentCode,
+        consultationMode: data.consultationMode,
+        screeningId: data.screeningId,
+        riskLevel: data.riskLevel,
+        conditionCategory: data.conditionCategory,
+        suggestedDoctorType: data.suggestedDoctorType,
+        preferredDoctorId: data.preferredDoctorId,
+        hospitalId: data.hospitalId || (data.consultationMode === 'offline' ? data.destinationHospitalId : undefined),
+        scheduledAt: slotStart,
         patientId: data.patientId,
         patientName: data.patientName,
         destinationHospitalId: data.destinationHospitalId,
@@ -279,17 +334,20 @@ export class AppointmentService {
         status: 'requested',
         type: data.type || 'clinical_consultation',
         reason: data.reason,
+        patientNote: data.patientNote,
         requestedBy: {
           userId: requester.userId,
           role: requester.role,
           name: requester.name || requester.userId,
         },
         reschedulingHistory: [],
+        statusHistory: [{ status: 'requested', changedBy: requester.userId, time: new Date(), note: 'Appointment requested' }],
         idempotencyKey: data.idempotencyKey,
         clientRequestId: data.clientRequestId || data.idempotencyKey,
         offlineQueued: Boolean(data.offlineQueued),
         notes: data.notes,
-      });
+        visitDetails: data.visitDetails,
+      } as any);
 
       if (session) {
         await appointmentRecord.save({ session });
@@ -324,7 +382,7 @@ export class AppointmentService {
       let notificationRecord: any = null;
       try {
         notificationRecord = await NotificationQueue.enqueue({
-          recipientId: data.patientId,
+          recipientId: data.patientUserId || data.patientId,
           recipientRole: 'patient',
           customTitle: 'Consultation Appointment Requested',
           customBody: `A consultation appointment has been requested at ${data.destinationHospitalName || data.destinationHospitalId} for ${slotStart.toLocaleString()}. Confirmation pending review by hospital staff.`,
@@ -337,6 +395,18 @@ export class AppointmentService {
             slotStartTime: slotStart.toISOString(),
           },
         });
+        if (requester.role === 'patient' && data.assignedDoctorId) {
+          await NotificationQueue.enqueue({
+            recipientId: data.assignedDoctorId,
+            recipientRole: 'medical_officer',
+            customTitle: 'New appointment request',
+            customBody: `A patient requested an appointment for ${slotStart.toLocaleString()}. Review the request in your doctor portal.`,
+            category: 'referral',
+            priority: 'normal',
+            channels: ['in_app'],
+            metadata: { appointmentId, destinationHospitalId: data.destinationHospitalId, slotStartTime: slotStart.toISOString() },
+          });
+        }
       } catch (notifErr: any) {
         logger.warn(
           { error: notifErr.message, appointmentId },
@@ -409,7 +479,7 @@ export class AppointmentService {
     }
 
     // Role check: Only admin or medical_officer
-    if (actor.role !== 'admin' && actor.role !== 'medical_officer' && actor.role !== 'system_admin') {
+    if (actor.role !== 'admin' && actor.role !== 'medical_officer' && actor.role !== 'specialist_doctor' && actor.role !== 'system_admin') {
       const err: any = new Error(
         'Confirmation permitted by Hospital Manager or Medical Officer only'
       );
@@ -453,6 +523,8 @@ export class AppointmentService {
       name: actor.name || actor.userId,
       confirmedAt: new Date(),
     };
+    (appointment as any).statusHistory = (appointment as any).statusHistory || [];
+    (appointment as any).statusHistory.push({ status: 'confirmed', changedBy: actor.userId, time: new Date(), note: 'Appointment confirmed' });
 
     await appointment.save();
 
@@ -477,7 +549,7 @@ export class AppointmentService {
     let notificationRecord: any = null;
     try {
       notificationRecord = await NotificationQueue.enqueue({
-        recipientId: appointment.patientId,
+            recipientId: (await User.findOne({ role: 'patient', $or: [{ patientId: appointment.patientId }, { userId: appointment.patientId }] }).select('userId').lean() as any)?.userId || appointment.patientId,
         recipientRole: 'patient',
         customTitle: 'Appointment Confirmed',
         customBody: `Your consultation appointment at ${appointment.destinationHospitalName || appointment.destinationHospitalId} is confirmed for ${appointment.slotStartTime.toLocaleString()}.`,
@@ -544,7 +616,10 @@ export class AppointmentService {
       : new Date(newStart.getTime() + appointment.durationMinutes * 60000);
 
     // Validate new slot
-    this.validateSlot(newStart, newEnd);
+    if (appointment.assignedDoctorId) {
+      const published = await DoctorSlot.exists({ doctorId: appointment.assignedDoctorId, hospitalId: appointment.destinationHospitalId, startTime: newStart, endTime: newEnd });
+      if (!published || newStart.getTime() <= Date.now()) throw Object.assign(new Error('Choose a future slot published by the assigned doctor.'), { code: 'DOCTOR_SLOT_UNAVAILABLE', statusCode: 400 });
+    } else this.validateSlot(newStart, newEnd);
 
     // Check slot conflict
     const conflict = await Appointment.findOne({
@@ -576,7 +651,12 @@ export class AppointmentService {
 
     appointment.slotStartTime = newStart;
     appointment.slotEndTime = newEnd;
+    (appointment as any).scheduledAt = newStart;
     appointment.status = 'rescheduled';
+    if ((appointment as any).proposedReschedule) (appointment as any).proposedReschedule.status = 'accepted';
+    (appointment as any).statusHistory = (appointment as any).statusHistory || [];
+    (appointment as any).statusHistory.push({ status: 'rescheduled', changedBy: actor.userId, time: new Date(), note: reason || 'Rescheduled' });
+    if (appointment.videoInvite) appointment.videoInvite.revokedAt = new Date();
 
     await appointment.save();
 
@@ -660,11 +740,14 @@ export class AppointmentService {
     }
 
     appointment.status = 'cancelled';
+    if (appointment.videoInvite) appointment.videoInvite.revokedAt = new Date();
     appointment.cancellation = {
       cancelledBy: actor.userId,
       reason: reason || 'Patient or facility request',
       cancelledAt: new Date(),
     };
+    (appointment as any).statusHistory = (appointment as any).statusHistory || [];
+    (appointment as any).statusHistory.push({ status: 'cancelled', changedBy: actor.userId, time: new Date(), note: reason || 'Cancelled' });
 
     await appointment.save();
 
@@ -735,6 +818,11 @@ export class AppointmentService {
       throw err;
     }
 
+    if (!['admin', 'system_admin', 'medical_officer', 'specialist_doctor'].includes(actor.role) || (actor.role !== 'system_admin' && actor.hospitalId !== appointment.destinationHospitalId) || (['medical_officer', 'specialist_doctor'].includes(actor.role) && appointment.assignedDoctorId !== actor.userId)) {
+      const err: any = new Error('Only authorized staff at the assigned facility can check in this appointment');
+      err.code = 'APPOINTMENT_ACCESS_DENIED'; err.statusCode = 403; throw err;
+    }
+
     if (appointment.status !== 'confirmed') {
       const err: any = new Error(
         `Cannot check in appointment with status ${appointment.status}; appointment must be confirmed first`
@@ -745,7 +833,11 @@ export class AppointmentService {
     }
 
     appointment.status = 'checked_in';
+    (appointment as any).statusHistory = (appointment as any).statusHistory || [];
+    (appointment as any).statusHistory.push({ status: 'checked_in', changedBy: actor.userId, time: new Date(), note: 'Checked in' });
     await appointment.save();
+
+    await notifyAppointmentPatient(appointment, 'Appointment check-in', 'Your appointment has been marked as checked in.');
 
     return appointment;
   }
@@ -765,6 +857,11 @@ export class AppointmentService {
       throw err;
     }
 
+    if (!['admin', 'system_admin', 'medical_officer', 'specialist_doctor'].includes(actor.role) || (actor.role !== 'system_admin' && actor.hospitalId !== appointment.destinationHospitalId) || (['medical_officer', 'specialist_doctor'].includes(actor.role) && appointment.assignedDoctorId !== actor.userId)) {
+      const err: any = new Error('Only the assigned doctor or authorized facility staff can complete this appointment');
+      err.code = 'APPOINTMENT_ACCESS_DENIED'; err.statusCode = 403; throw err;
+    }
+
     if (appointment.status !== 'checked_in' && appointment.status !== 'confirmed') {
       const err: any = new Error(
         `Cannot complete appointment with status ${appointment.status}`
@@ -775,7 +872,11 @@ export class AppointmentService {
     }
 
     appointment.status = 'completed';
+    (appointment as any).statusHistory = (appointment as any).statusHistory || [];
+    (appointment as any).statusHistory.push({ status: 'completed', changedBy: actor.userId, time: new Date(), note: 'Consultation completed' });
     await appointment.save();
+
+    await notifyAppointmentPatient(appointment, 'Appointment completed', 'Your appointment is marked complete. Your doctor can share any follow-up instructions in your records.');
 
     await AuditLog.create({
       action: 'appointment.completed',
@@ -801,6 +902,7 @@ export class AppointmentService {
   static async listAppointments(filters: {
     hospitalId?: string;
     patientId?: string;
+    doctorId?: string;
     status?: AppointmentStatus;
     startDate?: string | Date;
     endDate?: string | Date;
@@ -808,6 +910,7 @@ export class AppointmentService {
     const query: any = {};
     if (filters.hospitalId) query.destinationHospitalId = filters.hospitalId;
     if (filters.patientId) query.patientId = filters.patientId;
+    if (filters.doctorId) query.assignedDoctorId = filters.doctorId;
     if (filters.status) query.status = filters.status;
     if (filters.startDate || filters.endDate) {
       query.slotStartTime = {};

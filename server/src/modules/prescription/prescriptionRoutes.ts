@@ -1,3 +1,6 @@
+import crypto from 'node:crypto';
+import { User } from '../auth/userModel.js';
+import { Hospital } from '../hospital/hospitalModel.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
@@ -19,6 +22,7 @@ const MedicineItemSchema = z.object({
 });
 
 const CreatePrescriptionSchema = z.object({
+  mutationId: z.string().uuid().optional(),
   patientId: z.string().min(1, 'Patient ID required'),
   patientName: z.string().min(1, 'Patient name required'),
   patientPhone: z.string().optional(),
@@ -32,6 +36,16 @@ const CreatePrescriptionSchema = z.object({
   consultationId: z.string().optional(),
   screeningCaseId: z.string().optional(),
 });
+
+async function canReadPrescription(user: any, patientId: string, hospitalId?: string) {
+  const account: any = await User.findOne({ userId: user.id || user.userId }).lean();
+  if (!account) return false;
+  if (account.role === 'patient') return account.patientId === patientId;
+  if (account.role === 'system_admin') return true;
+  if (!['medical_officer', 'specialist_doctor'].includes(account.role) || !account.hospitalId) return false;
+  const patient: any = await Patient.findOne({ patientId, hospitalId: account.hospitalId }).lean();
+  return Boolean(patient && (!hospitalId || hospitalId === account.hospitalId));
+}
 
 // 1. POST /api/v1/prescriptions (Clinicians only)
 router.post(
@@ -54,18 +68,27 @@ router.post(
       }
 
       const body = req.body;
-      const prescriptionId = `RX-PAD-${Date.now().toString().slice(-6)}-${Math.floor(10 + Math.random() * 90)}`;
+      const doctor: any = await User.findOne({ userId: user.id || user.userId }).lean();
+      const patient: any = await Patient.findOne({ patientId: body.patientId }).lean();
+      if (!doctor || !patient || !['medical_officer', 'specialist_doctor'].includes(doctor.role) || !['verified', 'VERIFIED'].includes(doctor.verificationStatus) || doctor.hospitalId !== patient.hospitalId) {
+        res.envelopeError('ACCESS_DENIED', 'An approved treating doctor in the patient facility is required.', undefined, 403); return;
+      }
+      if (body.mutationId) { const existing = await Prescription.findOne({ mutationId: body.mutationId, doctorId: doctor.userId, patientId: patient.patientId }); if (existing) { res.envelope({ prescription: existing }); return; } }
+      const hospital: any = await Hospital.findOne({ hospitalId: doctor.hospitalId }).lean();
+      const prescriptionId = `RX-${crypto.randomUUID()}`;
 
       const prescription = await Prescription.create({
         prescriptionId,
+        mutationId: body.mutationId,
+        sha256: crypto.createHash('sha256').update(JSON.stringify({ ...body, doctorId: doctor.userId, patientId: patient.patientId })).digest('hex'),
         patientId: body.patientId,
-        patientName: body.patientName,
+        patientName: patient.fullName,
         patientPhone: body.patientPhone,
-        doctorId: user.id || user.userId || 'DR-PAD-01',
-        doctorName: user.fullName || user.username || 'Medical Officer (CHC Paderu)',
+        doctorId: doctor.userId,
+        doctorName: doctor.fullName,
         doctorSpecialty: 'Dental Surgeon / Medical Officer',
-        hospitalId: user.hospitalId || 'HOSP-PAD-01',
-        hospitalName: 'Community Health Centre (CHC) Paderu',
+        hospitalId: doctor.hospitalId,
+        hospitalName: hospital?.name || doctor.hospitalId,
         consultationId: body.consultationId,
         screeningCaseId: body.screeningCaseId,
         clinicalObservations: body.clinicalObservations,
@@ -108,7 +131,7 @@ router.get(
       }
 
       // Patient scoping: patient can only view their own prescription
-      if (req.user!.role === 'patient' && req.user!.patientId && prescription.patientId !== req.user!.patientId) {
+      if (!(await canReadPrescription(req.user!, prescription.patientId, prescription.hospitalId))) {
         res.envelopeError('ACCESS_DENIED', 'You can only view your own prescriptions', undefined, 403);
         return;
       }
@@ -129,12 +152,12 @@ router.get(
       const patientId = req.params.patientId;
 
       // Scoping
-      if (req.user!.role === 'patient' && req.user!.patientId && patientId !== req.user!.patientId) {
+      if (!(await canReadPrescription(req.user!, String(patientId)))) {
         res.envelopeError('ACCESS_DENIED', 'You can only view your own prescriptions', undefined, 403);
         return;
       }
 
-      const prescriptions = await Prescription.find({ patientId }).sort({ createdAt: -1 }).lean();
+      const prescriptions = await Prescription.find({ patientId, ...(req.user!.role === 'patient' || req.user!.role === 'system_admin' ? {} : { hospitalId: req.user!.hospitalId }) }).sort({ createdAt: -1 }).lean();
 
       res.envelope({
         prescriptions,

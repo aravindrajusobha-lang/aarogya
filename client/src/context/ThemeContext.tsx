@@ -28,7 +28,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const saved = localStorage.getItem('aarogya_theme_choice') || localStorage.getItem('aarogya_theme');
       if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
     } catch {}
-    return 'system'; // Default to System using prefers-color-scheme
+    return 'light'; // Warm ivory is the first-visit default; saved choices remain respected.
   });
 
   const [systemTheme, setSystemTheme] = useState<ThemeMode>(getSystemTheme);

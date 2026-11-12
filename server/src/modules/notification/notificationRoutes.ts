@@ -9,6 +9,7 @@ import { Notification } from './notificationModel.js';
 import { NotificationPreferences } from './notificationPreferencesModel.js';
 import { NotificationQueue } from './notificationQueue.js';
 import { NOTIFICATION_TEMPLATES } from './templates.js';
+import { SyncLedger } from '../patient/syncLedgerModel.js';
 
 const router = Router();
 
@@ -29,6 +30,7 @@ const EnqueueNotificationSchema = z.object({
 });
 
 const UpdatePreferencesSchema = z.object({
+  mutationId: z.string().uuid().optional(),
   channels: z
     .object({
       inApp: z.boolean().optional(),
@@ -252,40 +254,39 @@ router.put(
   validate({ body: UpdatePreferencesSchema }),
   auditTag('NOTIFICATION_PREFERENCES_UPDATE', 'notification_preferences'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const session = await mongoose.startSession();
     try {
       const userId = req.user!.id;
       const data = req.body;
-
-      let prefs = await NotificationPreferences.findOne({ userId });
-      if (!prefs) {
-        prefs = new NotificationPreferences({ userId });
-      }
-
-      if (data.channels) {
-        prefs.channels = { ...prefs.channels, ...data.channels };
-      }
-      if (data.categories) {
-        prefs.categories = { ...prefs.categories, ...data.categories };
-      }
-      if (data.preferredLanguage) {
-        prefs.preferredLanguage = data.preferredLanguage;
-      }
-      if (data.phone !== undefined) {
-        prefs.phone = data.phone;
-      }
-      if (data.email !== undefined) {
-        prefs.email = data.email;
-      }
-
-      await prefs.save();
-
-      res.status(200).envelope({
-        preferences: prefs,
-        message: 'Notification preferences updated successfully',
+      let responsePayload: Record<string, unknown> = {};
+      await session.withTransaction(async () => {
+        if (data.mutationId) {
+          const replay: any = await SyncLedger.findOne({ clientMutationId: data.mutationId, entityType: 'notification-preferences', entityId: userId }).session(session).lean();
+          if (replay) { responsePayload = { ...(replay.responsePayload as Record<string, unknown>), idempotentReplay: true }; return; }
+        }
+        let prefs = await NotificationPreferences.findOne({ userId }).session(session);
+        if (!prefs) prefs = new NotificationPreferences({ userId });
+        if (data.channels) prefs.channels = { ...prefs.channels, ...data.channels };
+        if (data.categories) prefs.categories = { ...prefs.categories, ...data.categories };
+        if (data.preferredLanguage) prefs.preferredLanguage = data.preferredLanguage;
+        if (data.phone !== undefined) prefs.phone = data.phone;
+        if (data.email !== undefined) prefs.email = data.email;
+        await prefs.save({ session });
+        responsePayload = { preferences: prefs.toObject(), message: 'Notification preferences updated successfully', idempotentReplay: false };
+        if (data.mutationId) {
+          await SyncLedger.create([{
+            clientMutationId: data.mutationId,
+            entityType: 'notification-preferences',
+            entityId: userId,
+            responsePayload,
+            simulation: true,
+          }], { session });
+        }
       });
+      res.status(200).envelope(responsePayload);
     } catch (err) {
       next(err);
-    }
+    } finally { await session.endSession(); }
   }
 );
 
