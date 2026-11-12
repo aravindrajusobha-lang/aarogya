@@ -1445,3 +1445,67 @@
   }
 }
 
+/* Structured layout for the appointment WebRTC room. */
+.live-appointment-room { display: block; overflow: auto; padding: clamp(16px, 2.5vw, 34px); background: #eef3f2; color: #18302e; }
+.live-room-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1560px; margin: 0 auto 20px; padding: 2px 0 16px; border-bottom: 1px solid #d9e2df; }
+.live-room-heading { min-width: 0; }
+.live-room-eyebrow { color: #52736a; font-size: .68rem; font-weight: 850; letter-spacing: .11em; }
+.live-appointment-room .live-room-heading h1 { margin: 5px 0; color: #18302e; font-size: clamp(1.35rem, 2.7vw, 2rem); letter-spacing: -.035em; }
+.live-appointment-room .live-room-heading p { margin: 0; color: #61736e; font-size: .82rem; }
+.live-room-heading p strong { color: #314c44; }
+.live-room-status { display: flex; align-items: center; gap: 9px; max-width: min(42vw, 420px); padding: 10px 14px; border: 1px solid #ead8b6; border-radius: 999px; background: #fff9ed; color: #83591b; font-size: .77rem; font-weight: 700; }
+.live-room-status.connected { border-color: #b7ddc8; background: #edf9f1; color: #23633d; }
+.live-room-status-dot { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.live-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 380px); align-items: start; gap: 18px; max-width: 1560px; margin: 0 auto; }
+.live-room-stage { position: relative; min-width: 0; aspect-ratio: 16 / 10; min-height: 360px; overflow: hidden; border: 1px solid #29464b; border-radius: 20px; background: radial-gradient(ellipse at 50% 25%, #29474b 0, #193438 44%, #102528 100%); box-shadow: 0 16px 40px rgba(20, 48, 46, .16); }
+.live-room-stage .live-remote-video { position: absolute; inset: 0; min-height: 0; }
+.live-room-stage .live-remote-video video { display: block; width: 100%; height: 100%; max-height: none; object-fit: contain; }
+.live-video-waiting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 24px; color: #e5f0ed; text-align: center; background: linear-gradient(180deg, rgba(13,35,38,.14), rgba(13,35,38,.58)); }
+.live-video-waiting strong { font-size: clamp(1rem, 2vw, 1.3rem); }
+.live-video-waiting > span:last-child { color: #bdcfcb; font-size: .81rem; }
+.live-video-avatar { display: grid; place-items: center; width: 74px; height: 74px; border: 1px solid rgba(255,255,255,.28); border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-weight: 850; }
+.live-video-label, .live-local-video > span { position: absolute; left: 12px; bottom: 10px; z-index: 1; padding: 5px 9px; border-radius: 7px; background: rgba(8,25,27,.72); color: white; font-size: .7rem; font-weight: 750; }
+.live-room-stage .live-local-video { right: 18px; bottom: 18px; width: clamp(130px, 23%, 250px); height: auto; aspect-ratio: 16 / 10; border: 2px solid rgba(255,255,255,.85); border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.live-room-stage .live-local-video > span { left: 7px; bottom: 7px; }
+.live-room-sidebar { display: grid; gap: 14px; min-width: 0; max-height: calc(100vh - 140px); overflow: auto; padding-right: 3px; }
+.live-room-card { min-width: 0; padding: 17px; border: 1px solid #dce5e1; border-radius: 16px; background: #fff; box-shadow: 0 5px 18px rgba(26, 55, 48, .055); }
+.live-room-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.live-room-card-heading > div > span { color: #70847c; font-size: .62rem; font-weight: 850; letter-spacing: .1em; }
+.live-room-card-heading h2 { margin: 4px 0 0; color: #203b36; font-size: 1rem; }
+.live-room-badge { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: #f3f2ed; color: #766b55; font-size: .65rem; font-weight: 800; }
+.live-room-badge.is-live { background: #e8f7ed; color: #257047; }
+.live-room-call-card > p { margin: 12px 0; color: #63756f; font-size: .79rem; line-height: 1.5; }
+.live-appointment-room .live-appointment-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; gap: 8px; }
+.live-appointment-room .live-appointment-controls button, .live-room-chat form button, .live-room-chat > button, .live-room-clinical-notes > button { min-height: 42px; padding: 0 12px; border: 1px solid #d7e1dd; border-radius: 10px; background: #f8faf9; color: #29443d; font: inherit; font-size: .75rem; font-weight: 750; cursor: pointer; }
+.live-appointment-room .live-appointment-controls .live-control-primary { grid-column: 1 / -1; min-height: 46px; border-color: #176c58; background: #176c58; color: #fff; }
+.live-appointment-room .live-appointment-controls .live-control-danger { border-color: #b74545; background: #b74545; color: #fff; }
+.live-appointment-room .live-appointment-controls .live-control-quiet { background: #fff; }
+.live-appointment-room .live-appointment-controls button:hover, .live-room-chat form button:hover, .live-room-chat > button:hover, .live-room-clinical-notes > button:hover { filter: brightness(.97); }
+.live-room-chat-log { display: flex; flex-direction: column; gap: 9px; min-height: 90px; max-height: 260px; overflow: auto; margin: 12px 0; padding: 10px; border: 1px solid #e5ece9; border-radius: 11px; background: #f8faf9; }
+.live-room-chat-log p { display: grid; gap: 3px; margin: 0; color: #40564f; font-size: .76rem; line-height: 1.45; overflow-wrap: anywhere; }
+.live-room-chat-log p strong { color: #236452; font-size: .67rem; }
+.live-room-chat-log .live-room-empty { align-self: center; margin: auto; color: #84938e; text-align: center; }
+.live-room-chat form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.live-room-chat form input { min-width: 0; min-height: 42px; padding: 0 11px; border: 1px solid #d7e1dd; border-radius: 10px; color: #203b36; background: #fff; font: inherit; font-size: .77rem; }
+.live-room-chat form button:disabled { opacity: .5; cursor: not-allowed; }
+.live-room-chat > .live-room-prescribe { width: 100%; margin-top: 9px; }
+.live-room-clinical-notes label { display: grid; gap: 6px; margin-top: 12px; color: #52675f; font-size: .73rem; font-weight: 750; }
+.live-room-clinical-notes textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #d7e1dd; border-radius: 10px; color: #203b36; background: #fbfcfb; font: inherit; font-size: .79rem; resize: vertical; }
+.live-room-clinical-notes > button { width: 100%; margin-top: 12px; border-color: #176c58; background: #176c58; color: #fff; }
+.live-room-clinical-notes > p { margin: 9px 0 0; color: #788982; font-size: .68rem; line-height: 1.45; }
+.live-appointment-room .live-appointment-error { max-width: 1560px; margin: 0 auto 14px; padding: 11px 14px; border: 1px solid #f0c7c7; border-radius: 10px; background: #fff3f2; color: #9c3535; font-size: .8rem; }
+@media (max-width: 920px) {
+  .live-room-layout { grid-template-columns: minmax(0, 1fr); }
+  .live-room-sidebar { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; }
+  .live-room-call-card { grid-column: 1 / -1; }
+}
+@media (max-width: 620px) {
+  .live-appointment-room { padding: 12px; }
+  .live-room-header { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+  .live-room-status { max-width: 100%; border-radius: 12px; }
+  .live-room-stage { aspect-ratio: 4 / 3; min-height: 280px; border-radius: 15px; }
+  .live-room-stage .live-local-video { right: 10px; bottom: 10px; width: 34%; border-radius: 10px; }
+  .live-room-sidebar { grid-template-columns: minmax(0, 1fr); }
+  .live-room-call-card { grid-column: auto; }
+}
+
