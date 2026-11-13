@@ -288,6 +288,8 @@ export class AppointmentService {
       // Query active appointments overlapping the slot for the destination hospital
       const query = {
         destinationHospitalId: data.destinationHospitalId,
+        // Conflicts are per doctor; OPD bookings without a doctor conflict facility-wide.
+        assignedDoctorId: data.assignedDoctorId ? data.assignedDoctorId : { $in: [null] },
         status: { $in: ['requested', 'confirmed', 'checked_in'] },
         slotStartTime: { $lt: slotEnd },
         slotEndTime: { $gt: slotStart },

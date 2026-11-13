@@ -14,6 +14,19 @@
 
 ## 1. Reconciliation Notes
 
+### Doctor care workflow (2026-11-13)
+
+| Requirement | Evidence | Status |
+| --- | --- | --- |
+| Exact-ID selection across facilities with active verified doctor authentication | `server/tests/patientCare.test.ts` | PASSED |
+| Your patients includes both online and offline appointments, and approved transfers | `server/tests/patientCare.test.ts` | PASSED |
+| Only current doctor approves; pending/rejected requests grant no treatment access | `server/tests/patientCare.test.ts` | PASSED |
+| Approved recipient can screen/prescribe across facilities; prior doctor loses that care access; patient consent remains required | `server/tests/patientCare.test.ts` | PASSED |
+| Idempotent retries, mutation ownership and competing request invalidation | `server/tests/patientCare.test.ts` | PASSED |
+| Doctor records screen has no prescription/download controls | Source regression in `server/tests/patientCare.test.ts`; browser interaction not yet tested | PASSED (source only) |
+| Existing modules and disaster recovery | `smokeTestAllModules.test.ts`, `backupAndRestore.test.ts` | PASSED |
+
+
 ### Reconciliation Note 1: 252 Deduplicated Endpoints
 The platform routing matrix defines **252 deduplicated route-method permutations** across the entire REST API surface. These endpoints cover the 6 platform actor roles (`system_admin`, `admin` / Hospital Manager, `medical_officer`, `specialist`, `anm` / `asha`, `patient`). Every route is governed by:
 1. Strict capability authorization guards (`authorizeCapability(...)`).
@@ -453,3 +466,15 @@ Doctor sidebar destinations now remain under `/doctor/:section` (queue, appointm
 - Additive `consultationchats` collection: messageId (unique), appointmentId, senderId, role, text (immutable), SHA-256 (immutable), timestamps. Socket chat uses authenticated appointment rooms, bounded messages and idempotent message IDs. History is returned only after room authorization. Doctor starts the room before patient joins.
 - Prescriptions add optional immutable SHA-256 and sparse unique mutationId fields. Existing documents remain valid. New prescriptions resolve doctor/patient/facility names server-side and require approved treating doctor access. UI starts with empty clinician-authored medicine fields.
 - Verification: consultationSocket tests cover doctor-first room access, signaling and saved chat replay; appointmentsManagement tests cover slot publication, publication authorization and replay; module smoke, backup/restore and secret-scanner checks. Real camera/audio testing across two devices and network TURN relay remains an operational acceptance check.
+- 2026-11-12 Doctor-controlled consultation sessions (start any time after confirmation; start/end time, duration, follow-up frequency) → `server/src/modules/consultation/consultationSessionRoutes.ts`, `consultationModel.ts`, `consultationSocket.ts`; UI `client/src/portal/doctor/*`; tests `server/tests/consultationSessions.test.ts`.
+- 2026-11-12 Patient-safe AI screening result (risk level, findings, reasons, per-image confidence, model card without fabricated accuracy; Invariant 1) → `server/src/modules/ai/patientScreeningSummary.ts`, `modelEvaluation.ts`, `aiRoutes.ts`; UI `client/src/portal/patient/ScreeningPage.tsx`; tests `server/tests/patientScreeningSummary.test.ts`.
+- 2026-11-12 Rebuilt responsive patient & doctor portals (green design system, en/te/hi `portal.*` keys, simulation banner retained) → `client/src/portal/*`, `client/src/App.tsx`.
+- 2026-11-12 Admin login fix (default username matched no account; real server errors now shown) → `client/src/pages/Login.tsx`.
+- 2026-11-12 Gemini resilience (retry + model fallback chain), per-phrase safety filtering, detailed patient result view and non-destructive re-analysis → `server/src/modules/assistant/geminiService.ts`, `server/src/modules/ai/aiRoutes.ts`, `patientScreeningSummary.ts`; UI `client/src/portal/patient/ScreeningPage.tsx`; tests `geminiPatientEducation.test.ts`, `screeningReanalysis.test.ts`, `patientScreeningSummary.test.ts`.
+- 2026-11-12 Admin portal (doctor onboarding with unique Doctor ID, credentials, verification; facility-scoped) → `server/src/modules/doctorAdmin/*`, `client/src/portal/admin/AdminPortal.tsx`; tests `server/tests/doctorAdministration.test.ts`. Demo-only admin sections (hard-coded camps, critical cases, mandal GIS link) removed from the admin route.
+- 2026-11-12 Availability windows with slot status, per-doctor booking conflicts, doctor patient-record lookup with access history, live-call captures + DEMO AI analysis, patient prescription PDF, private Cloudinary storage, referrals removed from doctor portal → `server/src/modules/consultation/{patientRecordsRoutes,consultationCaptureModel,doctorSlotModel}.ts`, `server/src/modules/storage/cloudinaryService.ts`, `client/src/portal/doctor/{AvailabilityPage,PatientRecordsPage}.tsx`, `client/src/portal/prescriptionPdf.ts`; tests `server/tests/doctorRecordsAndCaptures.test.ts`.
+- 2026-11-12 Simple landing page, staff login, patient OTP login (mobile/ABHA), patient registration (Aadhaar front/back live camera with in-browser OCR + Verhoeff, ABHA, mobile OTP) → `server/src/modules/patient/patientEasyAuthRoutes.ts`, `client/src/portal/public/*`; tests `server/tests/patientEasyAuth.test.ts`.
+- 2026-11-13 Facility management (facility admins with credentials, beds/wards, medicine stock register with audit trail, equipment, facility doctors) → `server/src/modules/facility/*`, `client/src/portal/admin/FacilityDetailPage.tsx`; tests `server/tests/facilityOps.test.ts`. Standalone-MongoDB transaction fallback → `server/src/utils/transaction.ts`.
+# Patient records requirement update — 2026-11-13
+
+Owner-requested exact patient-ID lookup across facilities: implemented in `patientRecordsRoutes.ts` and `PatientRecordsPage.tsx`, with English/Telugu/Hindi labels. Requires an active verified doctor and audits reads; file requests must match the patient. Existing write scope is retained. Regression coverage: `server/tests/doctorRecordsAndCaptures.test.ts` (cross-facility reads, audit history, unknown ID, authentication, verification and file/patient matching).

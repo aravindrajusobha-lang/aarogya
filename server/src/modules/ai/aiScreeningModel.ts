@@ -115,6 +115,7 @@ export interface IAiScreening extends Document {
   syncStatus: 'SYNCED' | 'PENDING_SYNC';
   clientId: string; // UUID for deduplication
   geminiAnalysis?: any;
+  reanalysisOf?: string; // screeningId this record re-analysed (original kept unchanged)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -292,6 +293,7 @@ const AiScreeningSchema = new Schema<IAiScreening>(
     geminiAnalysis: {
       type: Schema.Types.Mixed,
     },
+    reanalysisOf: { type: String, index: true },
     syncStatus: {
       type: String,
       enum: ['SYNCED', 'PENDING_SYNC'],

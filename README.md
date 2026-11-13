@@ -143,6 +143,9 @@ npm test
 
 | Document | Purpose |
 |---|---|
+| [docs/PROJECT_REPORT.docx](docs/PROJECT_REPORT.docx) | Editable Word version of the approximately 30-page formal project report. |
+| [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md) | Approximately 30-page formal project report: problem statement, solution, features, architecture, models, technology, safeguards, and limitations. |
+| [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) | Separate practical guide: local manual setup without Docker, workflows, model locations, Render configuration, and troubleshooting. |
 | [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) | Step-by-step setup guide for clean Docker & bare-metal deployment. |
 | [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) | Exhaustive REST API specification covering all 252 deduplicated endpoints. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed technical architecture, component topologies, and security boundaries. |

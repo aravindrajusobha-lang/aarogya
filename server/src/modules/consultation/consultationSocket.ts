@@ -1,4 +1,5 @@
 import { ConsultationChat } from './consultationChatModel.js';
+import { assertCareAssignment } from './patientCareService.js';
 import type { Server as HttpServer } from 'node:http';
 import crypto from 'node:crypto';
 import { Server, Socket } from 'socket.io';
@@ -54,11 +55,20 @@ async function authorizeAppointment(participant: Participant, appointmentId: str
   } else if (!doctorRoles.has(participant.role) || participant.hospitalId !== appointment.destinationHospitalId || appointment.assignedDoctorId !== participant.userId) {
     throw new Error('Only the doctor assigned to this appointment can enter the room.');
   }
-  const now = Date.now();
-  const opensAt = new Date(appointment.slotStartTime).getTime() - 15 * 60_000;
-  const closesAt = new Date(appointment.slotEndTime).getTime() + 60 * 60_000;
-  if (now < opensAt) throw new Error('The consultation room opens 15 minutes before the appointment.');
-  if (now > closesAt) throw new Error('The consultation room time window has ended.');
+  // The assigned doctor may open the room whenever needed once the appointment is confirmed.
+  if (doctorRoles.has(participant.role)) await assertCareAssignment(participant.userId, appointment.patientId);
+  // A patient may join any time the doctor has an active (started, not ended) session.
+  if (participant.role === 'patient') {
+    const session: any = await Consultation.findOne({ appointmentId }).select('startedAt status').lean();
+    const sessionActive = Boolean(session?.startedAt) && !['COMPLETED', 'MISSED', 'CANCELLED'].includes(session?.status);
+    if (!sessionActive) {
+      const now = Date.now();
+      const opensAt = new Date(appointment.slotStartTime).getTime() - 15 * 60_000;
+      const closesAt = new Date(appointment.slotEndTime).getTime() + 60 * 60_000;
+      if (now < opensAt) throw new Error('The doctor has not started this consultation yet. You will be notified when the room opens.');
+      if (now > closesAt) throw new Error('The consultation room time window has ended.');
+    }
+  }
   return appointment;
 }
 
@@ -111,10 +121,11 @@ export function attachConsultationSocket(httpServer: HttpServer, allowedOrigins:
             status: 'WAITING',
             tokenHash: crypto.randomBytes(32).toString('hex'),
             linkSentAt: new Date(),
-            expiresAt: new Date(new Date(appointment.slotEndTime).getTime() + 60 * 60_000),
+            consultationMode: 'online',
+            expiresAt: new Date(Math.max(Date.now(), new Date(appointment.slotEndTime).getTime()) + 12 * 60 * 60_000),
           });
         }
-        if (doctorRoles.has(participant.role) && !consultation.startedAt) { consultation.startedAt = new Date(); await consultation.save(); }
+        if (doctorRoles.has(participant.role) && !consultation.startedAt) { consultation.startedAt = new Date(); consultation.startedBy = participant.userId; await consultation.save(); }
         if (participant.role === 'patient' && !consultation.patientWaitingAt) {
           consultation.patientWaitingAt = new Date();
           await consultation.save();
@@ -134,7 +145,7 @@ export function attachConsultationSocket(httpServer: HttpServer, allowedOrigins:
         socket.data.appointmentId = appointmentId;
         await socket.join(roomId);
         await AuditLog.create({ action: 'consultation.webrtc.joined', resourceType: 'appointment', resourceId: appointmentId, actorId: participant.userId, actorRole: participant.role, ip: socket.handshake.address || '127.0.0.1', statusCode: 200, metadata: { consultationMode: appointment.consultationMode }, simulation: true });
-        socket.emit('consultation:joined', { appointmentId, patientId: appointment.patientId, patientName: appointment.patientName, doctorName: appointment.assignedDoctorName, consultationId: consultation.consultationId, role: participant.role, peerPresent: members.size === 2, iceServers: configuredIceServers() });
+        socket.emit('consultation:joined', { appointmentId, patientId: appointment.patientId, patientName: appointment.patientName, doctorName: appointment.assignedDoctorName, consultationId: consultation.consultationId, startedAt: consultation.startedAt || null, role: participant.role, peerPresent: members.size === 2, iceServers: configuredIceServers() });
         socket.emit('consultation:chat-history', (await ConsultationChat.find({ appointmentId }).sort({ createdAt: -1 }).limit(100).lean()).reverse());
         if (members.size === 2) {
           consultation.status = 'IN_CALL';
@@ -169,6 +180,15 @@ export function attachConsultationSocket(httpServer: HttpServer, allowedOrigins:
       if (!roomId || !payload || !['offer', 'answer', 'ice-candidate'].includes(payload.type) || !payload.data || typeof payload.data !== 'object') return;
       if (JSON.stringify(payload.data).length > 80_000) return;
       socket.to(roomId).emit('webrtc:signal', { type: payload.type, data: payload.data });
+    });
+
+    // Doctor tells the patient that a still image was captured and saved to their record (transparency).
+    socket.on('consultation:capture-notice', (payload: { captureId?: string }) => {
+      const roomId = socket.data.roomId as string | undefined;
+      const participant = socket.data.participant as Participant | undefined;
+      if (!roomId || !participant || !doctorRoles.has(participant.role)) return;
+      const captureId = typeof payload?.captureId === 'string' ? payload.captureId.slice(0, 80) : '';
+      socket.to(roomId).emit('consultation:capture-notice', { captureId, at: new Date().toISOString() });
     });
 
     socket.on('consultation:leave', async () => { await removeFromRoom(io, socket); });

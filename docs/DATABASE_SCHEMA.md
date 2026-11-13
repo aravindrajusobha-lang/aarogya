@@ -9,6 +9,15 @@
 
 ## 1. Schema Entity Relationship Overview
 
+### Patient care assignments and transfers (2026-11-13)
+
+- `patientcares`: `patientId` (unique), `doctorId` (indexed), `version` (integer, starts at 1), timestamps, `simulation`. This is a patient-specific care relationship; it does not change the patient's registration hospital.
+- `caretransfers`: `requestId` (unique UUID), `patientId`, `fromDoctorId`, `toDoctorId`, `assignmentVersion`, `status` (`pending`, `approved`, `rejected`, `superseded`), optional `decidedAt`, timestamps, `simulation`. A partial unique index on `(patientId, toDoctorId)` for pending rows prevents duplicate outstanding requests.
+- Assignment changes use a compare-and-set on patient, current doctor and version within a transaction. Approval increments the version and supersedes competing pending requests. Requests retain their original parties and decision history.
+- `sync_ledgers` stores `entityType: patient_care`, patient ID, operation fingerprint (actor, action, patient, request), cached response and status code. Audit events identify requester/approver without storing passwords or clinical images.
+- Legacy care is resolved from latest attended appointment or earliest accepted booking until a claim/transfer persists the assignment. Existing appointments and clinical history retain their original doctor attribution. BackupService discovers these collections automatically.
+
+
 ```mermaid
 erDiagram
     HOSPITAL ||--o{ USER : employs
@@ -521,3 +530,16 @@ Doctor sidebar destinations now remain under `/doctor/:section` (queue, appointm
 - Additive `consultationchats` collection: messageId (unique), appointmentId, senderId, role, text (immutable), SHA-256 (immutable), timestamps. Socket chat uses authenticated appointment rooms, bounded messages and idempotent message IDs. History is returned only after room authorization. Doctor starts the room before patient joins.
 - Prescriptions add optional immutable SHA-256 and sparse unique mutationId fields. Existing documents remain valid. New prescriptions resolve doctor/patient/facility names server-side and require approved treating doctor access. UI starts with empty clinician-authored medicine fields.
 - Verification: consultationSocket tests cover doctor-first room access, signaling and saved chat replay; appointmentsManagement tests cover slot publication, publication authorization and replay; module smoke, backup/restore and secret-scanner checks. Real camera/audio testing across two devices and network TURN relay remains an operational acceptance check.
+
+### Consultation session fields on `videoconsultations` (2026-11-12, additive)
+- `consultationMode` (`online`|`offline`), `startedBy`, `endedBy` (user IDs).
+- `followUp` subdocument: `frequency` (`none|weekly|biweekly|monthly|quarterly|custom`), `intervalDays` (1–365), `nextFollowUpAt`, `plannedSessions` (1–52), `instructions` (≤2000), `setBy`, `setAt`.
+- Existing documents remain valid. Sessions are started/ended by `/api/v1/consultation-sessions`; clinical notes stay in the versioned `consultationnotes` collection (SHA-256 history), separate from AI screening records.
+- `aiscreenings.reanalysisOf` (String, indexed, optional, 2026-11-12): screeningId of the original record a detailed re-analysis was created from. Originals are never modified.
+- `users` (2026-11-12, additive): `doctorCode` (unique sparse, uppercase), `email`; `verificationDetails` adds `department`, `departmentName`, `qualifications[]`, `consultationFee`, `languages[]`, `consultationModes[]`, `councilName`, `rejectedBy`, `rejectedAt`. New `counters` collection `{_id: 'doctorCode', seq}`; existing doctors are backfilled at server start.
+- `consultationcaptures` (2026-11-12): captureId, appointmentId, consultationId, patientId, doctorId, doctorName, hospitalId, fileId (immutable), sha256Hash (immutable), note, aiScreeningId, clientId (unique). `storedfiles` adds `storageProvider: 'cloudinary'`, `cloudinaryPublicId`, `cloudinaryResourceType`, `cloudinaryFormat`. `appointments` unique active-slot index now includes `assignedDoctorId`.
+- `users` (2026-11-12, additive): `abhaHash` (unique sparse HMAC of ABHA number), `abhaMasked`, `phoneVerified`, `registrationMethod`.
+- Facility operations (2026-11-13): `facilitywards` (wardId, hospitalId, name, wardType, totalBeds, occupiedBeds, notes, updatedBy; unique hospitalId+name), `facilitymedicines` (itemId, hospitalId, name, form, strength, unit, stock ≥ 0, reorderLevel, batchNo, expiryDate; unique hospitalId+name+strength), `facilitystockmovements` (immutable: movementId, itemId, change, reason, note, balanceAfter, by, byName, createdAt), `facilityequipment` (equipmentId, hospitalId, name, category, quantity, functionalCount, lastServicedAt, notes).
+# Patient record access policy — 2026-11-13
+
+No persisted schema change. Exact-ID record reads by verified doctors may span facilities. AuditLog retains the actor, patient/file resource, timestamp, and read action; cross-facility record reads use metadata.reason `verified_doctor_lookup`. The response-only `access.canPrescribe` flag is derived from facility or appointment association; write authorization remains enforced separately.

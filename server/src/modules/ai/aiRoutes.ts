@@ -4,9 +4,11 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAuth } from '../../middleware/authGuard.js';
-import { savePrivateFile } from '../storage/storageService.js';
+import { savePrivateFile, getAuthorizedFile } from '../storage/storageService.js';
+import { analyzeOralPhotoWithGemini, isGeminiConfigured } from '../assistant/geminiService.js';
 import { AuditLog } from '../audit/auditModel.js';
 import { Patient } from '../patient/patientModel.js';
+import { canTreatPatient } from '../consultation/patientCareService.js';
 import {
   AiScreening,
   IAiScreening,
@@ -17,6 +19,8 @@ import { calculateRiskScore, IRiskQuestionnaireAnswers } from './riskScore.js';
 import { logger } from '../../config/logger.js';
 import { Consent } from '../consent/consentModel.js';
 import { analyzeOralScreeningImage, AiProviderUnavailableError, InvalidScreeningImageError } from './aiAnalysisService.js';
+import { getModelCard } from './modelEvaluation.js';
+import { buildPatientScreeningSummary } from './patientScreeningSummary.js';
 
 export const aiRouter = Router();
 
@@ -99,6 +103,12 @@ async function validatePatientScreeningAccess(
       return undefined;
     }
     hospitalId = actor.hospitalId;
+  } else if (['medical_officer', 'specialist_doctor'].includes(actor.role)) {
+    if (!(await canTreatPatient(actor.id, patientId))) {
+      res.envelopeError('TRANSFER_REQUIRED', 'The current treating doctor must approve access before screening.', undefined, 403);
+      return undefined;
+    }
+    hospitalId = actor.hospitalId;
   } else if (actor.role !== 'system_admin') {
     if (!actor.hospitalId) {
       res.envelopeError('HOSPITAL_REQUIRED', 'Your account must be assigned to a facility before screening.', undefined, 403);
@@ -113,12 +123,33 @@ async function validatePatientScreeningAccess(
     hospitalId = requestedHospitalId || actor.hospitalId;
   }
 
-  const activeConsent = await Consent.findOne({
+  let activeConsent: any = await Consent.findOne({
     patientId,
     purpose: 'screening_ai_analysis',
     status: 'granted',
     validUntil: { $gt: new Date() },
   }).lean();
+  // A patient may grant consent for their OWN record by explicitly agreeing on the screening screen
+  // (consentGiven=true). It is stored as a normal, revocable, audited consent record valid for one year.
+  // Staff screening someone else still require consent captured beforehand.
+  const selfAgreed = req.body?.consentGiven === true || req.body?.consentGiven === 'true';
+  if (!activeConsent && actor.role === 'patient' && actor.patientId === patientId && selfAgreed) {
+    activeConsent = await Consent.create({
+      consentId: `cns_self_${uuidv4()}`,
+      patientId,
+      purpose: 'screening_ai_analysis',
+      status: 'granted',
+      validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      grantedAt: new Date(),
+      actorId: actor.id,
+      actorRole: 'patient',
+      language: typeof req.body?.language === 'string' ? req.body.language.slice(0, 5) : 'en',
+      simulation: true,
+    });
+    if (AuditLog.db.readyState === 1) {
+      await AuditLog.create({ action: 'CONSENT_SELF_GRANTED', actorId: actor.id, actorRole: 'patient', resourceType: 'consent', resourceId: activeConsent.consentId, ip: req.ip || '127.0.0.1', statusCode: 201, metadata: { purpose: 'screening_ai_analysis' }, simulation: true });
+    }
+  }
   if (!activeConsent) {
     res.envelopeError('CONSENT_REQUIRED', 'Current patient consent for oral photo analysis is required.', undefined, 403);
     return undefined;
@@ -465,6 +496,8 @@ aiRouter.post(
       }
 
       const questionnaireAnswers: IRiskQuestionnaireAnswers = answers || req.body;
+      await validatePatientScreeningAccess(req, res, String(patientId), req.body.hospitalId);
+      if (res.headersSent) return;
       const riskResult = calculateRiskScore(questionnaireAnswers);
 
       // Save answers on patient record history
@@ -674,6 +707,125 @@ aiRouter.post(
 // -----------------------------------------------------------------------------
 // 5. GET /api/ai/screenings?patientId=
 // -----------------------------------------------------------------------------
+// GET /api/ai/model-card — evaluation metrics only when real metrics are configured (never fabricated).
+aiRouter.get('/model-card', requireAuth, (_req: Request, res: Response): void => {
+  res.envelope(getModelCard(), 'DEMO AI model card retrieved');
+});
+
+// GET /api/ai/screenings/:screeningId/summary — patient-safe screening result (no disease names).
+aiRouter.get('/screenings/:screeningId/summary', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const screeningId = String(req.params.screeningId || '').trim();
+    if (!screeningId || screeningId.length > 100) {
+      res.envelopeError('SCREENING_ID_REQUIRED', 'A valid screening ID is required.', undefined, 400);
+      return;
+    }
+    const screening: any = await AiScreening.findOne({ screeningId }).lean();
+    if (!screening) {
+      res.envelopeError('SCREENING_NOT_FOUND', 'Screening record not found.', undefined, 404);
+      return;
+    }
+    const role = req.user!.role;
+    if (role === 'patient') {
+      const selfPatientId = (req.user as any).patientId || req.user!.id;
+      if (screening.patientId !== selfPatientId && screening.patientId !== req.user!.id) {
+        res.envelopeError('FORBIDDEN', 'Patients may only access their own screening records.', undefined, 403);
+        return;
+      }
+    } else if (role !== 'system_admin' && (!req.user!.hospitalId || screening.hospitalId !== req.user!.hospitalId)) {
+      res.envelopeError('HOSPITAL_SCOPE_DENIED', 'This screening belongs to another facility.', undefined, 403);
+      return;
+    }
+    res.envelope({ ...buildPatientScreeningSummary(screening), modelCard: getModelCard() }, 'Screening summary retrieved');
+  } catch (err: any) {
+    logger.error({ err }, 'Error in GET /api/ai/screenings/:screeningId/summary');
+    res.envelopeError('SCREENING_SUMMARY_ERROR', 'Screening summary could not be loaded.', undefined, 500);
+  }
+});
+
+// POST /api/ai/screenings/:screeningId/reanalyze — run the detailed Gemini analysis again on the stored photo.
+// Creates a NEW screening record (reanalysisOf → original); the original record is never modified.
+aiRouter.post('/screenings/:screeningId/reanalyze', requireAuth, requireScreeningRole, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const clientId = typeof req.body?.clientId === 'string' ? req.body.clientId : '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+      res.envelopeError('INVALID_MUTATION_ID', 'clientId must be a UUID v4.', undefined, 400);
+      return;
+    }
+    const replay: any = await AiScreening.findOne({ clientId }).lean();
+    if (replay) {
+      if (replay.reanalysisOf !== req.params.screeningId) {
+        res.envelopeError('MUTATION_ID_REUSED', 'This request ID was already used for another screening.', undefined, 409);
+        return;
+      }
+      res.envelope({ screeningId: replay.screeningId, idempotentReplay: true }, 'Existing re-analysis returned.');
+      return;
+    }
+    const original: any = await AiScreening.findOne({ screeningId: String(req.params.screeningId) }).lean();
+    if (!original) {
+      res.envelopeError('SCREENING_NOT_FOUND', 'Screening record not found.', undefined, 404);
+      return;
+    }
+    const hospitalId = await validatePatientScreeningAccess(req, res, original.patientId, original.hospitalId);
+    if (res.headersSent) return;
+    if (!original.imageRef) {
+      res.envelopeError('IMAGE_UNAVAILABLE', 'The original photo is not available. Please take a new photo.', undefined, 409);
+      return;
+    }
+    if (!isGeminiConfigured()) {
+      res.envelopeError('AI_PROVIDER_UNAVAILABLE', 'Detailed AI analysis is not configured on this server.', undefined, 503);
+      return;
+    }
+
+    const { fileRecord, stream } = await getAuthorizedFile(original.imageRef, req.user as any);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream as AsyncIterable<Buffer | string>) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+
+    let gemini;
+    try {
+      gemini = await analyzeOralPhotoWithGemini({
+        imageBase64: Buffer.concat(chunks).toString('base64'),
+        mimeType: (fileRecord as any).mimeType || 'image/jpeg',
+        language: ['en', 'te', 'hi'].includes(req.body?.language) ? req.body.language : 'en',
+      });
+    } catch (geminiError) {
+      logger.warn({ err: geminiError instanceof Error ? geminiError.message.slice(0, 200) : 'unknown' }, 'Gemini re-analysis failed');
+      res.envelopeError('AI_PROVIDER_BUSY', 'The detailed AI service is busy right now. Please try again in a few minutes.', undefined, 503);
+      return;
+    }
+
+    const referToSpecialist = gemini.recommendedDoctor.urgency === 'urgent' || gemini.riskTier === 'high_risk_support';
+    const combinedRec = computeCombinedRecommendation({ label: gemini.riskTier, confidence: gemini.confidenceScore, referToSpecialist }, null, null);
+    const screening = await AiScreening.create({
+      patientId: original.patientId,
+      performedBy: { userId: req.user!.id, username: (req.user as any).username || req.user!.id, role: req.user!.role, fullName: (req.user as any).fullName },
+      hospitalId: hospitalId || original.hospitalId,
+      label: gemini.riskTier,
+      confidence: gemini.confidenceScore,
+      probabilities: {},
+      referToSpecialist,
+      modelVersion: `gemini-vision-${gemini.analyzedByModel}`,
+      source: 'server',
+      imageRef: original.imageRef,
+      imageQuality: original.imageQuality,
+      moduleA: { label: gemini.riskTier, confidence: gemini.confidenceScore, probabilities: {}, modelVersion: `gemini-vision-${gemini.analyzedByModel}`, source: 'server', imageRef: original.imageRef },
+      combinedRecommendation: combinedRec,
+      clinicianReview: { status: 'PENDING' },
+      consentGiven: true,
+      consentTimestamp: new Date(),
+      syncStatus: 'SYNCED',
+      clientId,
+      geminiAnalysis: gemini,
+      reanalysisOf: original.screeningId,
+    });
+    await AuditLog.create({ action: 'AI_SCREENING_REANALYSIS', actorId: req.user!.id, actorRole: req.user!.role, resourceType: 'ai_screening', resourceId: screening.screeningId, ip: req.ip || '127.0.0.1', statusCode: 200, metadata: { reanalysisOf: original.screeningId, model: gemini.analyzedByModel }, simulation: true });
+    res.envelope({ screeningId: screening.screeningId, reanalysisOf: original.screeningId }, 'Detailed analysis completed. The original result is kept unchanged.');
+  } catch (err: any) {
+    logger.error({ err }, 'Error in POST /api/ai/screenings/:screeningId/reanalyze');
+    res.envelopeError(err?.code || 'REANALYSIS_ERROR', err?.message || 'Re-analysis failed.', undefined, Number(err?.statusCode) || 500);
+  }
+});
+
 aiRouter.get('/screenings', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { patientId } = req.query;
@@ -711,6 +863,7 @@ aiRouter.get('/screenings', requireAuth, async (req: Request, res: Response): Pr
         source: s.source,
         clinicianReviewStatus: s.clinicianReview.status,
         finalImpression: s.clinicianReview.finalImpression,
+        riskLevel: buildPatientScreeningSummary(s).riskLevel,
         disclaimer: 'This AI result is a screening aid, not clinical confirmation. Please consult a qualified doctor.',
       }));
       res.envelope(safePatientView, 'Patient screening history retrieved safely');
@@ -859,6 +1012,9 @@ aiRouter.patch(
         return;
       }
 
+      if (['medical_officer', 'specialist_doctor'].includes(req.user!.role) && !(await canTreatPatient(req.user!.id, screening.patientId))) {
+        res.envelopeError('TRANSFER_REQUIRED', 'Only the current treating doctor can review this patient.', undefined, 403); return;
+      }
       screening.clinicianReview = {
         status: reviewStatus,
         reviewedBy: req.user!.id,

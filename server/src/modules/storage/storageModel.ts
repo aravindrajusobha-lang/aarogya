@@ -22,7 +22,10 @@ export interface IStoredFile extends Document {
   createdAt: Date;
 
   // Google Cloud Storage & Metadata Extensions
-  storageProvider: 'gcs' | 'local';
+  storageProvider: 'gcs' | 'local' | 'cloudinary';
+  cloudinaryPublicId?: string;
+  cloudinaryResourceType?: 'image' | 'raw';
+  cloudinaryFormat?: string;
   gcsBucket?: string;
   gcsObjectPath?: string;
   category: StorageCategory | string;
@@ -46,7 +49,11 @@ const StoredFileSchema = new Schema<IStoredFile>(
     simulation: { type: Boolean, default: true, immutable: true },
 
     // GCS Fields
-    storageProvider: { type: String, enum: ['gcs', 'local'], default: 'local', index: true },
+    storageProvider: { type: String, enum: ['gcs', 'local', 'cloudinary'], default: 'local', index: true },
+    // Cloudinary (private 'authenticated' delivery only)
+    cloudinaryPublicId: { type: String, default: null },
+    cloudinaryResourceType: { type: String, enum: ['image', 'raw', null], default: null },
+    cloudinaryFormat: { type: String, default: null },
     gcsBucket: { type: String, default: null },
     gcsObjectPath: { type: String, default: null, index: true },
     category: {

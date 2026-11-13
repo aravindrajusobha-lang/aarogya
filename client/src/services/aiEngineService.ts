@@ -1,5 +1,4 @@
 import * as ort from 'onnxruntime-web';
-import { v4 as uuidv4 } from 'uuid';
 import { db, OfflineAiScreening } from '../db/aarogyaDb';
 import { calculateRiskScore, IRiskQuestionnaireAnswers, IRiskScoreResult } from './riskScore';
 
@@ -430,7 +429,7 @@ export async function analyzeMucosalLesion(
       formData.append('patientId', patientId);
       if (hospitalId) formData.append('hospitalId', hospitalId);
       formData.append('consentGiven', 'true');
-      formData.append('clientId', uuidv4());
+      formData.append('clientId', crypto.randomUUID());
       formData.append('language', language);
 
       const response = await fetch('/api/ai/analyze', {
@@ -546,7 +545,7 @@ export async function generateCombinedReport(
 ): Promise<ICombinedReportResult> {
   if (!patientId) throw new Error('A valid patient record is required before saving a screening report.');
   if (!consentGiven) throw new Error('Patient consent is required before saving a screening report.');
-  const clientId = uuidv4();
+  const clientId = crypto.randomUUID();
   const triggerModules: string[] = [];
 
   // Module A rules

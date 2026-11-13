@@ -441,6 +441,13 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
   { method: 'POST', path: '/api/v1/hospitals/:hospitalId/doctors', requiredCapability: 'hospital:manage', description: 'Create doctor account with qualifications and verification requirements' },
   { method: 'GET', path: '/api/v1/hospitals/:hospitalId/doctors', requiredCapability: 'hospital:read', description: 'List doctor accounts registered at this facility' },
   { method: 'POST', path: '/api/v1/hospitals/:hospitalId/doctors/:doctorId/verify', requiredCapability: 'hospital:manage', description: 'Hospital manager verifies and activates doctor account' },
+  { method: 'GET', path: '/api/v1/admin/doctors/reference', requiredCapability: 'hospital:manage', description: 'Admin: facilities in scope and doctor onboarding reference lists' },
+  { method: 'GET', path: '/api/v1/admin/doctors', requiredCapability: 'hospital:manage', description: 'Admin: list doctors in facility scope' },
+  { method: 'POST', path: '/api/v1/admin/doctors/documents', requiredCapability: 'hospital:manage', description: 'Admin: upload doctor qualification document (private)' },
+  { method: 'POST', path: '/api/v1/admin/doctors', requiredCapability: 'hospital:manage', description: 'Admin: create doctor with unique Doctor ID and login credentials' },
+  { method: 'POST', path: '/api/v1/admin/doctors/:userId/verify', requiredCapability: 'hospital:manage', description: 'Admin: verify doctor' },
+  { method: 'POST', path: '/api/v1/admin/doctors/:userId/reject', requiredCapability: 'hospital:manage', description: 'Admin: reject doctor application' },
+  { method: 'POST', path: '/api/v1/admin/doctors/:userId/reset-password', requiredCapability: 'hospital:manage', description: 'Admin: issue new doctor password' },
 
   // Phase 3: Administration - 72-Hour Invitations
   { method: 'POST', path: '/api/v1/invitations', requiredCapability: 'invitation:create', description: 'Create 72-hour copyable staff invitation' },

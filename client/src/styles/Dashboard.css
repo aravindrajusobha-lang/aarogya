@@ -1509,3 +1509,16 @@
   .live-room-call-card { grid-column: auto; }
 }
 
+
+/* Live-call capture panel */
+.live-room-capture { display: grid; gap: 10px; }
+.live-room-capture label { display: grid; gap: 6px; font-size: .85rem; font-weight: 600; }
+.live-room-capture input { min-height: 40px; padding: 8px 10px; border: 1px solid #dce5e1; border-radius: 10px; font: inherit; }
+.live-room-record-link { font-size: .82rem; font-weight: 700; color: #1f8a4c; text-decoration: none; white-space: nowrap; }
+.live-capture-heading { margin: 4px 0 0; font-size: .85rem; }
+.live-capture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.live-capture-grid figure { margin: 0; border: 1px solid #dce5e1; border-radius: 10px; overflow: hidden; background: #f7faf8; }
+.live-capture-grid img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.live-capture-grid figcaption { padding: 6px; font-size: .74rem; }
+.live-capture-grid figcaption button { width: 100%; min-height: 32px; border: 1px solid #1f8a4c; border-radius: 8px; background: #fff; color: #1f8a4c; font-weight: 700; cursor: pointer; }
+.live-capture-notice { margin: 8px 0; padding: 10px 14px; border-radius: 10px; background: #e3f3e8; color: #176d3b; font-weight: 600; }

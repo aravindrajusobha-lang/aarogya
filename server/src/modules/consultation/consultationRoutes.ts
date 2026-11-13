@@ -1,9 +1,10 @@
-import { DoctorSlot, availableDoctorSlots } from './doctorSlotModel.js';
+import { DoctorSlot, availableDoctorSlots, doctorSlotsWithStatus } from './doctorSlotModel.js';
 import { Prescription } from '../prescription/prescriptionModel.js';
 import { AiScreening } from '../ai/aiScreeningModel.js';
 import { ScreeningCase } from '../screening/screeningCaseModel.js';
 import { Router, Request } from 'express';
 import crypto from 'node:crypto';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/authGuard.js';
 import { auditTag } from '../../middleware/auditTag.js';
@@ -19,6 +20,7 @@ import { ConsultationNote } from '../teleconsultation/teleconsultationModel.js';
 import { Hospital } from '../hospital/hospitalModel.js';
 import { Patient } from '../patient/patientModel.js';
 import { SyncLedger } from '../patient/syncLedgerModel.js';
+import { assertCareAssignment } from './patientCareService.js';
 
 export const consultationRouter = Router();
 const NoteSchema = z.object({ notes: z.string().trim().min(1).max(10000), clientMutationId: z.string().uuid().optional() });
@@ -29,17 +31,36 @@ const DirectEndSchema = z.object({ clientMutationId: z.string().uuid(), notes: z
 const DirectNotesSchema = z.object({ clientMutationId: z.string().uuid(), notes: z.string().trim().min(1).max(10000) });
 const DailyProviderConfigSchema = z.object({ apiKey: z.string().trim().min(10).max(500), domain: z.string().trim().min(3).max(253) });
 const hash = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
-async function saveClinicalNote(consultationId: string, clinician: { userId: string; name: string; role: string }, text: string) {
+export async function saveClinicalNote(consultationId: string, clinician: { userId: string; name: string; role: string }, text: string, session?: mongoose.ClientSession | null) {
   if (!text.trim()) return;
-  const digest = hash(text); const existing: any = await ConsultationNote.findOne({ consultationId });
-  if (!existing) await ConsultationNote.create({ noteId: `NOTE-${crypto.randomUUID()}`, consultationId, clinicianId: clinician.userId, clinicianName: clinician.name, clinicianRole: clinician.role, originalNoteText: text, originalHash: digest, currentNoteText: text, currentHash: digest, currentVersion: 1, notesHistory: [] });
-  else { existing.notesHistory.push({ version: existing.currentVersion, noteText: existing.currentNoteText, hash: existing.currentHash, amendedBy: clinician.userId, amendedAt: new Date(), amendmentReason: 'Versioned consultation note amendment' }); existing.currentVersion += 1; existing.currentNoteText = text; existing.currentHash = digest; await existing.save(); }
+  const digest = hash(text); const existing: any = await ConsultationNote.findOne({ consultationId }).session(session || null);
+  if (!existing) await ConsultationNote.create([{ noteId: `NOTE-${crypto.randomUUID()}`, consultationId, clinicianId: clinician.userId, clinicianName: clinician.name, clinicianRole: clinician.role, originalNoteText: text, originalHash: digest, currentNoteText: text, currentHash: digest, currentVersion: 1, notesHistory: [] }], { session });
+  else { existing.notesHistory.push({ version: existing.currentVersion, noteText: existing.currentNoteText, hash: existing.currentHash, amendedBy: clinician.userId, amendedAt: new Date(), amendmentReason: 'Versioned consultation note amendment' }); existing.currentVersion += 1; existing.currentNoteText = text; existing.currentHash = digest; await existing.save({ session }); }
 }
 async function caller(req: Request) {
   const userId = req.user?.id || (req.user as any)?.userId;
   if (!userId) throw Object.assign(new Error('Authentication required.'), { statusCode: 401 });
   const dbUser = await User.findOne({ userId }).lean() as any;
   return { userId, role: req.user!.role, hospitalId: (req.user as any).hospitalId || dbUser?.hospitalId, name: dbUser?.fullName || userId, patientId: dbUser?.patientId || userId };
+}
+export function sessionView(item: any) {
+  if (!item) return null;
+  return {
+    consultationId: item.consultationId,
+    status: item.status,
+    consultationMode: item.consultationMode || null,
+    startedAt: item.startedAt || null,
+    endedAt: item.endedAt || null,
+    durationSeconds: typeof item.durationSeconds === 'number' ? item.durationSeconds : null,
+    patientWaiting: Boolean(item.patientWaitingAt) && !item.endedAt,
+    followUp: item.followUp ? {
+      frequency: item.followUp.frequency,
+      intervalDays: item.followUp.intervalDays ?? null,
+      nextFollowUpAt: item.followUp.nextFollowUpAt ?? null,
+      plannedSessions: item.followUp.plannedSessions ?? null,
+      instructions: item.followUp.instructions ?? '',
+    } : null,
+  };
 }
 function error(res: any, err: any) { const status = err.statusCode || 400; return res.status(status).envelopeError(err.code || 'CONSULTATION_ERROR', err.message, undefined, status); }
 function doctorRole(role: string) { return role === 'medical_officer' || role === 'specialist_doctor'; }
@@ -65,6 +86,7 @@ async function authorizedConsultation(req: Request, appointmentId: string) {
   const doctor = ['medical_officer', 'specialist_doctor'].includes(user.role) && item.doctorId === user.userId && item.hospitalId === user.hospitalId;
   const patient = user.role === 'patient' && item.patientId === user.patientId;
   if (!doctor && !patient) throw Object.assign(new Error('This consultation is not assigned to your account.'), { statusCode: 403, code: 'CONSULTATION_ACCESS_DENIED' });
+  if (doctor && req.method !== 'GET') await assertCareAssignment(user.userId, item.patientId);
   return { item, user, doctor, patient };
 }
 async function finish(item: any, status: 'COMPLETED' | 'MISSED' = 'COMPLETED') {
@@ -86,6 +108,7 @@ async function authorizedDirectCall(req: Request, callId: string) {
   const doctor = doctorRole(user.role) && item.doctorId === user.userId && item.hospitalId === user.hospitalId;
   const patient = user.role === 'patient' && item.patientId === user.patientId;
   if (!doctor && !patient) throw Object.assign(new Error('Only the calling doctor and invited patient can access this call.'), { statusCode: 403, code: 'DIRECT_CALL_ACCESS_DENIED' });
+  if (doctor && req.method !== 'GET') await assertCareAssignment(user.userId, item.patientId);
   return { item, user, doctor, patient };
 }
 async function findDirectMutation(clientMutationId: string, action: string, callId?: string) {
@@ -127,6 +150,7 @@ consultationRouter.get('/direct-calls/patients', requireAuth, authorizeCapabilit
   try {
     const user = await caller(req);
     if (!doctorRole(user.role) || !user.hospitalId) return res.status(403).envelopeError('DOCTOR_REQUIRED', 'Only a doctor assigned to a facility can start a direct call.', undefined, 403);
+    await assertCareAssignment(user.userId, req.body.patientId);
     const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 80) : '';
     const scopedPatients: any[] = await Patient.find({ hospitalId: user.hospitalId }).select('patientId').limit(500).lean();
     const patientIds = [...new Set(scopedPatients.map((patient) => patient.patientId).filter(Boolean))];
@@ -306,13 +330,66 @@ consultationRouter.get('/appointments/my', requireAuth, authorizeCapability('app
   try { const user = await caller(req); if (user.role !== 'patient') return res.status(403).envelopeError('ROLE_REQUIRED', 'Patient access is required.', undefined, 403);
     const appointments = await Appointment.find({ patientId: user.patientId }).sort({ slotStartTime: -1 }).lean();
     const consultations = await Consultation.find({ patientId: user.patientId }).lean();
-    return res.envelope({ appointments: appointments.map((a: any) => { const consultation = consultations.find((c: any) => c.appointmentId === a.appointmentId); return { ...a, consultationStatus: consultation?.status || null, consultationStarted: Boolean(consultation?.startedAt) }; }) });
+    return res.envelope({ appointments: appointments.map((a: any) => { const consultation = consultations.find((c: any) => c.appointmentId === a.appointmentId); return { ...a, consultationStatus: consultation?.status || null, consultationStarted: Boolean(consultation?.startedAt), session: sessionView(consultation) }; }) });
   } catch (err) { return error(res, err); }
 });
 const SlotInput = z.object({ startTime: z.string().datetime(), endTime: z.string().datetime().optional(), mutationId: z.string().uuid() });
 consultationRouter.get('/doctor/availability', requireAuth, authorizeCapability('appointment:read'), async (req, res) => {
   try { const user = await caller(req); if (!doctorRole(user.role)) return res.status(403).envelopeError('DOCTOR_REQUIRED', 'Doctor access required.', undefined, 403);
-    return res.envelope({ slots: await DoctorSlot.find({ doctorId: user.userId, startTime: { $gte: new Date() } }).sort({ startTime: 1 }).lean() });
+    const from = new Date(Date.now() - 12 * 60 * 60000); const to = new Date(Date.now() + 90 * 86400000);
+    const slots = (await doctorSlotsWithStatus(user.userId, from, to)).map((slot) => ({ ...slot, booking: slot.booking ? { appointmentId: slot.booking.appointmentId, patientName: slot.booking.patientName || 'Patient', status: slot.booking.status, consultationMode: slot.booking.consultationMode } : null }));
+    return res.envelope({ slots });
+  } catch (err) { return error(res, err); }
+});
+
+// Doctor publishes a working window (start to end) split into consultation slots of a fixed duration (India time).
+const SlotRangeInput = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  durationMinutes: z.number().int().refine((v) => [10, 15, 20, 30, 45, 60].includes(v), 'Duration must be 10, 15, 20, 30, 45 or 60 minutes'),
+  breakMinutes: z.number().int().min(0).max(30).optional().default(0),
+  mutationId: z.string().uuid(),
+});
+consultationRouter.post('/doctor/availability/range', requireAuth, authorizeCapability('appointment:manage'), validate({ body: SlotRangeInput }), async (req, res) => {
+  try {
+    const user = await caller(req);
+    const doctor = await User.findOne({ userId: user.userId, status: 'active', verificationStatus: { $in: ['verified', 'VERIFIED'] } });
+    if (!doctorRole(user.role) || !doctor || !user.hospitalId) return res.status(403).envelopeError('VERIFIED_DOCTOR_REQUIRED', 'Administrator approval is required to publish slots.', undefined, 403);
+    const replay: any = await SyncLedger.findOne({ clientMutationId: req.body.mutationId }).lean();
+    if (replay) {
+      if (replay.entityType !== 'doctor-slot-range' || replay.responsePayload?.doctorId !== user.userId) return res.status(409).envelopeError('MUTATION_CONFLICT', 'Request ID already used.', undefined, 409);
+      return res.envelope({ ...replay.responsePayload, idempotentReplay: true });
+    }
+    const { date, startTime, endTime, durationMinutes, breakMinutes } = req.body;
+    const windowStart = new Date(`${date}T${startTime}:00+05:30`); const windowEnd = new Date(`${date}T${endTime}:00+05:30`);
+    if (windowEnd <= windowStart) return res.status(400).envelopeError('INVALID_RANGE', 'End time must be after start time.', undefined, 400);
+    if (windowEnd.getTime() - windowStart.getTime() > 12 * 60 * 60000) return res.status(400).envelopeError('INVALID_RANGE', 'A single window can be at most 12 hours.', undefined, 400);
+    if (windowStart.getTime() > Date.now() + 90 * 86400000) return res.status(400).envelopeError('INVALID_RANGE', 'Publish availability up to 90 days ahead.', undefined, 400);
+    const existing: any[] = await DoctorSlot.find({ doctorId: user.userId, startTime: { $lt: windowEnd }, endTime: { $gt: windowStart } }).lean();
+    const toCreate: any[] = []; let skipped = 0;
+    for (let t = windowStart.getTime(); t + durationMinutes * 60000 <= windowEnd.getTime(); t += (durationMinutes + breakMinutes) * 60000) {
+      const s = new Date(t); const e = new Date(t + durationMinutes * 60000);
+      if (s.getTime() <= Date.now() || existing.some((x) => new Date(x.startTime) < e && new Date(x.endTime) > s)) { skipped += 1; continue; }
+      toCreate.push({ doctorId: user.userId, hospitalId: user.hospitalId, startTime: s, endTime: e, mutationId: `${req.body.mutationId}:${toCreate.length}` });
+    }
+    if (!toCreate.length) return res.status(409).envelopeError('NO_NEW_SLOTS', 'No new future slots fit in this window (they may already exist or be in the past).', undefined, 409);
+    const created = await DoctorSlot.insertMany(toCreate, { ordered: false });
+    const responsePayload = { created: created.length, skipped, durationMinutes, date, doctorId: user.userId };
+    await SyncLedger.create({ clientMutationId: req.body.mutationId, entityType: 'doctor-slot-range', entityId: user.userId, responsePayload, simulation: true });
+    return res.status(201).envelope(responsePayload, `${created.length} slots published.`);
+  } catch (err) { return error(res, err); }
+});
+
+consultationRouter.delete('/doctor/availability/:slotId', requireAuth, authorizeCapability('appointment:manage'), validate({ params: z.object({ slotId: z.string().regex(/^[0-9a-f]{24}$/i) }) }), async (req, res) => {
+  try {
+    const user = await caller(req); if (!doctorRole(user.role)) return res.status(403).envelopeError('DOCTOR_REQUIRED', 'Doctor access required.', undefined, 403);
+    const slot: any = await DoctorSlot.findOne({ _id: req.params.slotId, doctorId: user.userId }).lean();
+    if (!slot) return res.status(404).envelopeError('SLOT_NOT_FOUND', 'Slot not found.', undefined, 404);
+    const [withStatus] = await doctorSlotsWithStatus(user.userId, new Date(slot.startTime), new Date(new Date(slot.startTime).getTime() + 1000));
+    if (withStatus?.status === 'booked') return res.status(409).envelopeError('SLOT_BOOKED', 'A patient has booked this slot. Reschedule or cancel the appointment instead.', undefined, 409);
+    await DoctorSlot.deleteOne({ _id: slot._id });
+    return res.envelope({ deleted: true });
   } catch (err) { return error(res, err); }
 });
 consultationRouter.post('/doctor/availability', requireAuth, authorizeCapability('appointment:manage'), validate({ body: SlotInput }), async (req, res) => {
@@ -355,10 +432,10 @@ consultationRouter.get('/availability', requireAuth, authorizeCapability('appoin
     if (user.role !== 'patient') return res.status(403).envelopeError('PATIENT_REQUIRED', 'Patient access is required.', undefined, 403);
     const date = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T12:00:00`).getTime())) return res.status(400).envelopeError('INVALID_DATE', 'Use a valid YYYY-MM-DD date.', undefined, 400);
-    const doctors: any[] = await User.find({ role: { $in: ['medical_officer', 'specialist_doctor'] }, status: 'active', verificationStatus: { $in: ['verified', 'VERIFIED'] }, hospitalId: { $exists: true, $ne: '' } }).select('userId fullName hospitalId verificationDetails').sort({ fullName: 1 }).lean();
+    const doctors: any[] = await User.find({ role: { $in: ['medical_officer', 'specialist_doctor'] }, status: 'active', verificationStatus: { $in: ['verified', 'VERIFIED'] }, hospitalId: { $exists: true, $ne: '' } }).select('userId fullName hospitalId verificationDetails doctorCode').sort({ fullName: 1 }).lean();
     const hospitals: any[] = await Hospital.find({ hospitalId: { $in: doctors.map(d => d.hospitalId) } }).select('hospitalId name').lean();
     const nameById = new Map(hospitals.map(h => [h.hospitalId, h.name]));
-    const availableDoctors = (await Promise.all(doctors.map(async d => ({ userId: d.userId, name: d.fullName, hospitalId: d.hospitalId, hospitalName: nameById.get(d.hospitalId) || d.hospitalId, specialization: d.verificationDetails?.specialization, availableSlotsCount: (await availableDoctorSlots(d.userId, date)).filter(s => s.isAvailable).length })))).filter(d => d.availableSlotsCount > 0);
+    const availableDoctors = (await Promise.all(doctors.map(async d => ({ userId: d.userId, name: d.fullName, hospitalId: d.hospitalId, hospitalName: nameById.get(d.hospitalId) || d.hospitalId, specialization: d.verificationDetails?.departmentName || d.verificationDetails?.specialization, consultationFee: d.verificationDetails?.consultationFee ?? null, experienceYears: d.verificationDetails?.experienceYears ?? null, consultationModes: d.verificationDetails?.consultationModes || [], doctorCode: d.doctorCode || null, availableSlotsCount: (await availableDoctorSlots(d.userId, date)).filter(s => s.isAvailable).length })))).filter(d => d.availableSlotsCount > 0);
     return res.envelope({ date, doctors: availableDoctors, availableDoctorCount: availableDoctors.length }, 'Verified doctors with free appointment slots retrieved.');
   } catch (err) { return error(res, err); }
 });
@@ -382,14 +459,17 @@ consultationRouter.get('/doctor/appointments', requireAuth, authorizeCapability(
     }).select('appointmentId status patientWaitingAt expiresAt').lean();
     const activeAppointmentIds = activeConsultations.map((item) => item.appointmentId);
     const appointments = await Appointment.find({ destinationHospitalId: user.hospitalId, assignedDoctorId: user.userId }).sort({ slotStartTime: -1 }).limit(200).lean();
+    const sessions = await Consultation.find({ appointmentId: { $in: appointments.map((item: any) => item.appointmentId) }, callType: { $ne: 'DIRECT' } }).lean();
 
     return res.envelope({
       appointments: appointments.map((appointment: any) => {
         const consultation = activeConsultations.find((item) => item.appointmentId === appointment.appointmentId);
+        const session = sessions.find((item: any) => item.appointmentId === appointment.appointmentId);
         return {
           ...appointment,
-          consultationStatus: consultation?.status || null,
+          consultationStatus: consultation?.status || (session as any)?.status || null,
           patientWaiting: consultation?.status === 'WAITING' && Boolean(consultation.patientWaitingAt),
+          session: sessionView(session),
         };
       }),
     });
@@ -417,6 +497,7 @@ consultationRouter.post('/:appointmentId/send-link', requireAuth, authorizeCapab
     if (!appointment) return res.status(404).envelopeError('APPOINTMENT_NOT_FOUND', 'Appointment not found.', undefined, 404);
     if (!['medical_officer', 'specialist_doctor'].includes(user.role) || user.hospitalId !== appointment.destinationHospitalId || (appointment.assignedDoctorId && appointment.assignedDoctorId !== user.userId)) return res.status(403).envelopeError('DOCTOR_NOT_ASSIGNED', 'Only the assigned doctor at this facility can issue a link.', undefined, 403);
     if (!['confirmed', 'rescheduled', 'checked_in'].includes(appointment.status)) return res.status(409).envelopeError('APPOINTMENT_NOT_CONFIRMED', 'The appointment must be confirmed first.', undefined, 409);
+    await assertCareAssignment(user.userId, appointment.patientId);
     const previous = await Consultation.findOne({ appointmentId: appointment.appointmentId });
     const patient = await User.findOne({ $or: [{ patientId: appointment.patientId }, { userId: appointment.patientId }], role: 'patient' }).lean() as any;
     if (!patient) return res.status(409).envelopeError('PATIENT_ACCOUNT_MISSING', 'The patient account could not be matched for private link delivery.', undefined, 409);

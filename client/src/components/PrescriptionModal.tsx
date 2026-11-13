@@ -105,8 +105,8 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        const json = await res.json();
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success && json?.data?.prescription?.prescriptionId) {
         setSaveSuccess(true);
         if (onPrescriptionCreated) {
           onPrescriptionCreated(json.data?.prescription || json.data);
@@ -116,23 +116,9 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
         }, 1500);
         return;
       }
-
-      // Simulation fallback for demo
-      setSaveSuccess(true);
-      if (onPrescriptionCreated) {
-        onPrescriptionCreated({
-          prescriptionId: `RX-PAD-${Date.now().toString().slice(-6)}`,
-          ...payload,
-        });
-      }
-      setTimeout(() => {
-        onClose();
-      }, 1500);
-    } catch {
-      setSaveSuccess(true);
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+      setErrorMsg(json?.error?.message || json?.message || 'Prescription could not be saved. Please retry.');
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Prescription could not be saved. Check your connection and retry.');
     } finally {
       setIsSubmitting(false);
     }

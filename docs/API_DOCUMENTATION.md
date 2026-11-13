@@ -9,6 +9,25 @@
 
 ## 1. Global API Standards & Envelope Specification
 
+### Doctor patient selection and transfers (2026-11-13)
+
+All `/api/v1/patient-care` routes require JWT authentication, `patient:read`, and an active, verified doctor with a facility assignment. Responses use the standard envelope and `Cache-Control: private, no-store`.
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| GET | `/api/v1/patient-care` | Distinct patients from all the caller's online/offline appointments and current care assignments; incoming/outgoing transfer requests. No unrelated facility patient listing. |
+| GET | `/api/v1/patient-care/:patientId` | Audited exact-ID lookup across facilities; patient identity, current doctor, `canTreat`, and caller's pending-request state. |
+| POST | `/api/v1/patient-care/:patientId/claim` | Become treating doctor when unassigned, or persist the caller's existing appointment-derived assignment. |
+| POST | `/api/v1/patient-care/:patientId/request` | Ask the current treating doctor for a transfer. The server determines the approver. |
+| POST | `/api/v1/patient-care/:patientId/approve` | Current doctor approves a pending request, changes the care assignment, and supersedes competing requests. |
+| POST | `/api/v1/patient-care/:patientId/reject` | Current doctor rejects a pending request without granting access. |
+
+All mutations require `screening:create` and `{ "mutationId": "<UUID>" }`; approval/rejection also require `requestId`. Assignment, request state, audit and `sync_ledgers` changes commit in one MongoDB transaction (Atlas or a replica set required). Reusing a mutation ID with another actor/action/patient/request returns 409. Matching retries return the saved 200 response. Inactive/unverified recipients cannot receive a transfer. Stale/competing approvals cannot overwrite the current assignment.
+
+For legacy patients without a persisted care assignment, the current doctor is derived from the latest completed/checked-in appointment, otherwise the earliest confirmed/rescheduled appointment, with appointment ID as a stable tie-breaker. A transfer freezes this assignment before requesting approval. New care artifacts remain attributed to their actual author/facility. Prior artifacts are not moved or rewritten. Approved transfer grants patient-specific screening and prescription access; consent, clinical roles, private storage and appointment ownership checks remain required. It does not grant arbitrary facility administration.
+
+The doctor's **Patients** screen is view-only, without prescription, edit, download or print controls. Its records response sets `access.canPrescribe: false`; care actions live in Screening and Your patients. This UI restriction cannot prevent operating-system screenshots or a browser saving already displayed content.
+
 All Aarogya-Drishti endpoints adhere strictly to the standardized JSend-compliant envelope structure:
 
 ### Success Response Envelope (HTTP 200, 201)
@@ -578,3 +597,55 @@ Doctor sidebar destinations now remain under `/doctor/:section` (queue, appointm
 - Additive `consultationchats` collection: messageId (unique), appointmentId, senderId, role, text (immutable), SHA-256 (immutable), timestamps. Socket chat uses authenticated appointment rooms, bounded messages and idempotent message IDs. History is returned only after room authorization. Doctor starts the room before patient joins.
 - Prescriptions add optional immutable SHA-256 and sparse unique mutationId fields. Existing documents remain valid. New prescriptions resolve doctor/patient/facility names server-side and require approved treating doctor access. UI starts with empty clinician-authored medicine fields.
 - Verification: consultationSocket tests cover doctor-first room access, signaling and saved chat replay; appointmentsManagement tests cover slot publication, publication authorization and replay; module smoke, backup/restore and secret-scanner checks. Real camera/audio testing across two devices and network TURN relay remains an operational acceptance check.
+
+### Consultation sessions, AI screening summary and model card (2026-11-12)
+- `POST /api/v1/consultation-sessions/:appointmentId/start` — `appointment:confirm`; assigned doctor at the appointment facility only. Body `{clientMutationId: UUID}`. Works for online and in-person appointments any time after the appointment is `confirmed`/`rescheduled`/`checked_in` (no slot time window). Records `startedAt`; in-person sessions become `IN_CALL` and the appointment `checked_in`; online sessions open the WebRTC room for the patient (in-app notification). Replays return the cached payload. Errors: 403 `DOCTOR_NOT_ASSIGNED`, 409 `APPOINTMENT_NOT_CONFIRMED`, `CONSULTATION_ALREADY_ENDED`, `DOCTOR_ALREADY_IN_CONSULTATION`.
+- `POST /api/v1/consultation-sessions/:appointmentId/end` — `appointment:confirm`; assigned doctor. Body `{clientMutationId, notes?, followUp: {frequency: none|weekly|biweekly|monthly|quarterly|custom, intervalDays? (required for custom), plannedSessions?, instructions?}}`. In one transaction: records `endedAt`, `durationSeconds`, follow-up plan with computed `nextFollowUpAt`, SHA-256 versioned clinical note, appointment `completed`, sync-ledger entry. Errors: 409 `CONSULTATION_NOT_STARTED`, `CONSULTATION_ALREADY_ENDED`.
+- `GET /api/v1/consultation-sessions/history[?patientId=]` — patient: own sessions; doctor: own sessions at own facility. Returns `{sessions[{appointmentId, patientName, doctorName, consultationMode, startedAt, endedAt, durationSeconds, followUp}], totalSessions, visitsByPatient}`.
+- `GET /api/v1/consultations/appointments/my` and `GET /api/v1/consultations/doctor/appointments` now include an additive `session` object (start/end/duration/follow-up).
+- Socket `consultation:join`: the assigned doctor may open the room at any time once confirmed; a patient may join whenever the doctor has an active session (otherwise the previous slot window applies). `consultation:joined` adds `startedAt`.
+- `GET /api/ai/screenings/:screeningId/summary` — patient (own) or facility-scoped staff. Patient-safe DEMO AI view: `riskLevel` (low/moderate/high), visual finding type, site, visual findings, reasons flagged, warning signs, per-image `confidence`, next step (`withinDays`), clinician review status, `modelCard`. No disease names; all text passes the prohibited-terms filter.
+- `GET /api/ai/model-card` — returns `{validated:false}` unless real evaluation metrics are configured via `AI_MODEL_EVALUATION` (JSON) or `AI_MODEL_EVALUATION_FILE` (default `server/config/model-evaluation.json`): `{modelVersion, datasetDescription, sampleSize, evaluatedAt, accuracy, sensitivity?, specificity?, notes?}`. Metrics are never generated by the platform.
+- `POST /api/ai/screenings/:screeningId/reanalyze` — patient (own) or facility-scoped screening roles; body `{clientId: UUID v4, language?}`. Re-runs the detailed Gemini analysis on the stored private photo and creates a NEW `aiscreenings` record with `reanalysisOf` → original (the original is never modified). Idempotent on `clientId`. 503 `AI_PROVIDER_BUSY` if every Gemini model is overloaded.
+- `GET /api/ai/screenings/:screeningId/summary` now also returns `analysisSource` (`detailed`|`basic`), `analyzedBy`, `lowConfidence`, `summary`, `possibleConditions` (general names a doctor may check for; prohibited wording removed), `possibleCauses`, `thingsToAvoid`, `whatToTellDoctor`, `whenToSeekReview`, `imageRef`, `reanalysisOf`, and `nextStep.facility`/`reason`.
+- Gemini calls: configured `GEMINI_MODEL` first, then `GEMINI_FALLBACK_MODELS` (default `gemini-3.5-flash,gemini-flash-latest,gemini-flash-lite-latest`); 429/5xx/timeouts retried (`GEMINI_ATTEMPTS_PER_MODEL`, default 2) within `GEMINI_TOTAL_BUDGET_MS` (default 110000). The API key is sent in the `x-goog-api-key` header. Unsafe phrases are dropped individually instead of discarding the whole analysis.
+
+### Admin doctor onboarding (2026-11-12)
+All routes: `requireAuth` + `hospital:manage` + role `admin` (own facility) or `system_admin` (all facilities).
+- `GET /api/v1/admin/doctors/reference` — facilities in scope, oral departments (DCI-recognised MDS specialties + general dentistry, ENT/head & neck, general medicine), qualifications, registration councils, languages.
+- `GET /api/v1/admin/doctors?status=all|pending|verified|rejected&q=&hospitalId=` — doctors in scope with `doctorCode`, department, qualifications, experience, fee, languages, modes, council details, document IDs; plus `counts`.
+- `POST /api/v1/admin/doctors/documents` (multipart `file`, `hospitalId`) — private qualification document upload (PDF/JPG/PNG ≤ 8 MB, magic-byte checked).
+- `POST /api/v1/admin/doctors` — creates a `medical_officer` (pending verification) with a unique `doctorCode` (`AD-DR-00001`…, atomic counter, never reused). Optional `username`/`password`; defaults: login ID = Doctor ID, strong generated password. Returns `credentials {doctorId, loginId, temporaryPassword}` once; only the Argon2 hash is stored. Transactional with the Specialist registry entry. 409 on duplicate login ID or council number.
+- `POST /api/v1/admin/doctors/:userId/verify` | `/reject {reason}` | `/reset-password` — scoped to the admin's facility.
+- `POST /api/v1/auth/login` now also accepts the Doctor ID as the username.
+- `GET /api/v1/consultations/availability` doctors now include `consultationFee`, `experienceYears`, `consultationModes`, `doctorCode`.
+
+### Availability windows, patient records, live-call captures, Cloudinary (2026-11-12)
+- `POST /api/v1/consultations/doctor/availability/range` — verified doctor; `{date, startTime 'HH:mm', endTime 'HH:mm', durationMinutes (10|15|20|30|45|60), breakMinutes?, mutationId}` (India time). Splits the window into slots, skipping past/overlapping ones; idempotent via sync ledger.
+- `GET /api/v1/consultations/doctor/availability` — own slots with `status` (`available|booked|past`), `durationMinutes`, and the booking (patient name) for booked slots. `DELETE /api/v1/consultations/doctor/availability/:slotId` — only unbooked slots.
+- `GET /api/v1/consultations/availability/:doctorId?date=` — patients get every slot of the day with `status`/`isAvailable`; never who booked.
+- Booking conflicts are now per doctor (unique index `uniq_active_slot_per_doctor`); OPD bookings without a doctor remain facility-wide. The legacy facility-wide index is dropped at server start.
+- `GET /api/v1/patient-records/:patientId` — verified doctor; patients registered at the doctor's facility or booked with the doctor (Invariant 7). Returns profile, screenings (patient-safe summaries + image refs), prescriptions, appointments, consultations (times/follow-up), versioned notes, captures and `activity` (who viewed/prescribed/consulted/reviewed). Every lookup is audit-logged (`PATIENT_RECORD_ACCESSED` / `_DENIED`).
+- `GET /api/v1/patient-records/:patientId/files/:fileId` — streams a patient image after the same access check (no public URLs).
+- `POST /api/v1/consultation-sessions/:appointmentId/captures` (multipart `image`, `clientId`, `note?`) — assigned doctor, active session only; saved privately to the patient record. `POST /api/v1/consultation-sessions/captures/:captureId/analyze` — DEMO AI analysis, requires the patient's `screening_ai_analysis` consent. `GET /api/v1/consultation-sessions/captures/my` — patient's own captures. Socket event `consultation:capture-notice` tells the patient a capture was taken.
+- Storage: when `CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET` are set, new files go to Cloudinary as `type: authenticated` assets and are fetched server-side through short-lived signed URLs after JWT + scope checks; falls back to GCS, then local private storage.
+
+### Simple patient registration & login (2026-11-12)
+- `GET /api/v1/patient/easy/places` — public mandal and village list (English/Telugu/Hindi names), used by registration.
+- `POST /api/v1/patient/easy/register` — `{method: aadhaar|abha|mobile, fullName, yearOfBirth, gender, mandalId, village, address?, pincode?, phoneToken?, abhaNumber?, consent: true, clientMutationId}`. Strict schema (rejects any Aadhaar number, card image or QR field; Invariant 5). Aadhaar: card read + Verhoeff check in the browser, no OTP required; optional mobile. Mobile/ABHA: `phoneToken` from `/api/v1/otp/verify` (purpose REGISTER) required. ABHA stored only as HMAC + masked form (not verified with ABDM in this demo). Facility assigned from the mandal catchment. Idempotent via sync ledger; 409 on duplicate mobile/ABHA. Returns session tokens.
+- `POST /api/v1/patient/easy/login/send-otp` `{phone | abhaNumber}` → OTP to the registered mobile (masked in response). `POST /api/v1/patient/easy/login` `{phone | abhaNumber, otp}` → session.
+- Fixes: Aadhaar-photo registration now stores mobile as `+91XXXXXXXXXX` (previously unreachable by mobile login); `/api/v1/patient/auth/login` accepts both stored formats.
+
+### Facility operations (2026-11-13)
+All routes: `requireAuth` + `hospital:manage`; role `system_admin` (any facility) or `admin` (own `hospitalId` only).
+- `GET /api/v1/facility-ops/:hospitalId/overview` — beds (total/occupied/wards), medicines (items/low/out/expiring in 60 days), equipment (units/needs repair), staff (doctors verified/pending, facility admins).
+- Facility admins: `GET|POST /:hospitalId/admins` (POST system_admin only; creates role `admin` scoped to the facility; returns login ID + temporary password once), `POST /:hospitalId/admins/:userId/reset-password` (system_admin).
+- Wards/beds: `GET|POST /:hospitalId/wards`, `PATCH|DELETE /:hospitalId/wards/:wardId` (occupied ≤ total enforced).
+- Medicines: `GET|POST /:hospitalId/medicines`, `PATCH|DELETE /:hospitalId/medicines/:itemId`, `POST /:hospitalId/medicines/:itemId/stock` `{quantity, direction: in|out, reason, note?}` (atomic, never below zero, immutable movement log), `GET /:hospitalId/medicines/:itemId/movements`.
+- Equipment: `GET|POST /:hospitalId/equipment`, `PATCH|DELETE /:hospitalId/equipment/:equipmentId` (working ≤ total enforced).
+- Transactions: multi-document writes use `runInTransaction` (server/src/utils/transaction.ts). Replica sets/Atlas run real transactions; a standalone dev MongoDB runs the same steps without a session (previously failed with "Transaction numbers are only allowed on a replica set member").
+# Doctor patient lookup access update — 2026-11-13
+
+`GET /api/v1/patient-records/:patientId` permits authenticated, active, verified doctors with an assigned facility and `patient:read` to read records for an exact existing patient ID across facilities. No appointment is required for reading. Unknown IDs return 404. `access.reason` can be `verified_doctor_lookup`; `access.canPrescribe` reflects the existing facility/appointment relationship and does not authorize prescription creation. Existing mutation routes retain their own checks.
+
+`GET /api/v1/patient-records/:patientId/files/:fileId` applies the same doctor checks and requires the file to belong to that exact patient and not be deleted. Record and file reads are audited and sent with `Cache-Control: private, no-store`. There is no public file URL or unrestricted patient-list endpoint. This is the project-owner's explicit exception to facility scoping dated 2026-11-13.

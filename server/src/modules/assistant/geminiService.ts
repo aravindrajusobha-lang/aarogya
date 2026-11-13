@@ -56,12 +56,24 @@ export interface GeminiChatResult {
   doctorRecommendation?: DoctorRecommendation;
 }
 
-const patientResponseBlockedPattern = /\b(?:cancer|malignant|carcinoma|curative)\b|\bstage\s*(?:\d+|[ivx]+)\b|\bdiagnostic confirmation\b/i;
+export const patientResponseBlockedPattern = /\b(?:cancer|malignant|carcinoma|curative)\b|\bstage\s*(?:\d+|[ivx]+)\b|\bdiagnostic confirmation\b/i;
 
-function ensureSafePatientText(values: Array<string | undefined>): void {
-  if (values.some((value) => typeof value === 'string' && (patientResponseBlockedPattern.test(value) || /\b(?:is|are|shows|indicates|confirms)\s+(?:a\s+)?(?:diagnosis|condition|disease)\b/i.test(value)))) {
-    throw new Error('Gemini response was withheld by the patient-safety content check.');
-  }
+const diagnosticClaimPattern = /\b(?:is|are|shows|indicates|confirms)\s+(?:a\s+)?(?:diagnosis|condition|disease)\b/i;
+
+/** True when text contains prohibited wording (Invariant 1) or a definitive diagnostic claim. */
+export function isUnsafePatientText(value: unknown): boolean {
+  return typeof value === 'string' && (patientResponseBlockedPattern.test(value) || diagnosticClaimPattern.test(value));
+}
+
+/** Returns trimmed text, or the fallback when the text is empty or unsafe (the rest of the analysis is kept). */
+function safeText(value: unknown, fallback: string, maxLength: number): string {
+  const text = typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+  return text && !isUnsafePatientText(text) ? text : fallback;
+}
+
+/** Cleans a list and drops individual unsafe items instead of discarding the whole response. */
+function safeList(value: unknown, maxItems = 5): string[] {
+  return cleanPatientTextList(value, maxItems).filter((item) => !isUnsafePatientText(item));
 }
 
 function cleanPatientTextList(value: unknown, maxItems = 5): string[] {
@@ -91,7 +103,8 @@ export function isGeminiConfigured(): boolean {
  */
 export function getGeminiModelName(): string {
   const model = process.env.GEMINI_MODEL?.trim();
-  if (!model || model === 'gemini-1.5-flash' || model === 'gemini-2.5-flash') {
+  // Respect the configured model; only retired 1.5 names fall back to the default.
+  if (!model || model.startsWith('gemini-1.5')) {
     return 'gemini-flash-lite-latest';
   }
   return model;
@@ -100,53 +113,74 @@ export function getGeminiModelName(): string {
 /**
  * Calls the configured Gemini model using native fetch and a bounded timeout.
  */
-async function callGeminiApi(payload: any): Promise<any> {
+/** Ordered list of models to try: configured model first, then GEMINI_FALLBACK_MODELS (comma-separated). */
+export function getGeminiModelChain(): string[] {
+  const fallbacks = (process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash,gemini-flash-latest,gemini-flash-lite-latest')
+    .split(',').map((item) => item.trim()).filter((item) => item && !item.startsWith('gemini-1.5'));
+  return Array.from(new Set([getGeminiModelName(), ...fallbacks]));
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+/** Concatenates the answer text, skipping "thought" parts emitted by thinking models. */
+function extractCandidateText(responseJson: any): string {
+  const parts: any[] = responseJson?.candidates?.[0]?.content?.parts || [];
+  return parts.filter((part) => typeof part?.text === 'string' && !part.thought).map((part) => part.text).join('').trim();
+}
+
+/**
+ * Calls Gemini with retries and a model fallback chain.
+ * Overloaded (503), rate-limited (429) and timed-out calls are retried with backoff, then the next model is tried.
+ * The API key travels in the x-goog-api-key header so it never appears in URLs or logs.
+ */
+async function callGeminiApi(payload: any): Promise<{ json: any; model: string }> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
-  const primaryModel = getGeminiModelName();
-  const fallbackCandidates = [primaryModel];
-
+  const attemptsPerModel = Math.max(1, Number(process.env.GEMINI_ATTEMPTS_PER_MODEL || 2));
+  const deadline = Date.now() + Math.max(15_000, Number(process.env.GEMINI_TOTAL_BUDGET_MS || 110_000));
   let lastError: Error | null = null;
 
-  for (const model of fallbackCandidates) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+  for (const model of getGeminiModelChain()) {
+    for (let attempt = 1; attempt <= attemptsPerModel; attempt += 1) {
+      const remaining = deadline - Date.now();
+      if (remaining < 3_000) throw lastError || new Error('Gemini analysis time budget exhausted');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const controller = new AbortController();
+      const timeoutMs = Math.min(45_000, remaining);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-      clearTimeout(timeoutId);
+        if (res.ok) return { json: await res.json(), model };
 
-      if (!res.ok) {
         const errText = await res.text();
-        logger.warn({ status: res.status, errText: errText.slice(0, 160), model }, 'Configured Gemini model request failed');
         lastError = new Error(`Gemini API returned HTTP ${res.status} on ${model}: ${errText.slice(0, 180)}`);
-        if (res.status === 404 || res.status === 503 || res.status === 429) {
-          continue;
+        logger.warn({ status: res.status, model, attempt }, 'Gemini model request failed');
+        if (res.status === 404) break; // model unavailable for this key: try the next model
+        if (!RETRYABLE_STATUS.has(res.status)) throw lastError; // 400/401/403: retrying will not help
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err?.name === 'AbortError') {
+          lastError = new Error(`Gemini API call timed out after ${Math.round(timeoutMs / 1000)} seconds on ${model}`);
+          logger.warn({ model, attempt }, 'Gemini model call timed out');
+        } else if (err instanceof Error && /HTTP (400|401|403)/.test(err.message)) {
+          throw err;
+        } else {
+          lastError = err instanceof Error ? err : new Error(String(err));
         }
-        throw lastError;
       }
-
-      return await res.json();
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        logger.warn({ model }, 'Configured Gemini model call timed out');
-        lastError = new Error(`Gemini API call timed out after 45 seconds on ${model}`);
-        continue;
-      }
-      lastError = err;
+      if (attempt < attemptsPerModel) await sleep(1_200 * attempt + Math.floor(Math.random() * 400));
     }
   }
 
@@ -177,36 +211,43 @@ export async function analyzeOralPhotoWithGemini(params: {
     kn: 'clear, conversational Kannada script',
     ml: 'clear, conversational Malayalam script',
   };
-  const langPrompt = `Write all patient-facing text in ${languageNames[language]}. Use short sentences and explain unfamiliar health words simply.`;
+  const langPrompt = `Write all patient-facing text in ${languageNames[language]}. Use short sentences and explain unfamiliar health words simply. Keep the enum values (conditionCategory, riskTier, urgency, riskCategory) in English exactly as listed.`;
 
-  const systemPrompt = `You are Drishti AI, a community health navigation assistant for Aarogya-Drishti.
+  const systemPrompt = `You are Drishti AI, a community oral-health screening assistant for Aarogya-Drishti (DEMO AI screening support for frontline health workers in tribal areas).
 
-Use the photo only to describe visible features for DEMO AI screening support. Never diagnose, identify a disease, assign a stage, recommend medicine, or claim certainty. Explain that a qualified clinician must review any concern. Do not infer patient identity, history, or symptoms that are not provided. Suggest a clinician type and local facility only as navigation options; the clinician decides urgency and care.
+Your job: look carefully at the oral photo and give a detailed, well-organised description that helps the patient understand what is visible and how soon to see a doctor.
+Rules:
+- You do not make a final clinical decision. Never state that the patient definitely has a disease, never assign a grade, never recommend medicines or treatment, and never claim certainty.
+- Never use these words: cancer, malignant, malignancy, carcinoma, the word stage followed by a number, or the phrase diagnostic confirmation. To express serious concern, use the riskTier field and phrases such as "needs prompt examination by a doctor".
+- possibleConditions may list two to four common, general condition names that a doctor might consider for a similar appearance (for example: mouth ulcer, white patch (leukoplakia), lichen planus, fungal infection (oral thrush), gum inflammation, tooth decay). They are possibilities to discuss with a doctor only.
+- Describe visual findings precisely: colour, approximate size compared with nearby teeth, shape, borders (smooth or irregular), surface (smooth, rough, raised, ulcerated) and location.
+- Do not infer identity, history or symptoms that were not supplied. If the photo is blurry, too dark or does not show the mouth, say so and set confidenceScore low.
+- confidenceScore (0 to 1) means how clearly the photo shows the features you describe.
 ${langPrompt}
-The speechText field is read aloud. Use plain spoken sentences without markdown, emojis, or URLs.
+The speechText field is read aloud: plain spoken sentences without markdown, emojis or URLs.
 
-Respond only with valid JSON matching this structure. Do not name or diagnose a disease. Describe only what is visibly apparent, and distinguish that observation from general health education. Never claim that a cause applies to this patient. If the image is unclear, say so. Base general education only on NHS mouth-ulcer guidance (https://www.nhs.uk/conditions/mouth-ulcers/) and WHO oral-health guidance (https://www.who.int/news-room/fact-sheets/detail/oral-health); avoid speculation:
+Respond only with valid JSON matching this structure:
 {
-  "observedCondition": "plain description of visible appearance, or unclear",
+  "observedCondition": "one sentence describing the main visible appearance",
   "conditionCategory": "white_lesion | red_lesion | ulcerative | pigmented | dental_caries | benign_mucosa | other",
   "riskTier": "low_risk_support | moderate_risk_support | high_risk_support",
   "confidenceScore": 0.0,
-  "anatomicalSite": "visible location or unclear",
-  "visualFindings": ["visible feature"],
-  "recommendedDoctor": {"specialty": "appropriate clinician type", "facility": "facility name or ask local staff", "urgency": "routine | priority | urgent", "timelineDays": 0, "consultationReason": "screening support reason, without diagnosis"},
-  "urgentRedFlags": [],
+  "anatomicalSite": "visible location, e.g. left inner cheek, side of tongue, lower gum",
+  "visualFindings": ["3 to 6 specific visible features: colour, size, shape, borders, surface"],
+  "recommendedDoctor": {"specialty": "clinician type, e.g. dentist or oral medicine specialist", "facility": "facility type, e.g. nearest PHC or district hospital", "urgency": "routine | priority | urgent", "timelineDays": 14, "consultationReason": "short reason for the visit"},
+  "urgentRedFlags": ["signs that mean the patient should seek care quickly"],
   "lifestyleAdvice": [],
-  "imageObservation": "The photo appears to show a visible feature, or the image is unclear. This description may be inaccurate.",
-  "possibleConditions": ["one to three general educational condition names only; each is possible, not a diagnosis"],
-  "riskFactors": ["only factors supplied in the patient notes; never infer from the image"],
-  "possibleCauses": ["general, common causes of a similar appearance; clearly state these are possibilities and cannot be determined from the photo"],
-  "thingsToAvoid": ["general self-care avoidance guidance, never a treatment plan"],
-  "whatToTellClinician": ["useful details the patient can share at an appointment, such as when it started or whether it is changing"],
-  "whenToConsult": ["one to two week rule and urgent symptoms as general navigation guidance"],
-  "riskCategory": "low | moderate | high; based only on supplied risk factors and symptoms, never image alone",
-  "patientExplanation": "2-4 short sentences explaining what the image appears to show, what an image cannot establish, and why a clinician review matters",
-  "whenToSeekReview": ["clear, practical signs or timeframes for arranging an in-person review"],
-  "answerText": "same plain-language explanation for existing report and chat features",
+  "imageObservation": "2 to 3 sentences describing what the photo appears to show and its quality",
+  "possibleConditions": ["2 to 4 general condition names a doctor may consider"],
+  "riskFactors": ["only factors supplied in the patient notes; empty if none"],
+  "possibleCauses": ["2 to 4 common general causes of a similar appearance, e.g. sharp tooth edge, tobacco or betel use, infection"],
+  "thingsToAvoid": ["1 to 3 mouth-related habits to avoid until examined, e.g. tobacco, betel quid, touching the area"],
+  "whatToTellClinician": ["2 to 4 details to share with the doctor, e.g. when it started, pain, bleeding, growth"],
+  "whenToConsult": ["general timing guidance"],
+  "riskCategory": "low | moderate | high",
+  "patientExplanation": "3 to 5 short sentences: what is visible, what a photo cannot tell, and why the doctor visit matters",
+  "whenToSeekReview": ["2 to 4 practical signs or timeframes for an in-person review"],
+  "answerText": "same plain-language explanation",
   "speechText": "plain spoken version of the summary",
   "suggestedActions": ["Book a clinician visit"]
 }`;
@@ -217,7 +258,7 @@ Respond only with valid JSON matching this structure. Do not name or diagnose a 
         role: 'user',
         parts: [
           {
-            text: `Review this oral photo for screening support only. Patient notes: "${patientNote || 'No additional notes provided'}". Describe visible features cautiously and suggest a clinician type for an in-person review.`,
+            text: `Review this oral photo for screening support only. Patient notes: "${patientNote || 'No additional notes provided'}". Describe the visible features in detail and suggest a clinician type for an in-person review.`,
           },
           {
             inlineData: {
@@ -230,7 +271,7 @@ Respond only with valid JSON matching this structure. Do not name or diagnose a 
     ],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 2200,
+      maxOutputTokens: 6144,
       responseMimeType: 'application/json',
     },
     systemInstruction: {
@@ -238,19 +279,82 @@ Respond only with valid JSON matching this structure. Do not name or diagnose a 
     },
   };
 
-  const responseJson = await callGeminiApi(payload);
-  const textOutput = responseJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!textOutput) {
-    throw new Error('Gemini returned an empty response for oral photo analysis');
+  // A truncated or malformed JSON answer is retried once (the call itself already retries overloads).
+  let parsed: any;
+  let usedModel = getGeminiModelName();
+  let lastParseError: Error | null = null;
+  for (let attempt = 1; attempt <= 2 && !parsed; attempt += 1) {
+    const { json: responseJson, model } = await callGeminiApi(payload);
+    usedModel = model;
+    const textOutput = extractCandidateText(responseJson);
+    try {
+      if (!textOutput) throw new Error('Gemini returned an empty response for oral photo analysis');
+      const candidate = JSON.parse(textOutput.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+      validateOralAnalysis(candidate);
+      parsed = candidate;
+    } catch (parseError) {
+      lastParseError = parseError instanceof Error ? parseError : new Error(String(parseError));
+      logger.warn({ model, attempt, err: lastParseError.message.slice(0, 160) }, 'Gemini oral analysis response unusable');
+    }
   }
+  if (!parsed) throw lastParseError || new Error('Gemini returned an unusable oral photo analysis');
 
-  const parsed = JSON.parse(textOutput);
+  const patientExplanation = safeText(
+    typeof parsed.patientExplanation === 'string' && parsed.patientExplanation.trim() ? parsed.patientExplanation : parsed.answerText,
+    'The photo shows an area that a clinician should look at. A photo alone cannot tell the cause, so an in-person examination is important.',
+    1200,
+  );
+  const observedCondition = safeText(parsed.observedCondition, 'A visible change that needs clinician review.', 400);
+  const imageObservation = safeText(
+    typeof parsed.imageObservation === 'string' && parsed.imageObservation.trim() ? parsed.imageObservation : `The photo appears to show ${observedCondition}`,
+    'The photo shows an area that needs clinician review. This description may be inaccurate.',
+    1200,
+  );
+  const riskCategory = ['low', 'moderate', 'high'].includes(parsed.riskCategory) ? parsed.riskCategory as 'low' | 'moderate' | 'high' : 'low';
 
+  return {
+    observedCondition,
+    conditionCategory: parsed.conditionCategory,
+    riskTier: parsed.riskTier,
+    confidenceScore: parsed.confidenceScore,
+    anatomicalSite: safeText(parsed.anatomicalSite, 'Unclear from image', 200),
+    visualFindings: safeList(parsed.visualFindings, 6),
+    recommendedDoctor: {
+      specialty: safeText(parsed.recommendedDoctor.specialty, 'Dentist or medical officer', 120),
+      facility: safeText(parsed.recommendedDoctor.facility, 'Ask local health staff', 160),
+      urgency: parsed.recommendedDoctor.urgency,
+      timelineDays: Math.round(parsed.recommendedDoctor.timelineDays),
+      consultationReason: safeText(parsed.recommendedDoctor.consultationReason, 'An in-person clinician review is needed.', 300),
+    },
+    urgentRedFlags: safeList(parsed.urgentRedFlags),
+    lifestyleAdvice: safeList(parsed.lifestyleAdvice),
+    answerText: safeText(parsed.answerText, patientExplanation, 1600),
+    speechText: safeText(parsed.speechText, patientExplanation, 1200),
+    patientExplanation,
+    imageObservation,
+    possibleConditions: safeList(parsed.possibleConditions, 4),
+    riskFactors: safeList(parsed.riskFactors),
+    possibleCauses: safeList(parsed.possibleCauses),
+    thingsToAvoid: safeList(parsed.thingsToAvoid, 3),
+    whatToTellClinician: safeList(parsed.whatToTellClinician),
+    whenToConsult: safeList(parsed.whenToConsult),
+    whenToSeekReview: safeList(parsed.whenToSeekReview),
+    riskCategory,
+    informationSources: ORAL_HEALTH_INFORMATION_SOURCES,
+    language,
+    suggestedActions: safeList(parsed.suggestedActions),
+    disclaimer:
+      'DEMO AI SCREENING SUPPORT ONLY — CONTAINS NO CONFIRMED CLINICAL FINDINGS. REQUIRES IN-PERSON CLINICIAN REVIEW.',
+    analyzedByModel: usedModel,
+  };
+}
+
+/** Structural validation of the Gemini JSON (throws on unusable responses). */
+function validateOralAnalysis(parsed: any): void {
   const validRiskTiers = ['low_risk_support', 'moderate_risk_support', 'high_risk_support'];
   const validCategories = ['white_lesion', 'red_lesion', 'ulcerative', 'pigmented', 'dental_caries', 'benign_mucosa', 'other'];
   const validUrgencies = ['routine', 'priority', 'urgent'];
-  if (!validRiskTiers.includes(parsed.riskTier) || !validCategories.includes(parsed.conditionCategory)) {
+  if (!parsed || !validRiskTiers.includes(parsed.riskTier) || !validCategories.includes(parsed.conditionCategory)) {
     throw new Error('Gemini returned an incomplete screening support response.');
   }
   if (typeof parsed.confidenceScore !== 'number' || !Number.isFinite(parsed.confidenceScore) || parsed.confidenceScore < 0 || parsed.confidenceScore > 1) {
@@ -259,87 +363,12 @@ Respond only with valid JSON matching this structure. Do not name or diagnose a 
   if (!parsed.recommendedDoctor || typeof parsed.recommendedDoctor.specialty !== 'string' || !parsed.recommendedDoctor.specialty.trim()) {
     throw new Error('Gemini did not provide a clinician navigation suggestion.');
   }
-  if (!validUrgencies.includes(parsed.recommendedDoctor.urgency) || !Number.isInteger(parsed.recommendedDoctor.timelineDays) || parsed.recommendedDoctor.timelineDays < 0) {
+  if (!validUrgencies.includes(parsed.recommendedDoctor.urgency) || typeof parsed.recommendedDoctor.timelineDays !== 'number' || !Number.isFinite(parsed.recommendedDoctor.timelineDays) || parsed.recommendedDoctor.timelineDays < 0) {
     throw new Error('Gemini returned an invalid follow-up suggestion.');
   }
   if (typeof parsed.observedCondition !== 'string' || typeof parsed.answerText !== 'string' || typeof parsed.speechText !== 'string') {
     throw new Error('Gemini returned an incomplete screening support response.');
   }
-
-  const patientExplanation = typeof parsed.patientExplanation === 'string' && parsed.patientExplanation.trim()
-    ? parsed.patientExplanation.trim().slice(0, 1200)
-    : parsed.answerText.trim().slice(0, 1200);
-  const imageObservation = typeof parsed.imageObservation === 'string' && parsed.imageObservation.trim()
-    ? parsed.imageObservation.trim().slice(0, 1200)
-    : `The photo appears to show ${String(parsed.observedCondition || 'an area that needs clinician review')}. This description may be inaccurate.`;
-  const possibleConditions = cleanPatientTextList(parsed.possibleConditions, 3);
-  const riskFactors = cleanPatientTextList(parsed.riskFactors);
-  const possibleCauses = cleanPatientTextList(parsed.possibleCauses);
-  const thingsToAvoid = cleanPatientTextList(parsed.thingsToAvoid);
-  const whatToTellClinician = cleanPatientTextList(parsed.whatToTellClinician);
-  const whenToConsult = cleanPatientTextList(parsed.whenToConsult);
-  const whenToSeekReview = cleanPatientTextList(parsed.whenToSeekReview);
-  const visualFindings = cleanPatientTextList(parsed.visualFindings);
-  const urgentRedFlags = cleanPatientTextList(parsed.urgentRedFlags);
-  const lifestyleAdvice = cleanPatientTextList(parsed.lifestyleAdvice);
-  const suggestedActions = cleanPatientTextList(parsed.suggestedActions);
-  const riskCategory = ['low', 'moderate', 'high'].includes(parsed.riskCategory) ? parsed.riskCategory as 'low' | 'moderate' | 'high' : 'low';
-  ensureSafePatientText([
-    parsed.observedCondition,
-    parsed.answerText,
-    parsed.speechText,
-    patientExplanation,
-    imageObservation,
-    ...possibleConditions,
-    ...riskFactors,
-    parsed.recommendedDoctor.specialty,
-    parsed.recommendedDoctor.consultationReason,
-    ...possibleCauses,
-    ...thingsToAvoid,
-    ...whenToConsult,
-    ...whatToTellClinician,
-    ...whenToSeekReview,
-    ...visualFindings,
-    ...urgentRedFlags,
-    ...lifestyleAdvice,
-    ...suggestedActions,
-  ]);
-
-  return {
-    observedCondition: parsed.observedCondition,
-    conditionCategory: parsed.conditionCategory,
-    riskTier: parsed.riskTier,
-    confidenceScore: parsed.confidenceScore,
-    anatomicalSite: parsed.anatomicalSite || 'Unclear from image',
-    visualFindings,
-    recommendedDoctor: {
-      specialty: parsed.recommendedDoctor.specialty.trim(),
-      facility: typeof parsed.recommendedDoctor.facility === 'string' ? parsed.recommendedDoctor.facility : 'Ask local health staff',
-      urgency: parsed.recommendedDoctor.urgency,
-      timelineDays: parsed.recommendedDoctor.timelineDays,
-      consultationReason: typeof parsed.recommendedDoctor.consultationReason === 'string' ? parsed.recommendedDoctor.consultationReason : 'An in-person clinician review is needed.',
-    },
-    urgentRedFlags,
-    lifestyleAdvice,
-    answerText: parsed.answerText.trim().slice(0, 1600),
-    speechText: parsed.speechText.trim().slice(0, 1200),
-    patientExplanation,
-    imageObservation,
-    possibleConditions,
-    riskFactors,
-    possibleCauses,
-    thingsToAvoid,
-    whatToTellClinician,
-    whenToConsult,
-    whenToSeekReview,
-    riskCategory,
-    informationSources: ORAL_HEALTH_INFORMATION_SOURCES,
-    language,
-    suggestedActions,
-    disclaimer:
-      'DEMO AI SCREENING SUPPORT ONLY — CONTAINS NO CONFIRMED CLINICAL FINDINGS OR STAGING. REQUIRES IN-PERSON CLINICIAN REVIEW.',
-    analyzedByModel: getGeminiModelName(),
-  };
 }
 
 /**
@@ -425,8 +454,8 @@ Respond ONLY with a valid JSON object matching:
     },
   };
 
-  const responseJson = await callGeminiApi(payload);
-  const textOutput = responseJson?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const { json: responseJson } = await callGeminiApi(payload);
+  const textOutput = extractCandidateText(responseJson);
 
   if (!textOutput) {
     throw new Error('Gemini returned an empty conversational response');

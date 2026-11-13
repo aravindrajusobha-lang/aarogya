@@ -9,6 +9,7 @@ import { validate } from '../../middleware/validate.js';
 import { auditTag } from '../../middleware/auditTag.js';
 import { Prescription } from './prescriptionModel.js';
 import { Patient } from '../patient/patientModel.js';
+import { canTreatPatient, patientIdentity } from '../consultation/patientCareService.js';
 import { logger } from '../../config/logger.js';
 
 const router = Router();
@@ -43,8 +44,10 @@ async function canReadPrescription(user: any, patientId: string, hospitalId?: st
   if (account.role === 'patient') return account.patientId === patientId;
   if (account.role === 'system_admin') return true;
   if (!['medical_officer', 'specialist_doctor'].includes(account.role) || !account.hospitalId) return false;
-  const patient: any = await Patient.findOne({ patientId, hospitalId: account.hospitalId }).lean();
-  return Boolean(patient && (!hospitalId || hospitalId === account.hospitalId));
+  const patient: any = await patientIdentity(patientId);
+  if (!patient) return false;
+  const careAccess = await canTreatPatient(account.userId, patientId);
+  return Boolean((patient.hospitalId === account.hospitalId || careAccess) && (!hospitalId || hospitalId === account.hospitalId || careAccess));
 }
 
 // 1. POST /api/v1/prescriptions (Clinicians only)
@@ -69,9 +72,9 @@ router.post(
 
       const body = req.body;
       const doctor: any = await User.findOne({ userId: user.id || user.userId }).lean();
-      const patient: any = await Patient.findOne({ patientId: body.patientId }).lean();
-      if (!doctor || !patient || !['medical_officer', 'specialist_doctor'].includes(doctor.role) || !['verified', 'VERIFIED'].includes(doctor.verificationStatus) || doctor.hospitalId !== patient.hospitalId) {
-        res.envelopeError('ACCESS_DENIED', 'An approved treating doctor in the patient facility is required.', undefined, 403); return;
+      const patient: any = await patientIdentity(body.patientId);
+      if (!doctor || !patient || !(await canTreatPatient(doctor.userId, body.patientId))) {
+        res.envelopeError('ACCESS_DENIED', 'Approval from the current treating doctor is required.', undefined, 403); return;
       }
       if (body.mutationId) { const existing = await Prescription.findOne({ mutationId: body.mutationId, doctorId: doctor.userId, patientId: patient.patientId }); if (existing) { res.envelope({ prescription: existing }); return; } }
       const hospital: any = await Hospital.findOne({ hospitalId: doctor.hospitalId }).lean();
@@ -115,6 +118,14 @@ router.post(
 );
 
 // 2. GET /api/v1/prescriptions/:id
+router.get('/doctor/mine', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!['medical_officer', 'specialist_doctor'].includes(req.user!.role)) { res.status(403).envelopeError('DOCTOR_REQUIRED', 'Doctor access is required.', undefined, 403); return; }
+    const items = await Prescription.find({ doctorId: req.user!.id }).sort({ createdAt: -1 }).limit(200).lean();
+    res.setHeader('Cache-Control', 'private, no-store'); res.envelope({ prescriptions: items });
+  } catch (err) { next(err); }
+});
+
 router.get(
   '/:id',
   requireAuth,
@@ -157,7 +168,9 @@ router.get(
         return;
       }
 
-      const prescriptions = await Prescription.find({ patientId, ...(req.user!.role === 'patient' || req.user!.role === 'system_admin' ? {} : { hospitalId: req.user!.hospitalId }) }).sort({ createdAt: -1 }).lean();
+      const doctor: any = await User.findOne({ userId: req.user!.id || (req.user as any).userId }).lean();
+      const careAccess = req.user!.role !== 'patient' && req.user!.role !== 'system_admin' && doctor ? await canTreatPatient(doctor.userId, patientId) : false;
+      const prescriptions = await Prescription.find({ patientId, ...(req.user!.role === 'patient' || req.user!.role === 'system_admin' || careAccess ? {} : { hospitalId: req.user!.hospitalId }) }).sort({ createdAt: -1 }).lean();
 
       res.envelope({
         prescriptions,

@@ -8,6 +8,7 @@ import { storageRouter } from './modules/storage/storageRoutes.js';
 import { authRouter } from './modules/auth/authRoutes.js';
 import { otpRouter } from './modules/auth/otpRoutes.js';
 import { patientAuthRouter } from './modules/patient/patientAuthRoutes.js';
+import { patientEasyAuthRouter } from './modules/patient/patientEasyAuthRoutes.js';
 import { auditRouter } from './modules/audit/auditRoutes.js';
 import { consentRouter } from './modules/consent/consentRoutes.js';
 import { hospitalRouter } from './modules/hospital/hospitalRoutes.js';
@@ -26,6 +27,11 @@ import { biopsyRouter } from './modules/biopsy/biopsyRoutes.js';
 import { referralRouter } from './modules/referral/referralRoutes.js';
 import { teleconsultationRouter } from './modules/teleconsultation/teleconsultationRoutes.js';
 import { consultationRouter } from './modules/consultation/consultationRoutes.js';
+import { consultationSessionRouter } from './modules/consultation/consultationSessionRoutes.js';
+import { doctorAdminRouter } from './modules/doctorAdmin/doctorAdminRoutes.js';
+import { facilityOpsRouter } from './modules/facility/facilityOpsRoutes.js';
+import { patientRecordsRouter } from './modules/consultation/patientRecordsRoutes.js';
+import { patientCareRouter } from './modules/consultation/patientCareRoutes.js';
 import { mapRouter } from './modules/map/mapRoutes.js';
 import { reportRouter } from './modules/report/reportRoutes.js';
 import { aadhaarMockRouter } from './modules/aadhaar/aadhaarMockRoutes.js';
@@ -110,6 +116,7 @@ export function createApp(): Express {
   app.use('/api/v1/storage', storageRouter);
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/patient/auth', patientAuthRouter);
+  app.use('/api/v1/patient/easy', patientEasyAuthRouter);
   app.use('/api/patient', patientReportChatRouter);
   app.use('/api/patient', patientSupportRouter);
   app.use('/api/patient', patientTreatmentRouter);
@@ -119,6 +126,8 @@ export function createApp(): Express {
 
   // Phase 3 Administration Routes
   app.use('/api/v1/hospitals', hospitalRouter);
+  app.use('/api/v1/admin/doctors', doctorAdminRouter);
+  app.use('/api/v1/facility-ops', facilityOpsRouter);
   app.use('/api/v1/invitations', invitationRouter);
   app.use('/api/v1/specialists', specialistRouter);
   app.use('/api/v1/assignments', assignmentRouter);
@@ -157,6 +166,9 @@ export function createApp(): Express {
   // Phase 13 Teleconsultation Workflow
   app.use('/api/v1/teleconsultation', teleconsultationRouter);
   app.use('/api/v1/consultations', consultationRouter);
+  app.use('/api/v1/consultation-sessions', consultationSessionRouter);
+  app.use('/api/v1/patient-records', patientRecordsRouter);
+  app.use('/api/v1/patient-care', patientCareRouter);
 
   // Phase 14 Village Data Map
   app.use('/api/v1/map', mapRouter);

@@ -15,6 +15,7 @@ import { ScreeningPhoto } from '../screening/screeningPhotoModel.js';
 import { ScreeningService } from '../screening/screeningService.js';
 import { Consent } from '../consent/consentModel.js';
 import { validateMagicBytes } from '../storage/magicBytes.js';
+import { runInTransaction } from '../../utils/transaction.js';
 
 export const patientTreatmentRouter = Router();
 
@@ -94,10 +95,9 @@ patientTreatmentRouter.post(
     const patientId = patientIdOr403(req, res);
     if (!patientId) return;
     const { mutationId, prescriptionId } = req.body as z.infer<typeof StartPlanSchema>;
-    const session = await mongoose.startSession();
     try {
       let result: Record<string, unknown> = {};
-      await session.withTransaction(async () => {
+      await runInTransaction(async (session) => {
         const replay = await SyncLedger.findOne({ clientMutationId: mutationId, entityType: 'patient-treatment-plan', entityId: patientId }).session(session).lean();
         if (replay) {
           result = { ...(replay.responsePayload as Record<string, unknown>), idempotentReplay: true };
@@ -148,7 +148,7 @@ patientTreatmentRouter.post(
       });
       res.status(201).envelope(result);
     } catch (error) { next(error); }
-    finally { await session.endSession(); }
+    finally { /* session ended by runInTransaction */ }
   }
 );
 
@@ -257,10 +257,9 @@ patientTreatmentRouter.post(
     const patientId = patientIdOr403(req, res);
     if (!patientId) return;
     const body = req.body as z.infer<typeof SaveLogSchema>;
-    const session = await mongoose.startSession();
     try {
       let result: Record<string, unknown> = {};
-      await session.withTransaction(async () => {
+      await runInTransaction(async (session) => {
         const replay = await SyncLedger.findOne({ clientMutationId: body.mutationId, entityType: 'patient-treatment-log', entityId: patientId }).session(session).lean();
         if (replay) {
           result = { ...(replay.responsePayload as Record<string, unknown>), idempotentReplay: true };
@@ -318,6 +317,6 @@ patientTreatmentRouter.post(
       });
       res.status(200).envelope(result);
     } catch (error) { next(error); }
-    finally { await session.endSession(); }
+    finally { /* session ended by runInTransaction */ }
   }
 );

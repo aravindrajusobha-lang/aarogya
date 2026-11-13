@@ -115,7 +115,9 @@ router.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { username, password, deviceId, deviceName } = req.body;
-      const user = await User.findOne({ username: username.toLowerCase().trim() });
+      // Doctors may sign in with their login ID or their unique Doctor ID (e.g. AD-DR-00012).
+      const loginId = String(username).trim();
+      const user = await User.findOne({ $or: [{ username: loginId.toLowerCase() }, { doctorCode: loginId.toUpperCase() }] });
 
       if (!user) {
         res.envelopeError('INVALID_CREDENTIALS', 'Invalid username or password', undefined, 401);
@@ -252,7 +254,7 @@ router.post(
         village,
         mandal,
         pincode,
-        phone: mobile,
+        phone: mobile ? `+91${mobile}` : undefined,
         passwordHash: await hashPassword(uuidv4()),
         verificationStatus: 'UNVERIFIED',
         status: 'active',

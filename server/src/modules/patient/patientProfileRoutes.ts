@@ -7,6 +7,7 @@ import { validate } from '../../middleware/validate.js';
 import { authorizeCapability } from '../auth/authorizationEngine.js';
 import { User } from '../auth/userModel.js';
 import { SyncLedger } from './syncLedgerModel.js';
+import { runInTransaction } from '../../utils/transaction.js';
 
 export const patientProfileRouter = Router();
 
@@ -76,10 +77,9 @@ patientProfileRouter.put(
     const userId = patientUserOr403(req, res);
     if (!userId) return;
     const input = req.body as z.infer<typeof ProfileSchema>;
-    const session = await mongoose.startSession();
     try {
       let result: Record<string, unknown> = {};
-      await session.withTransaction(async () => {
+      await runInTransaction(async (session) => {
         const replay: any = await SyncLedger.findOne({ clientMutationId: input.mutationId, entityType: 'patient-profile', entityId: req.user!.id }).session(session).lean();
         if (replay) { result = { ...(replay.responsePayload as Record<string, unknown>), idempotentReplay: true }; return; }
         const user: any = await User.findOne({ userId, role: 'patient' }).session(session);
@@ -104,6 +104,6 @@ patientProfileRouter.put(
       });
       res.envelope(result);
     } catch (error) { next(error); }
-    finally { await session.endSession(); }
+    finally { /* session ended by runInTransaction */ }
   }
 );

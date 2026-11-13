@@ -295,7 +295,7 @@ router.post(
     try {
       const { phone, otp, password, deviceId, deviceName } = req.body;
 
-      const user = await User.findOne({ phone: `+91${phone}`, role: 'patient' });
+      const user = await User.findOne({ phone: { $in: [`+91${phone}`, phone] }, role: 'patient' });
       if (!user) {
         res.envelopeError('USER_NOT_FOUND', 'No patient account found with this phone number. Please register first.', undefined, 404);
         return;

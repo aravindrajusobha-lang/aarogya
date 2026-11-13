@@ -23,6 +23,7 @@ export interface AIRobotAssistantProps {
   onClose: () => void;
   authToken?: string;
   currentUser?: AuthUser | null;
+  isPatientContext?: boolean;
   onLoginSuccess?: (user: AuthUser, tokens: AuthTokens) => void;
   activeTab?: string;
 }
@@ -39,9 +40,10 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
   onClose,
   authToken,
   currentUser,
+  isPatientContext = false,
   activeTab = 'dashboard',
 }) => {
-  const isPatient = currentUser?.role?.toLowerCase() === 'patient';
+  const isPatient = isPatientContext || currentUser?.role?.toLowerCase() === 'patient';
   // Language & Auto-detection Hook
   const {
     currentLang,

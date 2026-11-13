@@ -10,6 +10,7 @@ import { NotificationPreferences } from './notificationPreferencesModel.js';
 import { NotificationQueue } from './notificationQueue.js';
 import { NOTIFICATION_TEMPLATES } from './templates.js';
 import { SyncLedger } from '../patient/syncLedgerModel.js';
+import { runInTransaction } from '../../utils/transaction.js';
 
 const router = Router();
 
@@ -254,12 +255,11 @@ router.put(
   validate({ body: UpdatePreferencesSchema }),
   auditTag('NOTIFICATION_PREFERENCES_UPDATE', 'notification_preferences'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const session = await mongoose.startSession();
     try {
       const userId = req.user!.id;
       const data = req.body;
       let responsePayload: Record<string, unknown> = {};
-      await session.withTransaction(async () => {
+      await runInTransaction(async (session) => {
         if (data.mutationId) {
           const replay: any = await SyncLedger.findOne({ clientMutationId: data.mutationId, entityType: 'notification-preferences', entityId: userId }).session(session).lean();
           if (replay) { responsePayload = { ...(replay.responsePayload as Record<string, unknown>), idempotentReplay: true }; return; }
@@ -286,7 +286,7 @@ router.put(
       res.status(200).envelope(responsePayload);
     } catch (err) {
       next(err);
-    } finally { await session.endSession(); }
+    } finally { /* session ended by runInTransaction */ }
   }
 );
 

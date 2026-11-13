@@ -8,6 +8,8 @@ import { initAgenda, stopAgenda } from './config/agenda.js';
 import { logger } from './config/logger.js';
 import { ensureStorageDirectory } from './modules/storage/storageService.js';
 import { runMasterSeed } from './modules/seed/masterSeed.js';
+import { backfillDoctorCodes } from './modules/doctorAdmin/doctorCodeService.js';
+import { migrateAppointmentSlotIndex } from './modules/appointment/appointmentIndexMigration.js';
 import { startConsultationScheduler, stopConsultationScheduler } from './modules/consultation/consultationScheduler.js';
 import { attachConsultationSocket } from './modules/consultation/consultationSocket.js';
 
@@ -18,6 +20,8 @@ async function bootstrap() {
     await ensureStorageDirectory();
     const conn = await connectDatabase();
     await runMasterSeed();
+    await migrateAppointmentSlotIndex();
+    await backfillDoctorCodes().catch((err) => logger.warn({ err: (err as Error).message }, 'Doctor ID backfill skipped'));
     await initAgenda({ mongoConnection: conn });
     startConsultationScheduler();
 

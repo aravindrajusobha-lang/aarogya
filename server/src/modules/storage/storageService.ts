@@ -14,6 +14,7 @@ import {
   deleteFromGcs,
   normalizeCategory,
 } from './gcsService.js';
+import { isCloudinaryConfigured, uploadToCloudinary, downloadFromCloudinary, deleteFromCloudinary } from './cloudinaryService.js';
 import { logger } from '../../config/logger.js';
 
 const STORAGE_ROOT = path.resolve(process.cwd(), 'storage', 'private_uploads');
@@ -39,6 +40,36 @@ export async function savePrivateFile(input: SaveFileInput): Promise<IStoredFile
   const fileId = uuidv4();
   const sha256Hash = crypto.createHash('sha256').update(input.buffer).digest('hex');
   const category = normalizeCategory(input.category);
+
+  // Preferred online storage: private Cloudinary (authenticated assets only)
+  if (isCloudinaryConfigured()) {
+    try {
+      const uploaded = await uploadToCloudinary({ buffer: input.buffer, fileId, category, mimeType: input.mimeType });
+      return await StoredFile.create({
+        fileId,
+        originalFilename: input.originalFilename,
+        mimeType: input.mimeType,
+        sizeBytes: input.buffer.length,
+        sha256Hash,
+        storedPath: `cloudinary://authenticated/${uploaded.resourceType}/${uploaded.publicId}`,
+        uploadedBy: input.uploader.id,
+        uploaderRole: input.uploader.role,
+        accessScopes: input.accessScopes || ['storage:read_clinical'],
+        simulation: true,
+        storageProvider: 'cloudinary',
+        cloudinaryPublicId: uploaded.publicId,
+        cloudinaryResourceType: uploaded.resourceType,
+        cloudinaryFormat: uploaded.format || null,
+        category,
+        patientId: input.patientId || null,
+        screeningReferenceId: input.screeningReferenceId || null,
+        uploadStatus: 'completed',
+        hospitalId: input.hospitalId || (input.uploader as any).hospitalId || null,
+      });
+    } catch (cloudErr: any) {
+      logger.warn({ err: cloudErr?.message }, 'Cloudinary upload failed; falling back to the next private storage provider');
+    }
+  }
 
   // Check if Google Cloud Storage is active
   if (isGcsConfigured()) {
@@ -162,6 +193,11 @@ export async function getAuthorizedFile(
 
   verifyFileAccess(record, user);
 
+  if (record.storageProvider === 'cloudinary' && record.cloudinaryPublicId) {
+    const buffer = await downloadFromCloudinary({ publicId: record.cloudinaryPublicId, resourceType: (record.cloudinaryResourceType as any) || 'image', format: record.cloudinaryFormat });
+    return { fileRecord: record, stream: Readable.from(buffer) };
+  }
+
   // If stored in GCS, stream from Google Cloud Storage
   if (record.storageProvider === 'gcs' && record.gcsObjectPath) {
     const buffer = await downloadFromGcs(record.gcsObjectPath);
@@ -236,7 +272,9 @@ export async function deleteAuthorizedFile(
 
   verifyFileAccess(record, user);
 
-  if (record.storageProvider === 'gcs' && record.gcsObjectPath) {
+  if (record.storageProvider === 'cloudinary' && record.cloudinaryPublicId) {
+    await deleteFromCloudinary({ publicId: record.cloudinaryPublicId, resourceType: (record.cloudinaryResourceType as any) || 'image' });
+  } else if (record.storageProvider === 'gcs' && record.gcsObjectPath) {
     await deleteFromGcs(record.gcsObjectPath);
   } else if (existsSync(record.storedPath)) {
     try {
@@ -250,4 +288,18 @@ export async function deleteAuthorizedFile(
   await record.save();
 
   return { success: true, message: 'File deleted successfully' };
+}
+
+
+/**
+ * Reads a stored file's bytes for server-side use AFTER the caller has done its own access check
+ * (e.g. the doctor patient-records proxy). Never expose this without an authorization check.
+ */
+export async function readStoredFileBuffer(record: IStoredFile): Promise<Buffer> {
+  if (record.storageProvider === 'cloudinary' && record.cloudinaryPublicId) {
+    return downloadFromCloudinary({ publicId: record.cloudinaryPublicId, resourceType: (record.cloudinaryResourceType as any) || 'image', format: record.cloudinaryFormat });
+  }
+  if (record.storageProvider === 'gcs' && record.gcsObjectPath) return downloadFromGcs(record.gcsObjectPath);
+  if (!existsSync(record.storedPath)) throw Object.assign(new Error('Physical file missing from private storage'), { statusCode: 404, code: 'FILE_DATA_MISSING' });
+  return fs.readFile(record.storedPath);
 }

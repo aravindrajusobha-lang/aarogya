@@ -275,10 +275,15 @@ const AppointmentSchema = new Schema<IAppointmentDocument>(
   }
 );
 
-// Compound partial unique index to prevent double bookings on active slots
+// Compound partial unique index to prevent double bookings on active slots.
+// Scoped per doctor: two doctors at one facility can see patients at the same time;
+// OPD bookings without an assigned doctor (assignedDoctorId null) stay facility-wide.
+export const APPOINTMENT_SLOT_INDEX_NAME = 'uniq_active_slot_per_doctor';
+export const LEGACY_APPOINTMENT_SLOT_INDEX_NAME = 'destinationHospitalId_1_slotStartTime_1_slotEndTime_1';
 AppointmentSchema.index(
-  { destinationHospitalId: 1, slotStartTime: 1, slotEndTime: 1 },
+  { destinationHospitalId: 1, assignedDoctorId: 1, slotStartTime: 1, slotEndTime: 1 },
   {
+    name: APPOINTMENT_SLOT_INDEX_NAME,
     unique: true,
     partialFilterExpression: {
       status: { $in: ['requested', 'confirmed', 'checked_in'] },

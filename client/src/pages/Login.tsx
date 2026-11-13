@@ -301,7 +301,7 @@ export const Login: React.FC<LoginProps> = ({
   const [doctorPassword, setDoctorPassword] = useState<string>('Doctor@2026');
 
   // Admin Credentials
-  const [adminUsername, setAdminUsername] = useState<string>('admin');
+  const [adminUsername, setAdminUsername] = useState<string>('admin.paderu');
   const [adminPassword, setAdminPassword] = useState<string>('Admin@2026');
 
   // Common UI State
@@ -740,7 +740,8 @@ export const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      setErrorMsg('Server authentication is unavailable. Demo auto-login is disabled. Please try again when the server is reachable.');
+      // Show the server's real reason (wrong credentials, locked account, backoff) instead of a generic outage message.
+      setErrorMsg(payload?.error?.message || (res.status >= 500 ? 'Server authentication is unavailable. Please try again when the server is reachable.' : 'Invalid username or password.'));
       return;
     } catch {
       setErrorMsg(
@@ -795,7 +796,7 @@ export const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      setErrorMsg('Server authentication is unavailable. Demo auto-login is disabled. Please try again when the server is reachable.');
+      setErrorMsg(payload?.error?.message || (res.status >= 500 ? 'Server authentication is unavailable. Please try again when the server is reachable.' : 'Invalid username or password.'));
       return;
     } catch {
       setErrorMsg(
@@ -845,7 +846,7 @@ export const Login: React.FC<LoginProps> = ({
         return;
       }
 
-      setErrorMsg('Server authentication is unavailable. Demo auto-login is disabled. Please try again when the server is reachable.');
+      setErrorMsg(payload?.error?.message || (res.status >= 500 ? 'Server authentication is unavailable. Please try again when the server is reachable.' : 'Invalid username or password.'));
       return;
     } catch {
       setErrorMsg(
@@ -1322,7 +1323,7 @@ export const Login: React.FC<LoginProps> = ({
                   type="text"
                   value={adminUsername}
                   onChange={(e) => setAdminUsername(e.target.value)}
-                  placeholder="admin"
+                  placeholder="admin.paderu"
                   required
                   style={{
                     width: '100%',

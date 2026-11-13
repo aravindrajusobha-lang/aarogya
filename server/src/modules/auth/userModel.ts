@@ -60,7 +60,24 @@ export interface IUser extends Document {
     specialization?: string;
     experienceYears?: number;
     rejectionReason?: string;
+    rejectedBy?: string;
+    rejectedAt?: Date;
+    department?: string;
+    departmentName?: string;
+    qualifications?: string[];
+    consultationFee?: number;
+    languages?: string[];
+    consultationModes?: string[];
+    councilName?: string;
   };
+  /** Unique human-readable doctor ID (e.g. AD-DR-00012); doctors may sign in with it. */
+  doctorCode?: string;
+  email?: string;
+  /** HMAC of the 14-digit ABHA number (never stored in clear) and its masked display form. */
+  abhaHash?: string;
+  abhaMasked?: string;
+  phoneVerified?: boolean;
+  registrationMethod?: string;
   // Extended Patient Profile Fields (Module 3)
   medicalHistory?: string;
   allergies?: string[];
@@ -164,7 +181,22 @@ const UserSchema = new Schema<IUser>(
       specialization: { type: String },
       experienceYears: { type: Number },
       rejectionReason: { type: String },
+      rejectedBy: { type: String },
+      rejectedAt: { type: Date },
+      department: { type: String },
+      departmentName: { type: String },
+      qualifications: [{ type: String }],
+      consultationFee: { type: Number, min: 0 },
+      languages: [{ type: String }],
+      consultationModes: [{ type: String }],
+      councilName: { type: String },
     },
+    doctorCode: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
+    abhaHash: { type: String, unique: true, sparse: true },
+    abhaMasked: { type: String },
+    phoneVerified: { type: Boolean, default: false },
+    registrationMethod: { type: String },
+    email: { type: String, lowercase: true, trim: true },
     // Extended Patient Profile Fields (Module 3)
     medicalHistory: { type: String, default: '' },
     allergies: { type: [String], default: [] },

@@ -1,5 +1,8 @@
-import { DoctorWorkspace } from './components/DoctorWorkspace';
-import { DoctorAppointmentsPanel } from './components/DoctorAppointmentsPanel';
+import { PatientPortal } from './portal/patient/PatientPortal';
+import { DoctorPortal } from './portal/doctor/DoctorPortal';
+import { AdminPortal } from './portal/admin/AdminPortal';
+import { HomePage, StaffLoginPage, PatientLoginPage as EasyPatientLoginPage } from './portal/public/PublicPages';
+import { PatientRegisterPage } from './portal/public/PatientRegisterPage';
 import React, { useState, useEffect } from 'react';
 import { SimulationBanner } from './components/SimulationBanner';
 import { OfflineStatusIndicator } from './components/OfflineStatusIndicator';
@@ -30,18 +33,10 @@ import { AuthPanel, AuthUser, AuthTokens } from './components/AuthPanel';
 import { clearStoredAuth, readStoredAuth, storeAuth, validateAccessToken } from './utils/session';
 import { AIRobotAssistant } from './components/AIRobotAssistant';
 import AarogyaDrishtiIntro from './components/AarogyaDrishtiIntro';
-import { DashboardLayout } from './components/DashboardLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { Login } from './pages/Login';
-import { LandingPage } from './pages/LandingPage';
 import { PatientDashboard } from './pages/dashboards/PatientDashboard';
-import { PatientLoginPage } from './pages/patient/PatientLoginPage';
-import { PatientAccountPage } from './pages/patient/PatientAccountPage';
-import { DoctorDashboard } from './pages/dashboards/DoctorDashboard';
 import { LiveVideoConsultationModal } from './components/LiveVideoConsultationModal';
-import { AdminDashboard } from './pages/dashboards/AdminDashboard';
 import { AiOralHealthEngine } from './components/AiEngine/AiOralHealthEngine';
-import { PageTransition } from './components/PageTransition';
 import { LanguagePreferenceModal } from './components/LanguagePreferenceModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { DailyConsultationPage } from './components/VideoConsultation';
@@ -354,7 +349,7 @@ export const App: React.FC = () => {
     const activeTitle = getPageTitle(mainTab);
 
     // Omnipresent Multilingual AI Assistant Chatbot ("Drishti AI")
-    const renderAssistant = () => (
+    const renderAssistant = (patientContext = false) => (
       <AIRobotAssistant
         currentLang={lang}
         onSelectLang={setLang}
@@ -368,7 +363,9 @@ export const App: React.FC = () => {
           } else if (tab === 'admin') {
             window.location.hash = '#/admin';
           } else if (tab === 'login') {
-            window.location.hash = '#/login';
+            window.location.hash = patientContext ? '#/patient/login' : '#/login';
+          } else if (tab === 'register' || tab === 'patient-register') {
+            window.location.hash = '#/patient/register';
           } else {
             setMainTab(tab as MainTabType);
           }
@@ -377,8 +374,9 @@ export const App: React.FC = () => {
         onClose={toggleNurseAssistant}
         authToken={tokens?.accessToken}
         currentUser={currentUser}
+        isPatientContext={patientContext}
         onLoginSuccess={handleLoginSuccess}
-        activeTab={mainTab}
+        activeTab={patientContext ? (currentRoute.split('?')[0] === '#/patient/register' ? 'patient-register' : currentRoute.startsWith('#/patient') ? 'patient' : 'patient-home') : mainTab}
       />
     );
 
@@ -398,74 +396,38 @@ export const App: React.FC = () => {
       );
     }
 
-    // 1A. ROUTE: /login -> Dedicated Login Screen (Patient, Doctor, Admin)
+    const changePublicLang = (chosen: LanguageCode) => {
+      setLang(chosen);
+      try { localStorage.setItem('aarogya_language', chosen); localStorage.setItem('aarogya_lang_prompted', 'true'); } catch { /* ignore */ }
+    };
+    const homeForRole = (roleName?: string) => {
+      const role = (roleName || '').toUpperCase();
+      if (role.includes('ADMIN') || role === 'DISTRICT_OFFICER') return '#/admin';
+      if (role === 'PATIENT' || role === 'COMMUNITY_VOLUNTEER') return '#/patient';
+      if (role.includes('DOCTOR') || role.includes('MEDICAL') || role === 'HOSPITAL_MANAGER') return '#/doctor';
+      return '#/';
+    };
+    const completeLogin = (user: AuthUser, userTokens: AuthTokens) => {
+      handleLoginSuccess(user, userTokens);
+      const returnRoute = sessionStorage.getItem('aarogya_post_login_route');
+      if (returnRoute) { sessionStorage.removeItem('aarogya_post_login_route'); window.location.hash = returnRoute; return; }
+      window.location.hash = homeForRole(user.role);
+    };
+
+    // 1A. ROUTE: /login — simple staff login (doctor / admin); patients use #/patient/login
     if (currentRoute.startsWith('#/login')) {
-      return (
-        <>
-          <PageTransition routeKey="#/login">
-            <SimulationBanner />
-            <LanguagePreferenceModal
-              isOpen={showLanguageModal}
-              currentLang={lang}
-              onSelectLanguage={(chosen) => {
-                setLang(chosen);
-                try {
-                  localStorage.setItem('aarogya_language', chosen);
-                  localStorage.setItem('aarogya_lang_prompted', 'true');
-                } catch {}
-              }}
-              onClose={() => setShowLanguageModal(false)}
-            />
-            <Login
-              currentLang={lang}
-              requireServerAuth={new URLSearchParams(currentRoute.split('?')[1] || '').get('liveVideo') === 'true'}
-              onSelectLang={(chosen) => {
-                setLang(chosen);
-                try {
-                  localStorage.setItem('aarogya_language', chosen);
-                } catch {}
-              }}
-              onLoginSuccess={(user, userTokens) => {
-                handleLoginSuccess(user, userTokens);
-                const returnRoute = sessionStorage.getItem('aarogya_post_login_route');
-                if (returnRoute) {
-                  sessionStorage.removeItem('aarogya_post_login_route');
-                  window.location.hash = returnRoute;
-                  return;
-                }
-                const role = (user.role || '').toUpperCase();
-                if (role.includes('ADMIN')) window.location.hash = '#/admin';
-                else if (role.includes('DOCTOR') || role.includes('MEDICAL')) window.location.hash = '#/doctor';
-                else window.location.hash = '#/patient';
-              }}
-              onNavigateHome={() => (window.location.hash = '#/')}
-              onPlayIntro={() => setShowIntro(true)}
-            />
-          </PageTransition>
-          {renderAssistant()}
-        </>
-      );
+      if (currentUser) return <PortalRedirect route={homeForRole(currentUser.role)} />;
+      return <StaffLoginPage lang={lang} onChangeLang={changePublicLang} onLoggedIn={({ user, tokens: userTokens }) => completeLogin(user, userTokens as AuthTokens)} />;
     }
 
     const patientAuthRoute = currentRoute.split('?')[0];
     if (['#/patient/login', '#/patient/register', '#/patient/forgot-password'].includes(patientAuthRoute)) {
       if (currentUser) return <PortalRedirect route="#/patient/dashboard" />;
-      if (patientAuthRoute === '#/patient/login') {
-        return <PatientLoginPage
-          currentLang={lang}
-          onSelectLang={(chosen) => { setLang(chosen); try { localStorage.setItem('aarogya_language', chosen); } catch {} }}
-          onLoginSuccess={(user, userTokens) => { handleLoginSuccess(user, userTokens); window.location.hash = '#/patient/dashboard'; }}
-          onNavigateToRegister={() => (window.location.hash = '#/patient/register')}
-          onNavigateToForgotPassword={() => (window.location.hash = '#/patient/forgot-password')}
-        />;
+      if (patientAuthRoute === '#/patient/register') {
+        return <><PatientRegisterPage lang={lang} onChangeLang={changePublicLang} onRegistered={({ user, tokens: userTokens }) => completeLogin(user, userTokens as AuthTokens)} />{renderAssistant(true)}</>;
       }
-      return <PatientAccountPage
-        mode={patientAuthRoute === '#/patient/register' ? 'register' : 'forgot-password'}
-        currentLang={lang}
-        onSelectLang={(chosen) => { setLang(chosen); try { localStorage.setItem('aarogya_language', chosen); } catch {} }}
-        onNavigateToLogin={() => (window.location.hash = '#/patient/login')}
-        onRegistrationSuccess={(user, userTokens) => { handleLoginSuccess(user, userTokens); window.location.hash = '#/patient/dashboard'; }}
-      />;
+      // Patients sign in with an OTP, so "forgot password" goes to the same simple login.
+      return <><EasyPatientLoginPage lang={lang} onChangeLang={changePublicLang} onLoggedIn={({ user, tokens: userTokens }) => completeLogin(user, userTokens as AuthTokens)} />{renderAssistant(true)}</>;
     }
 
     if (currentRoute.startsWith('#/appointment-consultation/')) {
@@ -488,7 +450,7 @@ export const App: React.FC = () => {
       const role = currentUser.role.toLowerCase();
       if (!['patient', 'medical_officer', 'specialist_doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
       if (!appointmentId) return <div className="login-page-root"><div className="login-card"><h2>This consultation is unavailable.</h2></div></div>;
-      return <><SimulationBanner /><LiveAppointmentRoom appointmentId={appointmentId} role={role === 'patient' ? 'patient' : 'doctor'} onClose={() => (window.location.hash = role === 'patient' ? '#/patient/consult' : '#/doctor')} /></>;
+      return <><SimulationBanner /><LiveAppointmentRoom appointmentId={appointmentId} role={role === 'patient' ? 'patient' : 'doctor'} onClose={() => (window.location.hash = role === 'patient' ? '#/patient/appointments' : '#/doctor')} /></>;
     }
 
   if (currentRoute.startsWith('#/consultation/direct/')) {
@@ -561,195 +523,74 @@ export const App: React.FC = () => {
     if (isLandingRoute) {
       return (
         <>
-          <PageTransition routeKey="#/home">
-            <SimulationBanner />
+          <HomePage lang={lang} onChangeLang={changePublicLang} />
+          {renderAssistant(true)}
+        </>
+      );
+    }
+
+    // 2. ROUTE: /admin — rebuilt admin portal (doctor onboarding, credentials, verification)
+    if (currentRoute.startsWith('#/admin')) {
+      return (
+        <>
+          <ProtectedRoute
+            allowedRoles={['ADMIN', 'SYSTEM_ADMIN', 'DISTRICT_OFFICER']}
+            currentUser={currentUser}
+            onRedirectToLogin={() => (window.location.hash = '#/login')}
+          >
+            <AdminPortal
+              currentUser={currentUser}
+              lang={lang}
+              onChangeLang={(chosen) => { setLang(chosen); try { localStorage.setItem('aarogya_language', chosen); } catch { /* ignore */ } }}
+              route={currentRoute}
+              onLogout={handleLogout}
+            />
+          </ProtectedRoute>
+        </>
+      );
+    }
+
+    const changePortalLang = (chosen: LanguageCode) => {
+      setLang(chosen);
+      try { localStorage.setItem('aarogya_language', chosen); } catch { /* ignore */ }
+    };
+
+    // 3. ROUTE: /doctor — rebuilt doctor portal (schedule, start/end consultations, follow-ups)
+    if (currentRoute.startsWith('#/doctor')) {
+      return (
+        <>
+          <ProtectedRoute
+            allowedRoles={['DOCTOR', 'SPECIALIST_DOCTOR', 'MEDICAL_OFFICER', 'CHIEF_MEDICAL_OFFICER', 'HOSPITAL_MANAGER']}
+            currentUser={currentUser}
+            onRedirectToLogin={() => (window.location.hash = '#/login')}
+          >
+            <DoctorPortal currentUser={currentUser} lang={lang} onChangeLang={changePortalLang} route={currentRoute} onLogout={handleLogout} />
+          </ProtectedRoute>
+        </>
+      );
+    }
+
+    // 4. ROUTE: /patient — rebuilt patient portal
+    if (currentRoute.startsWith('#/patient') || (isPatient && isLandingRoute)) {
+      return (
+        <>
+          <ProtectedRoute
+            allowedRoles={['PATIENT', 'COMMUNITY_VOLUNTEER']}
+            currentUser={currentUser}
+            onRedirectToLogin={() => (window.location.hash = '#/patient/login')}
+          >
             <LanguagePreferenceModal
               isOpen={showLanguageModal}
               currentLang={lang}
               onSelectLanguage={(chosen) => {
-                setLang(chosen);
-                try {
-                  localStorage.setItem('aarogya_language', chosen);
-                  localStorage.setItem('aarogya_lang_prompted', 'true');
-                } catch {}
+                changePortalLang(chosen);
+                try { localStorage.setItem('aarogya_lang_prompted', 'true'); } catch { /* ignore */ }
               }}
               onClose={() => setShowLanguageModal(false)}
             />
-            <LandingPage
-              currentLang={lang}
-              onSelectLang={(chosen) => {
-                setLang(chosen);
-                try { localStorage.setItem('aarogya_language', chosen); } catch {}
-              }}
-              currentUser={currentUser}
-              onNavigateLogin={() => (window.location.hash = '#/login')}
-              onNavigatePatient={() => (window.location.hash = '#/patient')}
-              onNavigateDoctor={() => (window.location.hash = '#/doctor')}
-              onNavigateAdmin={() => (window.location.hash = '#/admin')}
-              onOpenScreening={() => {
-                window.location.hash = currentUser ? '#/patient' : '#/login';
-              }}
-            />
-          </PageTransition>
-          {renderAssistant()}
-        </>
-      );
-    }
-
-    // 2. ROUTE: /admin
-    if (currentRoute.startsWith('#/admin')) {
-      return (
-        <>
-          <PageTransition routeKey="#/admin">
-            <ProtectedRoute
-              allowedRoles={['ADMIN', 'SYSTEM_ADMIN', 'DISTRICT_OFFICER']}
-              currentUser={currentUser}
-              onRedirectToLogin={() => (window.location.hash = '#/login')}
-            >
-              <DashboardLayout
-                currentUser={currentUser}
-                activeNav="dashboard"
-                onNavSelect={(nav) => setMainTab(nav as MainTabType)}
-                onLogout={handleLogout}
-                onToggleAIAssistant={toggleNurseAssistant}
-                title="Admin Portal"
-              >
-                <AdminDashboard
-                  currentUser={currentUser}
-                  onNavigateTab={(tab) => setMainTab(tab as any)}
-                />
-              </DashboardLayout>
-            </ProtectedRoute>
-          </PageTransition>
-          {renderAssistant()}
-        </>
-      );
-    }
-
-    // 3. ROUTE: /doctor
-    if (currentRoute.startsWith('#/doctor')) {
-      const requestedDoctorPage = currentRoute.split('?')[0].split('/')[2] || 'queue';
-      const doctorPage = requestedDoctorPage === 'high-risk' ? 'queue' : requestedDoctorPage;
-      return (
-        <>
-          <PageTransition routeKey="#/doctor">
-            <ProtectedRoute
-              allowedRoles={['DOCTOR', 'SPECIALIST_DOCTOR', 'MEDICAL_OFFICER', 'CHIEF_MEDICAL_OFFICER', 'HOSPITAL_MANAGER']}
-              currentUser={currentUser}
-              onRedirectToLogin={() => (window.location.hash = '#/login')}
-            >
-              <DashboardLayout
-                currentUser={currentUser}
-                currentLang={lang}
-                activeNav={doctorPage}
-                onNavSelect={(nav) => { window.location.hash = `#/doctor/${nav}`; }}
-                onLogout={handleLogout}
-                onToggleAIAssistant={toggleNurseAssistant}
-                title="Doctor Clinical Review Portal"
-              >
-                {doctorPage === 'appointments' ? <DoctorAppointmentsPanel onOpenRoom={id => { window.location.hash = `#/consultation/webrtc/${encodeURIComponent(id)}`; }} />
-                  : ['patients', 'availability', 'referrals', 'biopsy'].includes(doctorPage) ? <DoctorWorkspace key={doctorPage} page={doctorPage} />
-                  : doctorPage === 'ai-screening' ? <AiOralHealthEngine />
-                  : doctorPage === 'queue' ? <DoctorDashboard key={doctorPage} initialRiskFilter="ALL" currentUser={currentUser} currentLang={lang} onNavigateTab={tab => { window.location.hash = `#/doctor/${tab}`; }} />
-                  : <section className="dash-panel"><h1>Page not found</h1><a href="#/doctor/queue">Back to clinical queue</a></section>}
-              </DashboardLayout>
-            </ProtectedRoute>
-          </PageTransition>
-          {renderAssistant()}
-        </>
-      );
-    }
-
-    // 4. ROUTE: /patient (or patient landed on default route)
-    if (currentRoute.startsWith('#/patient') || (isPatient && isLandingRoute)) {
-      const patientPath = (currentRoute.split('?')[0].replace(/\/+$/, '') || '#/patient');
-      const patientSegments = patientPath.slice('#/patient'.length).split('/').filter(Boolean);
-      const patientTabByPath: Record<string, string> = {
-        dashboard: 'home', profile: 'profile', screening: 'screening', assessment: 'assessment',
-        consult: 'consultation', treatment: 'treatment', appointments: 'consultation',
-        reminders: 'consultation', help: 'consultation', history: 'history', reports: 'reports',
-        hospitals: 'hospitals', referrals: 'assessment', prescriptions: 'prescriptions', education: 'education', 'care-team': 'care-team',
-      };
-      const patientQueryTab = new URLSearchParams(currentRoute.split('?')[1] || '').get('tab');
-      const patientPathTab = patientSegments.length === 0
-        ? 'home'
-        : patientSegments[0] === 'screening' && patientSegments.length === 3 && patientSegments[2] === 'report'
-          ? 'report-detail'
-          : patientSegments[0] === 'reports' && patientSegments.length === 2
-            ? 'prescriptions'
-          : patientTabByPath[patientSegments[0]];
-      const validPatientTabs = new Set(['home', 'profile', 'screening', 'assessment', 'consultation', 'prescriptions', 'history', 'reports', 'hospitals', 'education', 'care-team', 'treatment', 'report-detail']);
-      const patientMenuTab = patientPath === '#/patient' && patientQueryTab
-        ? patientQueryTab
-        : patientPathTab || patientQueryTab || 'home';
-      const patientRouteNotFound = !validPatientTabs.has(patientMenuTab) || !patientPathTab;
-      return (
-        <>
-          <PageTransition routeKey="#/patient">
-            <ProtectedRoute
-              allowedRoles={['PATIENT', 'COMMUNITY_VOLUNTEER']}
-              currentUser={currentUser}
-              onRedirectToLogin={() => (window.location.hash = '#/patient/login')}
-            >
-              <LanguagePreferenceModal
-                isOpen={showLanguageModal}
-                currentLang={lang}
-                onSelectLanguage={(chosen) => {
-                  setLang(chosen);
-                  try {
-                    localStorage.setItem('aarogya_language', chosen);
-                    localStorage.setItem('aarogya_lang_prompted', 'true');
-                  } catch {}
-                }}
-                onClose={() => setShowLanguageModal(false)}
-              />
-              <DashboardLayout
-                currentUser={currentUser}
-                currentLang={lang}
-                activeNav={patientMenuTab}
-                onNavSelect={(nav) => {
-                  const patientTabMap: Record<string, string> = {
-                    dashboard: 'home',
-                    screening: 'screening',
-                    history: 'history',
-                    appointments: 'consultation',
-                    referrals: 'assessment',
-                    prescriptions: 'prescriptions',
-                    hospitals: 'hospitals',
-                    auth: 'care-team',
-                    notifications: 'consultation',
-                    help: 'education',
-                  };
-                  const targetTab = patientTabMap[nav] || 'screening';
-                  window.location.hash = `#/patient?tab=${targetTab}`;
-                }}
-                onLogout={handlePatientLogout}
-                onToggleAIAssistant={toggleNurseAssistant}
-                title="Patient Healthcare Navigation Portal"
-              >
-                {patientRouteNotFound ? (
-                  <section className="patient-route-not-found" role="status">
-                    <span aria-hidden="true">404</span>
-                    <h2>Page not found</h2>
-                    <p>This patient portal page is unavailable.</p>
-                    <button type="button" className="dash-btn dash-btn-primary" onClick={() => (window.location.hash = '#/patient/dashboard')}>Return to dashboard</button>
-                  </section>
-                ) : <PatientDashboard
-                  key={patientMenuTab}
-                  currentUser={currentUser}
-                  currentLang={lang}
-                  initialTab={(patientMenuTab as any) || 'home'}
-                  initialResourceId={patientSegments[1]}
-                  onOpenLanguageModal={() => setShowLanguageModal(true)}
-                  onToggleAIAssistant={toggleNurseAssistant}
-                  onNavigateTab={(tab) => {
-                    window.location.hash = `#/patient?tab=${tab}`;
-                  }}
-                />}
-              </DashboardLayout>
-            </ProtectedRoute>
-          </PageTransition>
-          {renderAssistant()}
+            <PatientPortal currentUser={currentUser} lang={lang} onChangeLang={changePortalLang} route={currentRoute.startsWith('#/patient') ? currentRoute : '#/patient'} onLogout={handlePatientLogout} />
+          </ProtectedRoute>
+          {renderAssistant(true)}
         </>
       );
     }
@@ -1264,7 +1105,6 @@ export const App: React.FC = () => {
         </div>
 
         {/* 4. Supported Multilingual 2D Animated AI Robotic Assistant ("Drishti AI") */}
-        {renderAssistant()}
       </div>
     );
   };

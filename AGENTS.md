@@ -52,6 +52,8 @@ Aarogya-Drishti is a community-based oral mucosal screening and healthcare navig
 - An original record is **never overwritten**. Amendments produce a version increment ($v_1 \to v_2$) while preserving the previous byte-identical record in history.
 
 ### Invariant 7: Zero Public Storage & Cross-Hospital Scoping
+- Project-owner transfer workflow (2026-11-13): verified doctors may select an exact patient ID through `/api/v1/patient-care`, list their own appointment/assigned patients, and request a transfer. Only the current treating doctor can approve a version-checked transfer. An approved assignment permits patient-specific screening and prescribing at the receiving doctor's facility; it never grants facility administration or bulk patient search. The doctor's Patients records screen remains view-only.
+- Project-owner exception (2026-11-13): active, verified doctors with a facility assignment may read a patient's records and associated private files across facilities by exact patient ID through `/api/v1/patient-records/:patientId` and its `/files/:fileId` GET route. Every successful access is audited. This exception does not grant cross-facility mutation, search/list, prescription, or administrative access.
 - No patient upload directory may be exposed statically. File downloads (`/api/v1/storage/files/:id`) must require JWT authentication and scope checks.
 - Non-system-admin staff cannot view, edit, or search patient records outside their assigned hospital facility or catchment mandals (Cross-Hospital Denial).
 

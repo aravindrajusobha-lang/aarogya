@@ -59,4 +59,31 @@ describe('Gemini patient education response', () => {
     expect(result.whenToSeekReview).toHaveLength(1);
     expect(result.informationSources?.some((source) => source.url.includes('nhs.uk'))).toBe(true);
   });
+
+  it('retries an overloaded model, then falls back to the next model in the chain', async () => {
+    vi.stubEnv('GEMINI_FALLBACK_MODELS', 'gemini-backup-model');
+    vi.stubEnv('GEMINI_ATTEMPTS_PER_MODEL', '2');
+    const overloaded = { ok: false, status: 503, text: async () => 'overloaded', json: async () => ({}) };
+    const success = { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'thinking…', thought: true }, { text: JSON.stringify(geminiJson) }] } }] }) };
+    const fetchMock = vi.fn().mockResolvedValueOnce(overloaded).mockResolvedValueOnce(overloaded).mockResolvedValueOnce(success);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await analyzeOralPhotoWithGemini({ imageBase64: 'aGVsbG8=', mimeType: 'image/jpeg', language: 'en' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('/models/gemini-backup-model:generateContent');
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('key=');
+    expect(result.analyzedByModel).toBe('gemini-backup-model');
+  }, 20000);
+
+  it('drops individual prohibited phrases instead of discarding the whole analysis', async () => {
+    const unsafe = { ...geminiJson, possibleConditions: ['mouth ulcer', 'oral carcinoma'], visualFindings: ['Raised white patch about 1 cm', 'looks malignant'] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(unsafe) }] } }] }) })));
+
+    const result = await analyzeOralPhotoWithGemini({ imageBase64: 'aGVsbG8=', mimeType: 'image/jpeg', language: 'en' });
+
+    expect(result.possibleConditions).toEqual(['mouth ulcer']);
+    expect(result.visualFindings).toEqual(['Raised white patch about 1 cm']);
+    expect(result.patientExplanation).toContain('cannot establish its cause');
+  });
 });
