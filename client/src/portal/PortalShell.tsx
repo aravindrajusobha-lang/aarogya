@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { LanguageCode } from '../i18n';
-import { SimulationBanner } from '../components/SimulationBanner';
 import { BrandMark, Icon } from './icons';
 import { initials, Translate } from './lib';
 import './portal.css';
@@ -62,7 +61,6 @@ export const PortalShell: React.FC<PortalShellProps> = ({ t, lang, onChangeLang,
 
   return (
     <div className="adp-root">
-      <SimulationBanner />
       <div className="adp-layout">
         <aside className={`adp-sidebar${drawerOpen ? ' is-open' : ''}`} aria-label={t('nav.menu')}>
           <div className="adp-brand">

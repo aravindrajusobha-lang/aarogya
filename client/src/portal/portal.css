@@ -582,7 +582,7 @@
    Brand: logo watermark on every portal / public page + home hero
    ========================================================================= */
 .adp-root {
-  background-image: url('/brand/aarogya-watermark.png');
+  background-image: url('/brand/aarogya-logo-768.png');
   background-repeat: no-repeat;
   background-position: center 58%;
   background-size: min(62vw, 460px) auto;
@@ -594,7 +594,7 @@
 }
 /* Dialog backdrops reuse .adp-root tokens but must not repeat the watermark. */
 .adp-root.adp-dialog-backdrop { background-image: none; }
-.live-appointment-room { background-image: url('/brand/aarogya-watermark.png'); background-repeat: no-repeat; background-position: center 60%; background-size: min(60vw, 420px) auto; background-attachment: fixed; }
+.live-appointment-room { background-image: url('/brand/aarogya-logo-768.png'); background-repeat: no-repeat; background-position: center 60%; background-size: min(60vw, 420px) auto; background-attachment: fixed; }
 
 .adp-sidebar .adp-brand { align-items: center; }
 .adp-public-brand img, .adp-brand img { filter: drop-shadow(0 2px 6px rgba(16, 40, 24, .12)); }
@@ -625,8 +625,8 @@
   .adp-public-lang button { padding: 6px 9px; font-size: .85rem; }
 }
 
-.adp-brand-badge { box-shadow: 0 4px 14px rgba(10, 30, 16, .22); }
-.adp-home-copy .adp-brand-badge { box-shadow: 0 14px 34px rgba(10, 30, 16, .28); }
+.adp-brand-badge { filter: drop-shadow(0 2px 8px rgba(10, 30, 16, .3)); }
+.adp-home-copy .adp-brand-badge { filter: drop-shadow(0 5px 18px rgba(10, 30, 16, .35)); }
 
 .adp-consent-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--adp-primary-soft); color: var(--adp-text); font-size: .95rem; line-height: 1.45; }
 .adp-consent-note svg { flex: none; margin-top: 2px; color: var(--adp-primary); }

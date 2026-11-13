@@ -785,8 +785,9 @@
 }
 
 .patient-sidebar-heading { display: flex; align-items: center; gap: 11px; padding: 4px 8px 15px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
-.patient-sidebar-brand { display: grid; grid-template-columns: 34px 1fr; grid-template-rows: auto auto; align-items: center; column-gap: 9px; margin: 0 6px 12px; padding: 5px 3px 13px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
-.patient-sidebar-brand > span { grid-row: span 2; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--success-bg); color: var(--success-text); font-size: 1.25rem; }
+.patient-sidebar-brand { display: grid; grid-template-columns: 42px 1fr; grid-template-rows: auto auto; align-items: center; column-gap: 9px; margin: 0 6px 12px; padding: 5px 3px 13px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.patient-sidebar-brand > img { grid-row: span 2; display: block; width: 40px; height: 40px; object-fit: contain; }
+.dash-sidebar-brand img.dash-brand-icon { object-fit: contain; background: transparent !important; box-shadow: none !important; }
 .patient-sidebar-brand strong { font-size: .9rem; line-height: 1.2; }
 .patient-sidebar-brand small { color: var(--text-secondary); font-size: .68rem; }
 .patient-sidebar-avatar { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 12px; background: var(--success-bg); color: var(--success-text); font-weight: 800; }
@@ -1231,7 +1232,7 @@
   .patient-dashboard-layout { grid-template-columns: 76px minmax(0, 1fr); gap: 16px; }
   .patient-dashboard-layout-fullwidth .patient-dashboard-sidebar { padding-inline: 7px; }
   .patient-sidebar-brand { grid-template-columns: 1fr; justify-items: center; }
-  .patient-sidebar-brand > span { grid-row: auto; }
+  .patient-sidebar-brand > img { grid-row: auto; }
   .patient-sidebar-brand strong, .patient-sidebar-brand small, .patient-sidebar-heading div, .patient-sidebar-item > span:last-child, .patient-sidebar-ai-note, .patient-sidebar-key > span:last-child { display: none; }
   .patient-sidebar-section-label { display: none; }
   .patient-sidebar-heading { justify-content: center; padding-inline: 0; }

@@ -151,39 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              <svg
-                viewBox="0 0 32 32"
-                width="24"
-                height="24"
-                fill="none"
-                className="leaf-svg"
-                style={{
-                  width: 24,
-                  height: 24,
-                  maxWidth: 24,
-                  maxHeight: 24,
-                  display: 'block',
-                  flexShrink: 0,
-                }}
-              >
-                <path
-                  d="M16 2C8 6 3 14 3 22C3 26.4 6.6 30 11 30C18 30 29 23 29 2C29 2 24 2 16 2Z"
-                  fill="url(#forestGradient)"
-                />
-                <path
-                  d="M16 2C15 12 11 20 5 26"
-                  stroke="#a3e635"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <circle cx="20" cy="12" r="3" fill="#34d399" />
-                <defs>
-                  <linearGradient id="forestGradient" x1="3" y1="2" x2="29" y2="30">
-                    <stop offset="0%" stopColor="#10b981" />
-                    <stop offset="100%" stopColor="#064e3b" />
-                  </linearGradient>
-                </defs>
-              </svg>
+              <img src="/brand/aarogya-mark.png" alt="Aarogya-Drishti logo" width={36} height={36} style={{ width: 36, height: 36, objectFit: 'contain' }} />
             </div>
 
             {!isCollapsed && (

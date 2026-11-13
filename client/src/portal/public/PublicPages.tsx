@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LanguageCode } from '../../i18n';
-import { SimulationBanner } from '../../components/SimulationBanner';
 import { BrandMark, Icon } from '../icons';
 import { makeT, Translate } from '../lib';
 import '../portal.css';
@@ -26,7 +25,6 @@ export { publicApi };
 /* ---------- Shell ---------- */
 export const PublicShell: React.FC<{ lang: LanguageCode; onChangeLang: (lang: LanguageCode) => void; children: React.ReactNode; t: Translate; narrow?: boolean }> = ({ lang, onChangeLang, children, t, narrow }) => (
   <div className="adp-root adp-public">
-    <SimulationBanner />
     <header className="adp-public-header">
       <a href="#/" className="adp-public-brand" aria-label="Aarogya-Drishti home"><BrandMark size={52} /><span><strong>Aarogya-Drishti</strong><small>{t('common.tagline')}</small></span></a>
       <div className="adp-public-lang" role="group" aria-label={t('common.language')}>

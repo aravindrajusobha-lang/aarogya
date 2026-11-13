@@ -187,7 +187,10 @@
     "directCallSent": "Call request sent. The patient can answer from their dashboard.",
     "directCallSessionExpired": "Your session expired. Please sign in again.",
     "directCallSignIn": "Sign in again",
-    "directCallDemoLogin": "You are in demo mode. Use a server-verified doctor or patient account for live video calls."
+    "directCallDemoLogin": "You are in demo mode. Use a server-verified doctor or patient account for live video calls.",
+    "directCallFlipCamera": "Flip camera",
+    "directCallSwitchingCamera": "Switching camera…",
+    "directCallCameraFlipError": "Could not switch camera. Check that another camera is available."
   },
   "aadhaarMock": {
     "title": "MOCK - Aadhaar Simulation Adapter",
@@ -738,6 +741,8 @@
     },
     "capture": {
       "take": "Capture photo",
+      "flipCamera": "Flip camera",
+      "switchingCamera": "Switching camera…",
       "taking": "Saving…",
       "saved": "Photo saved to the patient record.",
       "noVideo": "The patient video is not available yet.",

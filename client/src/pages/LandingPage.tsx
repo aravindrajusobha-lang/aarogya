@@ -802,7 +802,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           style={{ cursor: 'pointer' }}
           onClick={() => handleSectionSwitch('all')}
         >
-          <div className="landing-brand-logo">🌿</div>
+          <img className="landing-brand-logo" src="/brand/aarogya-mark.png" alt="Aarogya-Drishti logo" />
           <div className="landing-brand-text">
             <h1>{t.appName}</h1>
             <p>{t.subBrand}</p>

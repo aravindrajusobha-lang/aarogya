@@ -70,7 +70,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       <aside className={`dash-sidebar ${isMobileOpen ? 'mobile-open' : ''}`}>
         {/* Brand */}
         <div className="dash-sidebar-brand">
-          <div className="dash-brand-icon">🌿</div>
+          <img className="dash-brand-icon" src="/brand/aarogya-mark.png" alt="Aarogya-Drishti logo" />
           <div className="dash-brand-text">
             <span>Aarogya-Drishti</span>
             <span className="dash-brand-sub">ITDA Paderu Agency</span>

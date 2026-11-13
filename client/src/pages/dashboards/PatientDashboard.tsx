@@ -1182,7 +1182,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
       <aside className="patient-dashboard-sidebar" aria-label={currentLang === 'te' ? 'రోగి నావిగేషన్' : currentLang === 'hi' ? 'रोगी नेविगेशन' : 'Patient navigation'}>
-        <div className="patient-sidebar-brand"><span aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M3.5 16s4.4-8 12.5-8 12.5 8 12.5 8-4.4 8-12.5 8S3.5 16 3.5 16Z" stroke="currentColor" strokeWidth="2"/><circle cx="16" cy="16" r="3.5" fill="currentColor"/><path d="M22.5 5.5c-4.7 0-7.4 1.9-7.4 5.4 0 1 .3 1.8.8 2.5 1.9-2.6 4.1-4.4 7.2-5.6l-.6-2.3Z" fill="#4b8c73"/></svg></span><strong>Aarogya Drishti</strong><small>Patient Portal</small></div>
+        <div className="patient-sidebar-brand"><img src="/brand/aarogya-mark.png" alt="Aarogya-Drishti logo"/><strong>Aarogya Drishti</strong><small>Patient Portal</small></div>
         <div className="patient-sidebar-heading">
           <span className="patient-sidebar-avatar" aria-hidden="true">{patientName.slice(0, 1).toUpperCase()}</span>
           <div><strong>{patientName}</strong><span>{currentLang === 'te' ? 'రోగి పోర్టల్' : currentLang === 'hi' ? 'रोगी पोर्टल' : 'Patient portal'}</span></div>
@@ -1213,7 +1213,6 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       </aside>
 
       <main className="patient-dashboard-content">
-      <div className="patient-demo-banner" role="status">{'\u26a0\ufe0f SIMULATION SYSTEM \u2014 DEMO DATA ONLY \u2014 NOT FOR CLINICAL USE'}</div>
       {activeTab === 'home' && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}><HealthCardButton patient={currentUser} language={currentLang} /></div>}
       <nav className="patient-global-breadcrumb" aria-label="Breadcrumb"><button type="button" onClick={() => switchTab('home')}>Patient Portal</button><span aria-hidden="true">/</span><span>{activeTab === 'report-detail' ? 'Oral Screening / Report' : activeTab.replace('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())}</span></nav>
       {activeTab !== 'home' && activeTab !== 'report-detail' && <header className="patient-route-title"><h1>{({ profile: 'Health Profile', screening: 'Oral Screening', assessment: 'AI Assessment & Referrals', consultation: 'Consultation', appointments: 'Consultation', history: 'Reports & History', treatment: 'Treatment Tracking', reminders: 'Consultation', help: 'Consultation', referrals: 'Referral Tracking', prescriptions: 'Treatment', reports: 'Medical Reports', hospitals: 'Hospitals', education: 'Health Education', 'care-team': 'Care Team' } as Record<string, string>)[activeTab] || 'Patient Portal'}</h1></header>}

@@ -1,6 +1,5 @@
 import React, { useRef, useState } from 'react';
 import { LanguageCode, translations } from '../../i18n';
-import { SimulationBanner } from '../../components/SimulationBanner';
 import { LanguageSwitcher } from '../../components/LanguageSwitcher';
 import { extractIdentityFromImages, IdentityDocumentKind } from '../../services/localIdentityOcr';
 import '../../styles/PatientAuth.css';
@@ -206,12 +205,11 @@ export const PatientAccountPage: React.FC<PatientAccountPageProps> = ({
 
   return (
     <>
-      <SimulationBanner />
       <div className="patient-auth-language"><LanguageSwitcher currentLang={currentLang} onSelect={onSelectLang} /></div>
       <main className="patient-auth-page patient-auth-page-register">
         <div className="patient-auth-shell patient-auth-shell-register">
           <aside className="patient-auth-intro" aria-label={labels.portal}>
-            <div className="patient-auth-brand-mark" aria-hidden="true">AD</div>
+            <img className="patient-auth-brand-mark" src="/brand/aarogya-mark.png" alt="Aarogya-Drishti logo" />
             <p className="patient-auth-eyebrow">{labels.portal}</p>
             <h1>{mode === 'register' ? labels.registerTitle : labels.forgotPassword}</h1>
             <p className="patient-auth-intro-copy">{mode === 'register' ? labels.registerSubtitle : labels.recoverySubtitle}</p>

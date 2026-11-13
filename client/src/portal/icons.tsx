@@ -35,7 +35,7 @@ export const Icon = {
   stop: make(<rect x="6" y="6" width="12" height="12" rx="2" />),
 };
 
-/** Official Aarogya-Drishti logo, shown as its native dark badge (crisp at small sizes). Size = px. */
+/** High-resolution mark cropped from the supplied full logo artwork. */
 export const BrandMark: React.FC<{ size?: number }> = ({ size = 44 }) => (
-  <img className="adp-brand-badge" src={size > 128 ? '/brand/aarogya-badge-360.png' : '/brand/aarogya-badge-128.png'} alt="" aria-hidden="true" width={size} height={size} style={{ display: 'block', flex: 'none', borderRadius: Math.round(size * 0.24), objectFit: 'cover' }} />
+  <img className="adp-brand-badge" src="/brand/aarogya-mark.png" alt="" aria-hidden="true" width={size} height={size} style={{ display: 'block', flex: 'none', objectFit: 'contain' }} />
 );

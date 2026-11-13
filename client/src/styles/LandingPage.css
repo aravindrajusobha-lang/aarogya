@@ -105,14 +105,7 @@
 .landing-brand-logo {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
-  background: var(--success-bg);
-  color: var(--success-text);
-  border: 1.5px solid var(--success-text);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
+  object-fit: contain;
 }
 
 .landing-brand-text h1 {

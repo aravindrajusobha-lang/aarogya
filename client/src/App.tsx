@@ -4,7 +4,6 @@ import { AdminPortal } from './portal/admin/AdminPortal';
 import { HomePage, StaffLoginPage, PatientLoginPage as EasyPatientLoginPage } from './portal/public/PublicPages';
 import { PatientRegisterPage } from './portal/public/PatientRegisterPage';
 import React, { useState, useEffect } from 'react';
-import { SimulationBanner } from './components/SimulationBanner';
 import { OfflineStatusIndicator } from './components/OfflineStatusIndicator';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { Sidebar } from './components/Sidebar';
@@ -110,7 +109,6 @@ const AppointmentConsultationRoute: React.FC<{
   const role = currentUser.role === 'patient' ? 'patient' : 'medical_officer';
   const close = () => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor');
   return <>
-    <SimulationBanner />
     <LiveVideoConsultationModal
       consultationId={appointmentId}
       inviteToken={inviteToken}
@@ -450,7 +448,7 @@ export const App: React.FC = () => {
       const role = currentUser.role.toLowerCase();
       if (!['patient', 'medical_officer', 'specialist_doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
       if (!appointmentId) return <div className="login-page-root"><div className="login-card"><h2>This consultation is unavailable.</h2></div></div>;
-      return <><SimulationBanner /><LiveAppointmentRoom appointmentId={appointmentId} role={role === 'patient' ? 'patient' : 'doctor'} onClose={() => (window.location.hash = role === 'patient' ? '#/patient/appointments' : '#/doctor')} /></>;
+      return <LiveAppointmentRoom appointmentId={appointmentId} role={role === 'patient' ? 'patient' : 'doctor'} onClose={() => (window.location.hash = role === 'patient' ? '#/patient/appointments' : '#/doctor')} />;
     }
 
   if (currentRoute.startsWith('#/consultation/direct/')) {
@@ -462,7 +460,7 @@ export const App: React.FC = () => {
     const role = currentUser.role.toLowerCase();
     if (!['patient', 'medical_officer', 'specialist_doctor', 'doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
     if (!callId) return <div className="login-page-root"><div className="login-card"><h2>This video call is unavailable.</h2></div></div>;
-    return <><SimulationBanner /><DailyConsultationPage directCallId={callId} role={role === 'patient' ? 'patient' : 'doctor'} currentLang={lang} onClose={() => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor')} /></>;
+    return <DailyConsultationPage directCallId={callId} role={role === 'patient' ? 'patient' : 'doctor'} currentLang={lang} onClose={() => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor')} />;
   }
 
   if (currentRoute.startsWith('#/consultation/appointment/')) {
@@ -474,7 +472,7 @@ export const App: React.FC = () => {
     const role = currentUser.role.toLowerCase();
     if (!['medical_officer', 'specialist_doctor', 'doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join as the assigned doctor.</h2></div></div>;
     if (!appointmentId) return <div className="login-page-root"><div className="login-card"><h2>This consultation is unavailable.</h2></div></div>;
-    return <><SimulationBanner /><DailyConsultationPage appointmentId={appointmentId} role="doctor" currentLang={lang} onClose={() => (window.location.hash = '#/doctor')} /></>;
+    return <DailyConsultationPage appointmentId={appointmentId} role="doctor" currentLang={lang} onClose={() => (window.location.hash = '#/doctor')} />;
   }
 
   if (currentRoute.startsWith('#/consultation/join/')) {
@@ -485,11 +483,11 @@ export const App: React.FC = () => {
     }
     const role = currentUser.role.toLowerCase();
     if (!['patient', 'medical_officer', 'specialist_doctor', 'doctor'].includes(role)) return <div className="login-page-root"><div className="login-card"><h2>This account cannot join this consultation.</h2></div></div>;
-    return <><SimulationBanner /><DailyConsultationPage token={raw} role={role === 'patient' ? 'patient' : 'doctor'} currentLang={lang} onClose={() => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor')} /></>;
+    return <DailyConsultationPage token={raw} role={role === 'patient' ? 'patient' : 'doctor'} currentLang={lang} onClose={() => (window.location.hash = role === 'patient' ? '#/patient' : '#/doctor')} />;
   }
 
     if (currentRoute.startsWith('#/consultation-demo/')) {
-      return <><SimulationBanner /><div className="login-page-root"><div className="login-card" role="status"><h2>Demo video rooms are unavailable</h2><p>Open an online appointment confirmed by your assigned doctor to join a private live room.</p><button className="login-submit-btn" onClick={() => (window.location.hash = currentUser?.role?.toLowerCase() === 'patient' ? '#/patient/consult' : '#/doctor')}>Return to your portal</button></div></div></>;
+      return <div className="login-page-root"><div className="login-card" role="status"><h2>Demo video rooms are unavailable</h2><p>Open an online appointment confirmed by your assigned doctor to join a private live room.</p><button className="login-submit-btn" onClick={() => (window.location.hash = currentUser?.role?.toLowerCase() === 'patient' ? '#/patient/consult' : '#/doctor')}>Return to your portal</button></div></div>;
     }
     if (!authChecked) {
       return <div className="login-page-root" aria-live="polite">Checking session…</div>;
@@ -638,9 +636,6 @@ export const App: React.FC = () => {
         />
         {/* Intro Animation Overlay */}
         {showIntro && <AarogyaDrishtiIntro onComplete={() => setShowIntro(false)} />}
-
-        {/* 1. Mandatory Non-dismissible Simulation Header (AGENTS.md Invariant 2) */}
-        <SimulationBanner />
 
         <div className="app-master-layout">
           {/* 2. Preserved Side Dashboard Navigation */}

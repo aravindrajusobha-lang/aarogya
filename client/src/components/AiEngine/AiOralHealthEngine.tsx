@@ -469,24 +469,6 @@ export const AiOralHealthEngine: React.FC<AiOralHealthEngineProps> = ({
         margin: '0 auto',
       }}
     >
-      {/* Simulation Banner (Invariant 2) */}
-      <div
-        style={{
-          background: 'var(--warning-bg)',
-          color: 'var(--warning-text)',
-          padding: '8px 14px',
-          borderRadius: '8px',
-          fontWeight: 800,
-          fontSize: '0.75rem',
-          textAlign: 'center',
-          letterSpacing: '0.8px',
-          marginBottom: '16px',
-          border: '1px solid var(--border)',
-        }}
-      >
-        ⚠️ SIMULATION SYSTEM — DEMO DATA ONLY — NOT FOR CLINICAL USE
-      </div>
-
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
         <div>

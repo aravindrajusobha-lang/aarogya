@@ -30,6 +30,8 @@ export const LiveAppointmentRoom: React.FC<{ appointmentId: string; role: 'patie
   const [peerReady, setPeerReady] = useState(false);
   const [connected, setConnected] = useState(false);
   const [cameraOn, setCameraOn] = useState(true);
+  const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
+  const [switchingCamera, setSwitchingCamera] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [roomInfo, setRoomInfo] = useState<JoinedRoom | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -70,7 +72,7 @@ export const LiveAppointmentRoom: React.FC<{ appointmentId: string; role: 'patie
     setError(''); setState('Requesting local camera and microphone access…');
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('Camera and microphone require HTTPS (or localhost) in a supported browser.');
-      const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: { ideal: 960 }, height: { ideal: 540 } } });
+      const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: { ideal: 'user' } } });
       if (!mounted.current) { localStream.getTracks().forEach(t => t.stop()); return; }
       stream.current = localStream;
       if (localVideo.current) localVideo.current.srcObject = localStream;
@@ -127,6 +129,48 @@ export const LiveAppointmentRoom: React.FC<{ appointmentId: string; role: 'patie
 
   const toggleCamera = () => { const next = !cameraOn; setCameraOn(next); stream.current?.getVideoTracks().forEach((track) => { track.enabled = next; }); };
   const toggleMic = () => { const next = !micOn; setMicOn(next); stream.current?.getAudioTracks().forEach((track) => { track.enabled = next; }); };
+  const flipCamera = async () => {
+    const activeStream = stream.current;
+    const currentTrack = activeStream?.getVideoTracks()[0];
+    if (!activeStream || !currentTrack || switchingCamera) return;
+    setSwitchingCamera(true);
+    try {
+      const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
+      try {
+        await currentTrack.applyConstraints({ facingMode: { exact: nextFacing } });
+        setCameraFacing(nextFacing);
+        setError('');
+        return;
+      } catch {
+        // Some mobile browsers require a replacement track to change cameras.
+      }
+      const replacementStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
+      const replacementTrack = replacementStream.getVideoTracks()[0];
+      if (!replacementTrack) {
+        replacementStream.getTracks().forEach((track) => track.stop());
+        throw new Error('No camera was available to switch to.');
+      }
+      const sender = peer.current?.getSenders().find((item) => item.track?.kind === 'video');
+      if (sender) {
+        try { await sender.replaceTrack(replacementTrack); }
+        catch (error) { replacementStream.getTracks().forEach((track) => track.stop()); throw error; }
+      }
+      replacementTrack.enabled = cameraOn;
+      const nextStream = new MediaStream([...activeStream.getAudioTracks(), replacementTrack]);
+      stream.current = nextStream;
+      if (localVideo.current) {
+        localVideo.current.srcObject = nextStream;
+        await localVideo.current.play().catch(() => undefined);
+      }
+      currentTrack.stop();
+      setCameraFacing(nextFacing);
+      setError('');
+    } catch (switchError) {
+      setError(switchError instanceof Error ? switchError.message : 'Could not switch camera. Check that another camera is available.');
+    } finally {
+      setSwitchingCamera(false);
+    }
+  };
 
   const saveNotes = async (): Promise<boolean> => {
     if (role !== 'doctor' || (!notes.trim() && !followUp.trim())) return true;
@@ -227,7 +271,7 @@ export const LiveAppointmentRoom: React.FC<{ appointmentId: string; role: 'patie
 
   return <main className="live-appointment-room" aria-labelledby="live-appointment-title">
     <header className="live-room-header">
-      <div className="live-room-heading"><span className="live-room-eyebrow">PRIVATE APPOINTMENT ROOM</span><h1 id="live-appointment-title">Secure video consultation</h1><p>Appointment <strong>{appointmentId}</strong></p></div>
+      <div className="live-room-heading" style={{ display: 'flex', alignItems: 'center', gap: 12 }}><img src="/brand/aarogya-mark.png" alt="Aarogya-Drishti logo" width={48} height={48} style={{ objectFit: 'contain', flex: 'none' }} /><div><span className="live-room-eyebrow">PRIVATE APPOINTMENT ROOM</span><h1 id="live-appointment-title">Secure video consultation</h1><p>Appointment <strong>{appointmentId}</strong></p></div></div>
       <div className={`live-room-status ${connected ? 'connected' : ''}`} aria-live="polite"><span className="live-room-status-dot" />{state}</div>
     </header>
     {error && <p className="live-appointment-error" role="alert">{error}</p>}
@@ -238,7 +282,7 @@ export const LiveAppointmentRoom: React.FC<{ appointmentId: string; role: 'patie
         <div className="live-local-video"><video ref={localVideo} autoPlay muted playsInline aria-label="Your camera preview" /><span>You</span></div>
       </section>
       <aside className="live-room-sidebar">
-        <section className="live-room-card live-room-call-card"><div className="live-room-card-heading"><div><span>CONSULTATION</span><h2>{role === 'doctor' ? 'Doctor controls' : 'Join your doctor'}</h2></div><span className={`live-room-badge ${joined ? 'is-live' : ''}`}>{connected ? 'Connected' : joined ? 'In room' : 'Not started'}</span></div><p>{joined ? state : role === 'doctor' ? 'Start the appointment room when you are ready.' : 'Your doctor must start the room before you can join.'}</p><div className="live-appointment-controls">{!joined && <button type="button" className="live-control-primary" onClick={() => void startRoom()}>{role === 'doctor' ? 'Start consultation' : 'Join live call'}</button>}{joined && <><button type="button" aria-pressed={cameraOn} onClick={toggleCamera}>{cameraOn ? 'Turn camera off' : 'Turn camera on'}</button><button type="button" aria-pressed={micOn} onClick={toggleMic}>{micOn ? 'Mute microphone' : 'Unmute microphone'}</button></>}{role === 'doctor' && joined && <button type="button" className="live-control-danger" disabled={saving} onClick={() => void finishAppointment()}>{saving ? 'Saving…' : 'End consultation'}</button>}<button type="button" className="live-control-quiet" onClick={leaveRoom}>{role === 'doctor' ? 'Leave room' : 'Leave call'}</button></div></section>
+        <section className="live-room-card live-room-call-card"><div className="live-room-card-heading"><div><span>CONSULTATION</span><h2>{role === 'doctor' ? 'Doctor controls' : 'Join your doctor'}</h2></div><span className={`live-room-badge ${joined ? 'is-live' : ''}`}>{connected ? 'Connected' : joined ? 'In room' : 'Not started'}</span></div><p>{joined ? state : role === 'doctor' ? 'Start the appointment room when you are ready.' : 'Your doctor must start the room before you can join.'}</p><div className="live-appointment-controls">{!joined && <button type="button" className="live-control-primary" onClick={() => void startRoom()}>{role === 'doctor' ? 'Start consultation' : 'Join live call'}</button>}{joined && <><button type="button" disabled={switchingCamera} onClick={() => void flipCamera()}>{switchingCamera ? tt('capture.switchingCamera') : tt('capture.flipCamera')}</button><button type="button" aria-pressed={cameraOn} onClick={toggleCamera}>{cameraOn ? 'Turn camera off' : 'Turn camera on'}</button><button type="button" aria-pressed={micOn} onClick={toggleMic}>{micOn ? 'Mute microphone' : 'Unmute microphone'}</button></>}{role === 'doctor' && joined && <button type="button" className="live-control-danger" disabled={saving} onClick={() => void finishAppointment()}>{saving ? 'Saving…' : 'End consultation'}</button>}<button type="button" className="live-control-quiet" onClick={leaveRoom}>{role === 'doctor' ? 'Leave room' : 'Leave call'}</button></div></section>
         {joined && <section className="live-room-card live-room-chat"><div className="live-room-card-heading"><div><span>MESSAGES</span><h2>Consultation chat</h2></div></div><div className="live-room-chat-log" role="log" aria-live="polite">{messages.length ? messages.map(item => <p key={item.messageId}><strong>{item.role === 'patient' ? 'Patient' : 'Doctor'}</strong><span>{item.text}</span></p>) : <p className="live-room-empty">Messages shared here are visible to both participants.</p>}</div><form onSubmit={event => { event.preventDefault(); if (message.trim()) { socket.current?.emit('consultation:chat', { messageId: crypto.randomUUID(), text: message.trim() }); setMessage(''); } }}><label className="sr-only" htmlFor="live-consult-message">Message</label><input id="live-consult-message" value={message} maxLength={2000} onChange={e => setMessage(e.target.value)} placeholder="Write a message…" /><button type="submit" disabled={!message.trim()}>Send</button></form>{role === 'doctor' && roomInfo?.patientId && <button className="live-room-prescribe" onClick={() => setPrescribe(true)}>Issue prescription</button>}</section>}
         {role === 'doctor' && joined && <section className="live-room-card live-room-capture">
           <div className="live-room-card-heading"><div><span>DOCTOR ONLY</span><h2>{tt('capture.take')}</h2></div><a className="live-room-record-link" href={`#/doctor/patients?id=${encodeURIComponent(roomInfo?.patientId || '')}`} target="_blank" rel="noreferrer">{tt('records.open')}</a></div>
