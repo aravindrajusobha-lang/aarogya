@@ -19,6 +19,6 @@ export function installApiBaseUrl(): void {
 
     const target = `${API_BASE_URL}${url.pathname}${url.search}${url.hash}`;
     const request = input instanceof Request ? new Request(target, input) : target;
-    return originalFetch(request, { ...init, credentials: init?.credentials ?? 'include' });
+    return originalFetch(request, { ...init, credentials: init?.credentials ?? 'same-origin' });
   };
 }
