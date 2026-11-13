@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AuthUser } from '../../components/AuthPanel';
 import {
   analyzeMucosalLesion,
+  evaluateImageQualityClient,
   generateCombinedReport,
+  ImageQualityCheckResult,
   IMucosalLesionResult,
 } from '../../services/aiEngineService';
 import { getClientTranslation, LanguageCode, translations } from '../../i18n';
@@ -750,6 +752,8 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   const [capturedImagePreview, setCapturedImagePreview] = useState<string | null>(null);
   const [pendingCaptureFile, setPendingCaptureFile] = useState<File | null>(null);
   const [pendingCapturePreview, setPendingCapturePreview] = useState<string | null>(null);
+  const [pendingPhotoQuality, setPendingPhotoQuality] = useState<ImageQualityCheckResult | null>(null);
+  const [isCheckingPhotoQuality, setIsCheckingPhotoQuality] = useState(false);
   const cameraText = (key: string, fallback: string) => {
     const path = `patientCamera.${key}`;
     const translated = getClientTranslation(translations[currentLang] || translations.en, path);
@@ -824,6 +828,52 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
     window.addEventListener('aarogya:stop-camera', stopForLogout);
     return () => window.removeEventListener('aarogya:stop-camera', stopForLogout);
   }, []);
+
+  useEffect(() => {
+    if (!pendingCaptureFile) {
+      setPendingPhotoQuality(null);
+      setIsCheckingPhotoQuality(false);
+      return;
+    }
+
+    let cancelled = false;
+    const imageUrl = URL.createObjectURL(pendingCaptureFile);
+    const image = new Image();
+    setPendingPhotoQuality(null);
+    setIsCheckingPhotoQuality(true);
+    image.onload = () => {
+      try {
+        const maxDimension = 1200;
+        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas is unavailable');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const quality = evaluateImageQualityClient(canvas, context);
+        if (!cancelled) setPendingPhotoQuality(quality);
+      } catch {
+        if (!cancelled) setPendingPhotoQuality({ ok: false, reason: null, blurScore: 0, brightness: 0 });
+      } finally {
+        if (!cancelled) setIsCheckingPhotoQuality(false);
+        URL.revokeObjectURL(imageUrl);
+      }
+    };
+    image.onerror = () => {
+      if (!cancelled) {
+        setPendingPhotoQuality({ ok: false, reason: null, blurScore: 0, brightness: 0 });
+        setIsCheckingPhotoQuality(false);
+      }
+      URL.revokeObjectURL(imageUrl);
+    };
+    image.src = imageUrl;
+
+    return () => {
+      cancelled = true;
+      URL.revokeObjectURL(imageUrl);
+    };
+  }, [pendingCaptureFile]);
 
   const cameraErrorMessage = (error: unknown): string => {
     const name = typeof error === 'object' && error && 'name' in error ? String((error as { name?: string }).name || '') : '';
@@ -1038,6 +1088,11 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Image processing is unavailable in this browser.');
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const quality = evaluateImageQualityClient(canvas, context);
+      if (!quality.ok) {
+        setPendingPhotoQuality(quality);
+        return;
+      }
       clearPendingCapture();
       await processCanvasImage(canvas);
     } catch (error) {
@@ -1298,6 +1353,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
             </div>
 
             <p className="patient-muted-copy" style={{ marginBottom: '16px' }}>Photo-capture consent is recorded during registration. Uploads are checked against that consent before analysis.</p>
+            <p className="patient-muted-copy" style={{ marginBottom: '16px' }}>{cameraText('clarityGuidance', 'Photos are checked for clarity before DEMO AI screening support. You can retake any photo before using it.')}</p>
             {screeningHistoryError && <p className="patient-inline-error" role="alert">{screeningHistoryError}</p>}
 
             {/* Input Switcher: Camera vs. File Upload */}
@@ -1500,11 +1556,19 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                 <div>
                   <h4>{cameraText('reviewTitle', 'Review your photo')}</h4>
                   <p>{cameraText('reviewHelp', 'Choose whether to use this photo or take/select another.')}</p>
+                  {isCheckingPhotoQuality && <p role="status">{cameraText('checkingClarity', 'Checking photo clarity…')}</p>}
+                  {!isCheckingPhotoQuality && pendingPhotoQuality && (
+                    <p role={pendingPhotoQuality.ok ? 'status' : 'alert'} style={{ color: pendingPhotoQuality.ok ? 'var(--success-text)' : 'var(--danger-text)' }}>
+                      {pendingPhotoQuality.ok
+                        ? cameraText('clarityGood', 'Photo clarity looks okay.')
+                        : `${cameraText('clarityPoor', 'This photo may be blurry, too dark, or unclear. Retake it in good light and hold the camera steady.')}${pendingPhotoQuality.reason ? ` ${pendingPhotoQuality.reason}` : ''}`}
+                    </p>
+                  )}
                   <div className="patient-camera-photo-actions">
                     <button type="button" className="dash-btn dash-btn-outline" onClick={handleRetakePhoto}>
                       {cameraText('retake', 'Retake / Choose another')}
                     </button>
-                    <button type="button" className="dash-btn dash-btn-primary" onClick={() => void handleUseCapturedPhoto()}>
+                    <button type="button" className="dash-btn dash-btn-primary" disabled={isCheckingPhotoQuality || !pendingPhotoQuality?.ok} onClick={() => void handleUseCapturedPhoto()}>
                       {cameraText('usePhoto', 'Use photo')}
                     </button>
                   </div>

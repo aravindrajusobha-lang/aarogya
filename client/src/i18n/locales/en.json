@@ -82,7 +82,11 @@
     "uploadPhoto": "Upload a photo",
     "capturePhoto": "Capture photo",
     "switchFront": "Switch to front camera",
-    "switchBack": "Switch to back camera"
+    "switchBack": "Switch to back camera",
+    "clarityGuidance": "Photos are checked for clarity before DEMO AI screening support. You can retake any photo before using it.",
+    "checkingClarity": "Checking photo clarity…",
+    "clarityGood": "Photo clarity looks okay.",
+    "clarityPoor": "This photo may be blurry, too dark, or unclear. Retake it in good light and hold the camera steady."
   },
   "auth": {
     "login": "Sign In",
