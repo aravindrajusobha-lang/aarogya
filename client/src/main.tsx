@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { installApiBaseUrl } from './services/apiBase';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeProvider } from './context/ThemeContext';
@@ -9,6 +10,8 @@ import './styles/index.css';
 import './styles/cinematicBackdrop.css';
 import './styles/avengersVfx.css';
 import './styles/theme.css';
+
+installApiBaseUrl();
 
 // Register Service Worker for PWA Offline Caching (Production only)
 if ('serviceWorker' in navigator) {

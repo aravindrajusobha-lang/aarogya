@@ -1,6 +1,7 @@
 import { PrescriptionModal } from './PrescriptionModal';
 import React, { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { API_BASE_URL } from '../services/apiBase';
 import { EndConsultationDialog } from '../portal/doctor/EndConsultationDialog';
 import { makeT } from '../portal/lib';
 import type { LanguageCode } from '../i18n';
@@ -73,7 +74,7 @@ export const LiveAppointmentRoom: React.FC<{ appointmentId: string; role: 'patie
       if (!mounted.current) { localStream.getTracks().forEach(t => t.stop()); return; }
       stream.current = localStream;
       if (localVideo.current) localVideo.current.srcObject = localStream;
-      const nextSocket = io(window.location.origin, { autoConnect: false, auth: { token: accessToken() }, transports: ['websocket', 'polling'] });
+      const nextSocket = io(API_BASE_URL || window.location.origin, { autoConnect: false, auth: { token: accessToken() }, transports: ['websocket', 'polling'] });
       socket.current = nextSocket;
       nextSocket.on('consultation:chat-history', setMessages);
       nextSocket.on('consultation:chat-message', (item: any) => setMessages(previous => previous.some(m => m.messageId === item.messageId) ? previous : [...previous, item]));
