@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AuthUser } from './AuthPanel';
-import { clearStoredAuth, readStoredAuth, validateAccessToken } from '../utils/session';
+import { clearStoredAuth, readStoredAuth, validateStoredSession } from '../utils/session';
 
 export interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -31,9 +31,13 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         if (!cancelled) setCheckedUser(null);
         return;
       }
-      const validated = await validateAccessToken(stored.tokens.accessToken);
-      if (!cancelled) setCheckedUser((validated as AuthUser | null) || null);
-      if (!validated) clearStoredAuth();
+      try {
+        const session = await validateStoredSession(stored.tokens);
+        if (!cancelled) setCheckedUser((session?.user as AuthUser | undefined) || null);
+        if (!session) clearStoredAuth();
+      } catch {
+        if (!cancelled) setCheckedUser(stored.user as AuthUser);
+      }
     };
     void run();
     return () => {

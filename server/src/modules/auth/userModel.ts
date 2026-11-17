@@ -1,6 +1,20 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type UserRole = 'system_admin' | 'admin' | 'medical_officer' | 'anm' | 'asha' | 'patient';
+export type UserRole =
+  | 'system_admin'
+  | 'admin'
+  | 'medical_officer'
+  | 'anm'
+  | 'asha'
+  | 'asha_worker'
+  | 'patient';
+
+export type WorkerApprovalStatus =
+  | 'PENDING_PHC_VERIFICATION'
+  | 'MORE_INFORMATION_REQUIRED'
+  | 'PENDING_ADMIN_APPROVAL'
+  | 'ACTIVE'
+  | 'REJECTED';
 
 export interface IWebAuthnCredential {
   credentialId: string;
@@ -103,6 +117,8 @@ export interface IUser extends Document {
   profileCompleteness?: number;
   profileConsentAt?: Date;
   status: 'active' | 'suspended' | 'locked';
+  approvalStatus?: WorkerApprovalStatus;
+  registrationReference?: string;
   simulation: true;
   createdAt: Date;
   updatedAt: Date;
@@ -127,7 +143,7 @@ const UserSchema = new Schema<IUser>(
     role: {
       type: String,
       required: true,
-      enum: ['system_admin', 'admin', 'medical_officer', 'anm', 'asha', 'patient'],
+      enum: ['system_admin', 'admin', 'medical_officer', 'anm', 'asha', 'asha_worker', 'patient'],
       index: true,
     },
     fullName: { type: String, required: true },
@@ -226,6 +242,12 @@ const UserSchema = new Schema<IUser>(
       enum: ['active', 'suspended', 'locked'],
       default: 'active',
     },
+    approvalStatus: {
+      type: String,
+      enum: ['PENDING_PHC_VERIFICATION', 'MORE_INFORMATION_REQUIRED', 'PENDING_ADMIN_APPROVAL', 'ACTIVE', 'REJECTED'],
+      default: 'ACTIVE',
+    },
+    registrationReference: { type: String, unique: true, sparse: true, index: true },
     simulation: { type: Boolean, default: true, immutable: true },
   },
   {

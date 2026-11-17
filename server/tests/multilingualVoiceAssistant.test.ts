@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   detectScriptFromText,
   LanguageSessionManager,
@@ -8,14 +8,222 @@ import {
   MultilingualVoiceSynthesizer,
 } from '../../client/src/components/AIRobotAssistant/voiceSynthesisEngine.js';
 import {
+  askAssistant,
   cleanSpeechText,
 } from '../../client/src/components/AIRobotAssistant/assistantService.js';
+import { AssistantVoiceEngine } from '../../client/src/components/AIRobotAssistant/assistantVoice.js';
+import { detectLanguageFromText } from '../../client/src/components/AIRobotAssistant/languageDetector.js';
+import { resolveAssistantLanguage } from '../src/modules/assistant/assistantRoutes.js';
 import {
   VOICE_SESSION_DISCLAIMER,
   RED_FLAG_SYMPTOM_RULES,
 } from '../../client/src/components/AIRobotAssistant/safetyMessages.js';
 
 describe('Multilingual Voice Assistant Unit Tests', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  describe('Active assistant language detection', () => {
+    it.each([
+      ['తెలుగు మాటలు స్పష్టంగా వినిపిస్తున్నాయి', 'te'],
+      ['मुझे हिंदी में जवाब चाहिए', 'hi'],
+      ['தமிழில் பதில் சொல்லுங்கள்', 'ta'],
+      ['ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರಿಸಿ', 'kn'],
+      ['മലയാളത്തിൽ മറുപടി പറയൂ', 'ml'],
+      ['Please answer in English', 'en'],
+    ] as const)('detects the dominant language in "%s"', (text, expected) => {
+      expect(detectLanguageFromText(text)).toBe(expected);
+    });
+
+    it('detects common Telugu and Hindi transliteration without mislabeling ambiguous text', () => {
+      expect(detectLanguageFromText('ela unnaru naku pundu undi')).toBe('te');
+      expect(detectLanguageFromText('mujhe dard hai, kaise madad karein')).toBe('hi');
+      expect(detectLanguageFromText('vanakkam enakku vaayil vali irukku')).toBe('ta');
+      expect(detectLanguageFromText('namaskara nanna baayalli novu ide')).toBe('kn');
+      expect(detectLanguageFromText('sukhamano enikku vaayil vedana undu')).toBe('ml');
+      expect(detectLanguageFromText('namaste doctor', 'te')).toBe('te');
+      expect(detectLanguageFromText('Aarogya తెలుగు assistant can help you', 'en')).toBe('en');
+    });
+
+    it('uses detected language in auto mode but honors a manual language selection', () => {
+      expect(resolveAssistantLanguage('నాకు సహాయం కావాలి', 'en', 'auto')).toBe('te');
+      expect(resolveAssistantLanguage('నాకు సహాయం కావాలి', 'en', 'manual')).toBe('en');
+      expect(resolveAssistantLanguage('Please help me', 'te', 'auto')).toBe('en');
+      expect(resolveAssistantLanguage('தமிழில் பதில் சொல்லுங்கள்', 'en', 'auto')).toBe('ta');
+      expect(resolveAssistantLanguage('ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರಿಸಿ', 'en', 'auto')).toBe('kn');
+      expect(resolveAssistantLanguage('മലയാളത്തിൽ മറുപടി പറയൂ', 'en', 'auto')).toBe('ml');
+      expect(resolveAssistantLanguage('vanakkam enakku vaayil vali irukku', 'ta', 'auto')).toBe('ta');
+    });
+
+    it('replaces a server reply in the wrong language with the localized assistant response', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            answerText: 'Use the screening module.',
+            speechText: 'Open screening.',
+            language: 'ta',
+          },
+        }),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const answer = await askAssistant({
+        query: 'screening',
+        language: 'ta',
+        languageMode: 'manual',
+      });
+
+      expect(answer.language).toBe('ta');
+      expect(answer.answerText).toContain('வாய்வழி பரிசோதனை');
+      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(requestBody.languageMode).toBe('manual');
+    });
+
+    it('keeps the written answer but corrects speech that does not match the answer language', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              answerText: 'வாய்வழி பரிசோதனை வழிகாட்டுதல்கள்: புண்களைக் கவனித்து புகைப்படம் எடுக்கவும்.',
+              speechText: 'Observe for persistent patches and capture a clear photograph.',
+              language: 'ta',
+            },
+          }),
+        })
+      );
+
+      const answer = await askAssistant({
+        query: 'screening',
+        language: 'ta',
+        languageMode: 'manual',
+      });
+
+      expect(answer.answerText).toContain('வாய்வழி பரிசோதனை');
+      expect(answer.speechText).toContain('புகைப்படம்');
+    });
+  });
+
+  describe('Microphone recognition engine', () => {
+    it('starts in the selected locale and uses the highest-confidence transcript alternative', () => {
+      const instances: any[] = [];
+      class MockSpeechRecognition {
+        lang = '';
+        maxAlternatives = 0;
+        continuous = false;
+        interimResults = false;
+        onstart: (() => void) | null = null;
+        onresult: ((event: any) => void) | null = null;
+        onerror: ((event: any) => void) | null = null;
+        onend: (() => void) | null = null;
+        constructor() {
+          instances.push(this);
+        }
+        start() {
+          this.onstart?.();
+        }
+        stop() {
+          this.onend?.();
+        }
+        abort() {
+          this.onend?.();
+        }
+      }
+      vi.stubGlobal('window', { SpeechRecognition: MockSpeechRecognition });
+      const onTranscript = vi.fn();
+      const engine = new AssistantVoiceEngine({ onTranscript });
+
+      expect(engine.isSpeechRecognitionSupported()).toBe(true);
+      engine.startListening('te');
+      expect(instances[0].lang).toBe('te-IN');
+      expect(instances[0].maxAlternatives).toBe(3);
+
+      const alternatives = [
+        { transcript: 'unclear', confidence: 0.2 },
+        { transcript: 'నమస్కారం', confidence: 0.9 },
+      ];
+      Object.assign(alternatives, { isFinal: true });
+      instances[0].onresult?.({ resultIndex: 0, results: [alternatives] });
+      expect(onTranscript).toHaveBeenCalledWith('నమస్కారం', true);
+
+      engine.endConversation();
+    });
+
+    it('does not report microphone support when the recognizer cannot be initialized', () => {
+      class BrokenSpeechRecognition {
+        constructor() {
+          throw new Error('initialization failed');
+        }
+      }
+      vi.stubGlobal('window', { SpeechRecognition: BrokenSpeechRecognition });
+      const onError = vi.fn();
+      const engine = new AssistantVoiceEngine({ onError });
+
+      expect(engine.isSpeechRecognitionSupported()).toBe(false);
+      engine.startListening('en');
+      expect(onError).toHaveBeenCalledWith('Speech recognition is not supported in this browser.');
+
+      engine.endConversation();
+    });
+
+    it('starts listening when barge-in is used outside continuous conversation mode', () => {
+      const instances: any[] = [];
+      class MockSpeechRecognition {
+        lang = '';
+        continuous = false;
+        interimResults = false;
+        startCount = 0;
+        onstart: (() => void) | null = null;
+        onend: (() => void) | null = null;
+        constructor() {
+          instances.push(this);
+        }
+        start() {
+          this.startCount += 1;
+          this.onstart?.();
+        }
+        stop() {
+          this.onend?.();
+        }
+        abort() {
+          this.onend?.();
+        }
+      }
+      vi.stubGlobal('window', { SpeechRecognition: MockSpeechRecognition });
+      const engine = new AssistantVoiceEngine();
+      engine.enableContinuousConversation(false);
+
+      engine.interrupt();
+
+      expect(instances[0].lang).toBe('te-IN');
+      expect(instances[0].startCount).toBe(1);
+      engine.endConversation();
+    });
+
+    it('does not substitute an English voice for a Telugu response', () => {
+      vi.stubGlobal('window', {
+        speechSynthesis: {
+          getVoices: () => [
+            { name: 'English Voice', lang: 'en-IN' },
+          ] as SpeechSynthesisVoice[],
+        },
+      });
+      const engine = new AssistantVoiceEngine();
+
+      const voice = engine.resolveFemaleVoice('te');
+      expect(voice.voice).toBeNull();
+      expect(voice.canSpeak).toBe(false);
+      expect(voice.limitationNotice).toContain('Telugu');
+
+      engine.endConversation();
+    });
+  });
+
   describe('1. Language Detection Engine', () => {
     it('detects Telugu script accurately by Unicode codepoints', () => {
       const teluguText = 'నాకు నోటి లోపల పుండ్లు ఉన్నాయి. ఏమి చేయాలి?';

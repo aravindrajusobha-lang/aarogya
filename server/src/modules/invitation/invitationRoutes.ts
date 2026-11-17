@@ -15,7 +15,7 @@ const router = Router();
 const CreateInvitationSchema = z.object({
   email: z.string().email('Valid email address required'),
   fullName: z.string().min(2, 'Full name required'),
-  role: z.enum(['admin', 'medical_officer', 'anm', 'asha']),
+  role: z.enum(['admin', 'medical_officer', 'anm', 'asha', 'asha_worker']),
   hospitalId: z.string().min(1, 'Hospital ID required'),
 });
 

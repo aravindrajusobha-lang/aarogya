@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Aarogya-Drishti",
+    "slug": "aarogya-drishti",
+    "scheme": "aarogyadristi",
+    "version": "1.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose an oral screening photo. The photo is sent only after you give consent.",
+          "cameraPermission": "Take an oral screening photo. The photo is sent only after you give consent.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-sharing",
+      "expo-web-browser"
+    ],
+    "icon": "./assets/brand/aarogya-icon-512.png",
+    "android": {
+      "package": "org.itda.aarogyadristi",
+      "versionCode": 3
+    },
+    "ios": {
+      "bundleIdentifier": "org.itda.aarogyadristi"
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "ebd31cfa-311f-4f41-83e1-a6493285577c"
+      }
+    },
+    "owner": "bharathsimhareddyv19"
+  }
+}

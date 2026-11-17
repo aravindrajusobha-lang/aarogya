@@ -1237,7 +1237,6 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
             ) : (
               <div className="patient-report-grid">
                 <article className="patient-report-summary">
-                  {activeReport.imageUrl ? <img className="patient-report-photo" src={activeReport.imageUrl} alt="Patient uploaded screening image" /> : <div className="patient-report-photo-placeholder">Image not available on this device</div>}
                   <div className="patient-report-meta"><span className="patient-report-badge">DEMO AI OUTPUT - NOT FOR CLINICAL USE</span><span className="patient-report-risk">{activeReport.geminiAnalysis?.riskCategory || 'low'} risk category</span><span>{activeReport.date}{activeReport.time ? ` · ${activeReport.time}` : ''}</span></div>
                   <h2>Image quality and review</h2><p>{activeReport.imageQuality?.ok === false ? 'Retake recommended' : 'Image quality passed'} · <strong>Pending doctor review</strong></p>
                   <h2>Image observation</h2><p className="patient-report-finding">{activeReport.geminiAnalysis?.imageObservation || `The photo appears to show ${activeReport.observation || 'an area recorded for clinician review'}.`}</p><p>This description may be inaccurate.</p>

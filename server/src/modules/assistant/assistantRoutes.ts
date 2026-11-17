@@ -78,30 +78,37 @@ export interface QueryResponse {
  */
 export function detectLanguageFromText(text: string): 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml' {
   if (!text || !text.trim()) return 'en';
-  let teCount = 0;
-  let hiCount = 0;
-  let taCount = 0;
-  let knCount = 0;
-  let mlCount = 0;
+  const scriptRanges = [
+    { lang: 'te' as const, start: 0x0c00, end: 0x0c7f },
+    { lang: 'hi' as const, start: 0x0900, end: 0x097f },
+    { lang: 'ta' as const, start: 0x0b80, end: 0x0bff },
+    { lang: 'kn' as const, start: 0x0c80, end: 0x0cff },
+    { lang: 'ml' as const, start: 0x0d00, end: 0x0d7f },
+  ];
+  const counts = new Map<(typeof scriptRanges)[number]['lang'], number>();
+  let latinCount = 0;
 
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code >= 0x0c00 && code <= 0x0c7f) teCount++;
-    else if (code >= 0x0900 && code <= 0x097f) hiCount++;
-    else if (code >= 0x0b80 && code <= 0x0bff) taCount++;
-    else if (code >= 0x0c80 && code <= 0x0cff) knCount++;
-    else if (code >= 0x0d00 && code <= 0x0d7f) mlCount++;
+  for (const character of text) {
+    if (!/\p{L}/u.test(character)) continue;
+    if (/\p{Script=Latin}/u.test(character)) {
+      latinCount++;
+      continue;
+    }
+    const code = character.codePointAt(0)!;
+    const range = scriptRanges.find(({ start, end }) => code >= start && code <= end);
+    if (range) counts.set(range.lang, (counts.get(range.lang) || 0) + 1);
   }
 
-  const scores = [
-    { lang: 'te' as const, count: teCount },
-    { lang: 'hi' as const, count: hiCount },
-    { lang: 'ta' as const, count: taCount },
-    { lang: 'kn' as const, count: knCount },
-    { lang: 'ml' as const, count: mlCount },
-  ];
-  scores.sort((a, b) => b.count - a.count);
-  if (scores[0].count > 0) return scores[0].lang;
+  const scores = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const topScriptCount = scores[0]?.[1] || 0;
+  const secondScriptCount = scores[1]?.[1] || 0;
+  if (
+    scores.length > 0 &&
+    topScriptCount > secondScriptCount &&
+    (latinCount === 0 || topScriptCount >= latinCount * 0.25)
+  ) {
+    return scores[0][0];
+  }
 
   // Latin transliteration heuristic for Romanized Telugu and Hindi
   const lower = text.toLowerCase();
@@ -112,6 +119,21 @@ export function detectLanguageFromText(text: string): 'en' | 'te' | 'hi' | 'ta' 
   if (hindiSpecific.test(lower) && !teluguSpecific.test(lower)) return 'hi';
 
   return 'en';
+}
+
+type AssistantLanguage = 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml';
+
+export function resolveAssistantLanguage(
+  text: string,
+  requestedLanguage: AssistantLanguage,
+  mode: 'auto' | 'manual' = 'auto'
+): AssistantLanguage {
+  if (mode === 'manual') return requestedLanguage;
+  const detected = detectLanguageFromText(text);
+  if (detected !== 'en') return detected;
+  const hasEnglishMarkers =
+    /\b(i|you|your|the|is|are|my|how|what|when|where|please|can|could|should|have|has|with|for|and|to|help|patient|mouth|oral|health|screening|register|record|visit|consult|answer|use|show)\b/i.test(text);
+  return hasEnglishMarkers ? 'en' : requestedLanguage;
 }
 
 /**
@@ -247,6 +269,7 @@ assistantRouter.post(
         message,
         query,
         language = 'en',
+        languageMode = 'auto',
         context = '',
         conversationHistory = [],
         image,
@@ -256,6 +279,7 @@ assistantRouter.post(
         message?: string;
         query?: string;
         language?: 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml';
+        languageMode?: 'auto' | 'manual';
         context?: any;
         conversationHistory?: { role: string; text: string }[];
         image?: string;
@@ -266,10 +290,8 @@ assistantRouter.post(
       const rawInput = (message || query || '').trim();
       const rawImage = imageBase64 || image;
       const q = rawInput.toLowerCase();
-      const detected = detectLanguageFromText(rawInput);
       const requestedLang = ['en', 'te', 'hi', 'ta', 'kn', 'ml'].includes(language) ? language : 'en';
-      // Auto-detect patient language from script, with graceful fallback to requested or default
-      const lang = detected !== 'en' ? detected : requestedLang;
+      const lang = resolveAssistantLanguage(rawInput, requestedLang, languageMode);
 
       let response: QueryResponse | null = null;
 
@@ -318,6 +340,7 @@ assistantRouter.post(
             message: rawInput,
             conversationHistory,
             language: lang,
+            languageMode,
             context,
           });
 

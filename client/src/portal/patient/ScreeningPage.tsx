@@ -89,7 +89,6 @@ export const ScreeningResultView: React.FC<{ t: Translate; lang: LanguageCode; s
       {/* Header */}
       <Card>
         <div className="adp-result-top">
-          {summary.imageRef && <PrivatePhoto fileId={summary.imageRef} alt={t('result.photo')} />}
           <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
             <div className="adp-result-head">
               <div>
@@ -243,7 +242,7 @@ export const ScreeningResultPage: React.FC<{ t: Translate; lang: LanguageCode; s
   return (
     <>
       <button type="button" className="adp-link" onClick={onBack}>← {t('common.back')}</button>
-      {loading ? <Skeleton rows={3} /> : error ? <><Notice tone="error">{error}</Notice><button type="button" className="adp-btn adp-btn-outline" onClick={() => void reload()}>{t('common.retry')}</button></>
+      {loading ? <Skeleton rows={3} label={t('common.loading')} /> : error ? <><Notice tone="error">{error}</Notice><button type="button" className="adp-btn adp-btn-outline" onClick={() => void reload()}>{t('common.retry')}</button></>
         : data ? <ScreeningResultView t={t} lang={lang} summary={data} onBook={onBook} onOpenResult={onOpenResult} /> : null}
     </>
   );
@@ -253,7 +252,7 @@ export const ScreeningResultPage: React.FC<{ t: Translate; lang: LanguageCode; s
 export const ScreeningHistory: React.FC<{ t: Translate; lang: LanguageCode; patientId?: string; onOpen: (id: string) => void; limit?: number }> = ({ t, lang, patientId, onOpen, limit }) => {
   const { data, error, loading } = useApi<ScreeningListItem[]>(patientId ? `/api/ai/screenings?patientId=${encodeURIComponent(patientId)}` : null, [patientId]);
   const items = (data || []).slice(0, limit || 100);
-  if (loading) return <Skeleton rows={2} />;
+  if (loading) return <Skeleton rows={2} label={t('common.loading')} />;
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!items.length) return <Empty icon="scan">{t('screening.noHistory')}</Empty>;
   return (
@@ -285,6 +284,7 @@ export const ScreeningPage: React.FC<{ t: Translate; lang: LanguageCode; patient
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const clientId = useRef(newMutationId());
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -365,9 +365,17 @@ export const ScreeningPage: React.FC<{ t: Translate; lang: LanguageCode; patient
     setCameraError('');
     if (!next) return;
     if (!next.type.startsWith('image/')) { setError(t('screening.photoRequired')); return; }
-    if (preview) URL.revokeObjectURL(preview);
     setFile(next); setPreview(URL.createObjectURL(next));
     clientId.current = newMutationId();
+  };
+
+  const removePhoto = () => {
+    setFile(null);
+    setPreview('');
+    setError('');
+    setCameraError('');
+    clientId.current = newMutationId();
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const analyse = async () => {
@@ -405,30 +413,43 @@ export const ScreeningPage: React.FC<{ t: Translate; lang: LanguageCode; patient
                 aria-label={t('screening.liveCameraPreview')}
               />
               <span className="adp-live-badge"><span aria-hidden="true" />{cameraReady ? t('screening.cameraReady') : t('screening.cameraOpening')}</span>
+              <button
+                type="button"
+                className="adp-btn adp-btn-primary adp-camera-capture-center"
+                disabled={!cameraReady || busy}
+                onClick={() => void captureFromCamera()}
+                aria-label={t('screening.capturePhoto')}
+                title={t('screening.capturePhoto')}
+              >
+                <Icon.camera size={24} />
+                <span className="sr-only">{t('screening.capturePhoto')}</span>
+              </button>
             </div>
           ) : (
-            <label className="adp-dropzone">
-              <input type="file" accept="image/*" capture="environment" onChange={(e) => choose(e.target.files?.[0])} aria-label={t('screening.choosePhoto')} />
+            <div className="adp-dropzone">
               {preview ? <img src={preview} alt="" /> : (
-                <span style={{ display: 'grid', justifyItems: 'center', gap: 10, color: 'var(--adp-text-2)' }}>
+                <button type="button" className="adp-btn adp-btn-ghost" disabled={busy} onClick={() => void startCamera()} aria-label={t('screening.useLiveCamera')}>
                   <span className="adp-quick-icon" style={{ width: 64, height: 64 }}><Icon.camera size={30} /></span>
-                  <strong>{t('screening.choosePhoto')}</strong>
-                </span>
+                  <strong>{t('screening.useLiveCamera')}</strong>
+                </button>
               )}
-            </label>
+            </div>
           )}
+          <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => choose(e.target.files?.[0])} aria-label={t('screening.uploadPhoto')} style={{ display: 'none' }} />
           <canvas ref={canvasRef} className="adp-camera-canvas" aria-hidden="true" />
           <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
             {cameraStream ? (
               <div className="adp-camera-actions">
-                <button type="button" className="adp-btn adp-btn-primary" disabled={!cameraReady || busy} onClick={() => void captureFromCamera()}>
-                  <Icon.camera size={18} />{t('screening.capturePhoto')}
-                </button>
                 <button type="button" className="adp-btn adp-btn-outline" disabled={busy} onClick={stopCamera}>{t('screening.stopCamera')}</button>
               </div>
             ) : (
-              <button type="button" className="adp-btn adp-btn-outline adp-camera-start" disabled={busy} onClick={() => void startCamera()}>
-                <Icon.camera size={18} />{t('screening.useLiveCamera')}
+              <button type="button" className="adp-btn adp-btn-outline adp-camera-start" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                <Icon.camera size={18} />{t('screening.uploadPhoto')}
+              </button>
+            )}
+            {file && preview && !cameraStream && (
+              <button type="button" className="adp-btn adp-btn-ghost" disabled={busy} onClick={removePhoto}>
+                <Icon.x size={18} />{t('screening.removePhoto')}
               </button>
             )}
             {cameraError && <Notice tone="error">{cameraError}</Notice>}

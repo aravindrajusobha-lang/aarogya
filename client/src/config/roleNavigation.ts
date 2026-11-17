@@ -18,9 +18,9 @@ export type NormalizedRole = 'patient' | 'doctor' | 'admin' | 'health_worker';
 
 export function normalizeUserRole(role?: string | null): NormalizedRole {
   const r = (role || '').toLowerCase();
-  if (r.includes('admin') || r.includes('officer') && r.includes('district')) return 'admin';
+  if (r.includes('admin') || (r.includes('officer') && r.includes('district'))) return 'admin';
   if (r.includes('doctor') || r.includes('medical') || r.includes('specialist') || r.includes('manager')) return 'doctor';
-  if (r.includes('asha') || r.includes('anm') || r.includes('worker')) return 'health_worker';
+  if (r.includes('asha_worker') || r.includes('asha') || r.includes('anm') || r.includes('worker')) return 'health_worker';
   return 'patient';
 }
 

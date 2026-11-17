@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import DailyIframe, { DailyCall } from '@daily-co/daily-js';
 import { getClientTranslation, translations, type LanguageCode } from '../i18n';
+import { refreshStoredAuth } from '../utils/session';
 
 type Role = 'patient' | 'doctor';
 const accessToken = () => { try { return JSON.parse(localStorage.getItem('aarogya_tokens') || '{}').accessToken || localStorage.getItem('aarogya_token') || ''; } catch { return localStorage.getItem('aarogya_token') || ''; } };
@@ -11,38 +12,13 @@ const openLiveSignIn = (role: Role) => {
   window.location.hash = '#/login?liveVideo=true';
 };
 const headers = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken()}` });
-let refreshInFlight: Promise<string | null> | null = null;
-async function refreshAccessToken() {
-  if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      try {
-        const stored = JSON.parse(localStorage.getItem('aarogya_tokens') || '{}');
-        if (!stored.refreshToken) return null;
-        const response = await fetch('/api/v1/auth/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: stored.refreshToken }),
-        });
-        const payload = await response.json();
-        if (!response.ok || !payload.success || !payload.data?.accessToken || !payload.data?.refreshToken) return null;
-        const nextTokens = { ...stored, accessToken: payload.data.accessToken, refreshToken: payload.data.refreshToken, deviceSessionId: payload.data.deviceSessionId || stored.deviceSessionId };
-        localStorage.setItem('aarogya_tokens', JSON.stringify(nextTokens));
-        localStorage.setItem('aarogya_token', nextTokens.accessToken);
-        return nextTokens.accessToken as string;
-      } catch {
-        return null;
-      }
-    })().finally(() => { refreshInFlight = null; });
-  }
-  return refreshInFlight;
-}
 async function api(path: string, init: RequestInit = {}) {
   if (isDemoSession()) throw new Error('DEMO_LOGIN_ONLY');
   const send = (token: string) => fetch(`/api/v1/consultations${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) } });
   let response = await send(accessToken());
   if (response.status === 401) {
-    const refreshedToken = await refreshAccessToken();
-    if (refreshedToken) response = await send(refreshedToken);
+    const refreshedTokens = await refreshStoredAuth();
+    if (refreshedTokens) response = await send(refreshedTokens.accessToken);
   }
   const payload = await response.json();
   if (!response.ok || !payload.success) {
@@ -63,9 +39,32 @@ export const ConsultationPortalPanel: React.FC<{ role: Role; patientId?: string;
   const load = async () => { try { const data = await api(role === 'patient' ? '/appointments/my' : '/doctor/appointments'); setItems(data.appointments || []); setError(''); } catch (e) { setError(e instanceof Error ? e.message : 'Could not load appointments.'); } };
   const waitingCount = items.filter(item => role === 'doctor' && item.patientWaiting).length;
   useEffect(() => { if (isDemoSession()) { setError('DEMO_LOGIN_ONLY'); return; } void load(); const timer = window.setInterval(load, 5000); return () => window.clearInterval(timer); }, [role]);
-  useEffect(() => { if (isDemoSession() || role !== 'patient' || !bookDate) return; fetch(`/api/v1/consultations/availability?date=${encodeURIComponent(bookDate)}`, { headers: headers() }).then(r => r.json()).then(p => { if (!p?.success) throw new Error(p?.error?.message || 'Doctor availability is unavailable.'); const availableDoctors = p.data?.doctors || []; setDoctors(availableDoctors); setDoctorId(initialDoctorId && availableDoctors.some((doctor: any) => doctor.userId === initialDoctorId) ? initialDoctorId : ''); setSlots([]); setSlot(''); }).catch(e => setError(e instanceof Error ? e.message : 'Doctor availability is unavailable.')); }, [role, bookDate, initialDoctorId]);
+  useEffect(() => {
+    if (isDemoSession() || role !== 'patient' || !bookDate) return;
+    fetch(`/api/v1/consultations/availability?date=${encodeURIComponent(bookDate)}`, { headers: headers() })
+      .then(r => r.json())
+      .then(p => {
+        if (!p?.success) throw new Error(p?.error?.message || 'Doctor availability is unavailable.');
+        const availableDoctors = (p.data?.doctors || []).filter((doctor: any) => !doctor.consultationModes?.length || doctor.consultationModes.includes(consultationMode));
+        setDoctors(availableDoctors);
+        setDoctorId(initialDoctorId && availableDoctors.some((doctor: any) => doctor.userId === initialDoctorId) ? initialDoctorId : '');
+        setSlots([]);
+        setSlot('');
+      })
+      .catch(e => setError(e instanceof Error ? e.message : 'Doctor availability is unavailable.'));
+  }, [role, bookDate, initialDoctorId, consultationMode]);
   const selectedDoctor = doctors.find(d => d.userId === doctorId);
-  useEffect(() => { if (!selectedDoctor || !bookDate) { setSlots([]); return; } fetch(`/api/v1/consultations/availability/${encodeURIComponent(selectedDoctor.userId)}?date=${encodeURIComponent(bookDate)}`, { headers: headers() }).then(r => r.json()).then(p => { setSlots((p?.data?.slots || []).filter((s: any) => s.isAvailable && new Date(s.startTime).getTime() > Date.now())); setSlot(''); }).catch(() => setError('Available times are unavailable.')); }, [doctorId, bookDate]);
+  useEffect(() => {
+    if (!selectedDoctor || !bookDate) { setSlots([]); return; }
+    fetch(`/api/v1/consultations/availability/${encodeURIComponent(selectedDoctor.userId)}?date=${encodeURIComponent(bookDate)}`, { headers: headers() })
+      .then(r => r.json())
+      .then(p => {
+        const availableSlots = (p?.data?.slots || []).filter((s: any) => s.isAvailable && new Date(s.startTime).getTime() > Date.now() && (!s.consultationMode || s.consultationMode === consultationMode));
+        setSlots(availableSlots);
+        setSlot('');
+      })
+      .catch(() => setError('Available times are unavailable.'));
+  }, [doctorId, bookDate, consultationMode]);
   const book = async (event: React.FormEvent) => { event.preventDefault(); const chosenSlot = slots.find(item => item.startTime === slot); if (!patientId || !selectedDoctor || !chosenSlot?.endTime) { setError('Choose a currently available doctor slot with a start and end time.'); return; } setBusy('booking'); setError(''); try { const mutationId = crypto.randomUUID(); const response = await fetch('/api/v1/appointments', { method: 'POST', headers: headers(), body: JSON.stringify({ patientId, destinationHospitalId: selectedDoctor.hospitalId, destinationHospitalName: selectedDoctor.hospitalName, assignedDoctorId: selectedDoctor.userId, assignedDoctorName: selectedDoctor.name, slotStartTime: chosenSlot.startTime, slotEndTime: chosenSlot.endTime, consultationMode, patientNote: patientNote.trim(), mutationId, ...(shareRecords && screeningId ? { screeningId } : {}), consentGiven: shareRecords, visitDetails: { shareReport: Boolean(shareRecords && screeningId), shareProfile: shareRecords, consentGivenAt: shareRecords ? new Date().toISOString() : undefined }, type: 'clinical_consultation', reason: `${consultationMode === 'online' ? 'Online' : 'Offline'} consultation appointment request`, idempotencyKey: mutationId }) }); const data = await response.json(); if (!response.ok || !data.success) throw new Error(data.error?.message || 'Appointment could not be booked.'); setBooked(data.data.appointment.appointmentId); setPatientNote(''); setSlot(''); await load(); } catch (e) { setError(e instanceof Error ? e.message : 'Appointment could not be booked.'); } finally { setBusy(''); } };
   const sendLink = async (id: string) => { setBusy(id); try { const data = await api(`/${encodeURIComponent(id)}/send-link`, { method: 'POST' }); setLink(data.link); await navigator.clipboard?.writeText(data.link).catch(() => undefined); await load(); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to send the link.'); } finally { setBusy(''); } };
   const openLink = () => { if (link) window.location.hash = `#/consultation/join/${encodeURIComponent(new URL(link).hash.split('/').pop() || '')}`; };

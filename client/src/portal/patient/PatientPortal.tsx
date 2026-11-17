@@ -104,13 +104,13 @@ const HomePage: React.FC<{ t: Translate; lang: LanguageCode; user: any }> = ({ t
 
       <div className="adp-grid-2">
         <Card title={t('home.upcoming')} icon="calendar" action={<button type="button" className="adp-link" onClick={() => go('appointments')}>{t('common.viewAll')} <Icon.arrow size={16} /></button>}>
-          {appointments.loading ? <Skeleton rows={2} /> : appointments.error ? <Notice tone="error">{appointments.error}</Notice>
+          {appointments.loading ? <Skeleton rows={2} label={t('common.loading')} /> : appointments.error ? <Notice tone="error">{appointments.error}</Notice>
             : !upcoming.length ? <Empty icon="calendar" action={<button type="button" className="adp-btn adp-btn-primary adp-btn-sm" onClick={() => go('appointments?book=1')}>{t('appt.book')}</button>}>{t('home.noUpcoming')}</Empty>
             : <div className="adp-list">{upcoming.slice(0, 3).map((item) => <PatientAppointmentRow key={item.appointmentId} t={t} lang={lang} item={item} compact onChanged={() => void appointments.reload()} />)}</div>}
         </Card>
 
         <Card title={t('home.latestResult')} icon="scan" action={latest ? <button type="button" className="adp-link" onClick={() => go('records')}>{t('common.viewAll')} <Icon.arrow size={16} /></button> : undefined}>
-          {screenings.loading ? <Skeleton rows={1} /> : !latest ? (
+          {screenings.loading ? <Skeleton rows={1} label={t('common.loading')} /> : !latest ? (
             <Empty icon="scan" action={<button type="button" className="adp-btn adp-btn-primary adp-btn-sm" onClick={() => go('screening')}>{t('home.startCheck')}</button>}>{t('home.noResult')}</Empty>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
@@ -169,14 +169,14 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({ currentUser, lang,
     case 'prescriptions': content = <PrescriptionsPage t={t} lang={lang} patientId={patientId} patientName={currentUser?.fullName} />; break;
     case 'records': content = <><Card title={t('nav.records')} icon="file"><ScreeningHistory t={t} lang={lang} patientId={patientId} onOpen={(id) => go(`screening/${encodeURIComponent(id)}`)} /></Card><MyCaptures t={t} lang={lang} /></>; break;
     case 'notifications': content = <NotificationsPage t={t} lang={lang} onChanged={() => void notifications.reload()} />; break;
-    case 'profile': content = <PatientProfilePage currentUser={currentUser} currentLang={lang} />; break;
+    case 'profile': content = <PatientProfilePage currentUser={currentUser} currentLang={lang} t={t} />; break;
     default: content = <HomePage t={t} lang={lang} user={currentUser} />;
   }
 
   return (
     <PortalShell
       t={t} lang={lang} onChangeLang={onChangeLang}
-      userName={currentUser?.fullName || currentUser?.username || 'Patient'} userRole="Patient"
+      userName={currentUser?.fullName || currentUser?.username || t('common.patient')} userRole={t('common.patient')}
       nav={nav} active={active} onNavigate={(key) => go(key === 'dashboard' ? '' : key)} onLogout={onLogout}
       notificationCount={unread} onOpenNotifications={() => go('notifications')}
     >

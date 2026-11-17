@@ -1,0 +1,15 @@
+# Package only the mobile application for the authorized Expo build.
+/*
+!/mobile
+/mobile/node_modules/
+/mobile/.expo/
+/mobile/dist/
+/mobile/android/
+/mobile/ios/
+/mobile/.env*
+/mobile/credentials.json
+/mobile/*.jks
+/mobile/*.keystore
+/mobile/*.log
+/mobile/eas-archive*/
+/mobile/releases/

@@ -52,7 +52,7 @@ describe('Doctor availability ranges, patient record lookup and live-call captur
   it('publishes a start–end window split into slots; patients see available and booked slots; per-doctor conflicts', async () => {
     const date = istDate(2);
     const range = await request(app).post('/api/v1/consultations/doctor/availability/range').set('Authorization', `Bearer ${token.rec_doc_a}`)
-      .send({ date, startTime: '10:00', endTime: '11:00', durationMinutes: 20, mutationId: crypto.randomUUID() });
+      .send({ date, startTime: '10:00', endTime: '11:00', consultationMode: 'online', durationMinutes: 20, mutationId: crypto.randomUUID() });
     expect(range.status).toBe(201);
     expect(range.body.data.created).toBe(3);
     // Second doctor at the SAME facility publishes the same window.
@@ -62,11 +62,17 @@ describe('Doctor availability ranges, patient record lookup and live-call captur
     const slots = (await request(app).get(`/api/v1/consultations/availability/rec_doc_a?date=${date}`).set('Authorization', `Bearer ${token.patient}`)).body.data.slots;
     expect(slots.map((s: any) => s.status)).toEqual(['available', 'available', 'available']);
     expect(slots[0].durationMinutes).toBe(20);
+    expect(slots[0].consultationMode).toBe('online');
+    const doctorOptions = (await request(app).get(`/api/v1/consultations/availability?date=${date}`).set('Authorization', `Bearer ${token.patient}`)).body.data.doctors;
+    expect(doctorOptions.find((doctor: any) => doctor.userId === 'rec_doc_a').consultationModes).toContain('online');
 
-    const book = (doctorId: string, slot: any) => request(app).post('/api/v1/appointments').set('Authorization', `Bearer ${token.patient}`).send({
+    const book = (doctorId: string, slot: any, consultationMode: 'online' | 'offline' = 'online') => request(app).post('/api/v1/appointments').set('Authorization', `Bearer ${token.patient}`).send({
       patientId: 'PAT-REC-1', destinationHospitalId: H1, assignedDoctorId: doctorId, slotStartTime: slot.startTime, slotEndTime: slot.endTime,
-      consultationMode: 'online', consentGiven: true, visitDetails: { shareProfile: true }, type: 'clinical_consultation', mutationId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+      consultationMode, consentGiven: true, visitDetails: { shareProfile: true }, type: 'clinical_consultation', mutationId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
     });
+    const mismatch = await book('rec_doc_a', slots[0], 'offline');
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.body.error.code).toBe('DOCTOR_SLOT_MODE_MISMATCH');
     expect((await book('rec_doc_a', slots[0])).status).toBe(201);
     // Different doctor, same facility, same time: must be allowed now.
     const slotsB = (await request(app).get(`/api/v1/consultations/availability/rec_doc_b?date=${date}`).set('Authorization', `Bearer ${token.patient}`)).body.data.slots;

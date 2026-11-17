@@ -171,6 +171,7 @@ export const AssistantMessages: React.FC<AssistantMessagesProps> = ({
                       type="button"
                       className="chat-action-chip"
                       onClick={() => onSelectAction(action)}
+                      disabled={isThinking}
                     >
                       {action}
                     </button>

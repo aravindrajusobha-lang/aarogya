@@ -3,6 +3,9 @@ import {
   AssistantAnswer,
   generateLocalAssistantResponse,
 } from './multilingualAssistantService';
+import { detectLanguageFromText } from './languageDetector';
+
+const LANGUAGE_CODES: LanguageCode[] = ['en', 'te', 'hi', 'ta', 'kn', 'ml'];
 
 export interface ChatHistoryEntry {
   sender: 'user' | 'assistant';
@@ -13,6 +16,7 @@ export interface ChatHistoryEntry {
 export interface AssistantQueryOptions {
   query: string;
   language: LanguageCode;
+  languageMode?: 'auto' | 'manual';
   activeTab?: string;
   authToken?: string;
   conversationHistory?: ChatHistoryEntry[];
@@ -41,6 +45,7 @@ export async function askAssistant(
   const {
     query,
     language,
+    languageMode = 'auto',
     activeTab = 'dashboard',
     authToken,
     conversationHistory = [],
@@ -73,6 +78,7 @@ export async function askAssistant(
         message: query,
         query,
         language,
+        languageMode,
         context: { activeTab },
         conversationHistory: recentHistory,
         image,
@@ -88,11 +94,35 @@ export async function askAssistant(
       const payload = await res.json();
       if (payload.success && payload.data) {
         const data = payload.data;
-        const rawSpeech = data.speechText || data.answerText || '';
+        const answerText = data.answerText || data.response || '';
+        const responseLanguage =
+          languageMode === 'manual'
+            ? language
+            : LANGUAGE_CODES.includes(data.language)
+              ? data.language
+              : language;
+        const answerLanguageMismatch =
+          answerText && detectLanguageFromText(answerText, responseLanguage) !== responseLanguage;
+        const rawSpeech = data.speechText || answerText;
+        const speechLanguageMismatch =
+          rawSpeech && detectLanguageFromText(rawSpeech, responseLanguage) !== responseLanguage;
+        let spokenText = rawSpeech;
+
+        if (answerLanguageMismatch || speechLanguageMismatch) {
+          const localizedAnswer = generateLocalAssistantResponse(query, responseLanguage, activeTab);
+          if (answerLanguageMismatch) {
+            return {
+              ...localizedAnswer,
+              speechText: cleanSpeechText(localizedAnswer.speechText || localizedAnswer.answerText),
+            };
+          }
+          spokenText = localizedAnswer.speechText || localizedAnswer.answerText;
+        }
+
         return {
-          answerText: data.answerText || data.response || '',
-          speechText: cleanSpeechText(rawSpeech),
-          language: (data.language as LanguageCode) || language,
+          answerText,
+          speechText: cleanSpeechText(spokenText),
+          language: responseLanguage,
           topic: data.topic || 'general',
           animation:
             data.animation === 'warning' || data.animation === 'error'

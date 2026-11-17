@@ -379,19 +379,22 @@ export async function generateChatResponseWithGemini(params: {
   message: string;
   conversationHistory?: { role: string; text: string }[];
   language?: 'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml';
+  languageMode?: 'auto' | 'manual';
   context?: any;
 }): Promise<GeminiChatResult> {
-  const { message, conversationHistory = [], language = 'en', context } = params;
+  const { message, conversationHistory = [], language = 'en', languageMode = 'auto', context } = params;
 
   const detected = detectLanguageFromText(message);
-  const targetLang = detected !== 'en' ? detected : language;
-
-  const langInstruction =
-    targetLang === 'te'
-      ? 'Reply ONLY in Telugu (తెలుగు script). Use simple, friendly sentences suitable for frontline tribal healthcare workers and patients. Do not use English script.'
-      : targetLang === 'hi'
-      ? 'Reply ONLY in Hindi (हिंदी script). Use simple, respectful sentences suitable for frontline healthcare workers and patients.'
-      : 'Reply in clear Indian English with simple vocabulary.';
+  const targetLang = languageMode === 'manual' ? language : detected !== 'en' ? detected : language;
+  const languageInstructions: Record<'en' | 'te' | 'hi' | 'ta' | 'kn' | 'ml', string> = {
+    en: 'Reply only in clear Indian English with simple vocabulary suitable for patients and frontline healthcare workers.',
+    te: 'Reply only in Telugu using Telugu script. Use simple, friendly sentences suitable for patients and frontline healthcare workers.',
+    hi: 'Reply only in Hindi using Devanagari script. Use simple, respectful sentences suitable for patients and frontline healthcare workers.',
+    ta: 'Reply only in Tamil using Tamil script. Use simple, respectful sentences suitable for patients and frontline healthcare workers.',
+    kn: 'Reply only in Kannada using Kannada script. Use simple, respectful sentences suitable for patients and frontline healthcare workers.',
+    ml: 'Reply only in Malayalam using Malayalam script. Use simple, respectful sentences suitable for patients and frontline healthcare workers.',
+  };
+  const langInstruction = languageInstructions[targetLang];
 
   const systemPrompt = `You are "Drishti AI", the intelligent rural healthcare assistant for the Aarogya-Drishti platform across the 22 tribal mandals of Alluri Sitharama Raju (ASR) District, Andhra Pradesh (including Paderu, Araku Valley, Chintapalli, Dumbriguda, Munchingiputtu).
 

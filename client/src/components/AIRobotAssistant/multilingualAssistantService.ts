@@ -558,12 +558,14 @@ export function generateLocalAssistantResponse(
 
     return {
       answerText: answers[lang] || answers.en,
-      speechText:
-        lang === 'te'
-          ? 'ఆరోగ్య దృష్టి గిరిజన ప్రాంతాలలో ఓరల్ హెల్త్ స్క్రీనింగ్ కోసం రూపొందించిన డిజిటల్ వేదిక.'
-          : lang === 'hi'
-          ? 'आरोग्य दृष्टि आदिवासी क्षेत्रों में ओरल हेल्थ स्क्रीनिंग के लिए एक डिजिटल मंच है।'
-          : 'Aarogya Drishti is a digital community health screening platform for remote tribal settlements.',
+      speechText: {
+        en: 'Aarogya Drishti is a digital community health screening platform for remote tribal settlements.',
+        te: 'ఆరోగ్య దృష్టి గిరిజన ప్రాంతాలలో నోటి ఆరోగ్య స్క్రీనింగ్ కోసం రూపొందించిన డిజిటల్ వేదిక.',
+        hi: 'आरोग्य दृष्टि आदिवासी क्षेत्रों में मुख स्वास्थ्य स्क्रीनिंग के लिए बनाया गया डिजिटल मंच है।',
+        ta: 'ஆரோக்கிய திருஷ்டி தொலைதூர பழங்குடியினர் பகுதிகளுக்கான சமூக வாய்வழி சுகாதார பரிசோதனை தளமாகும்.',
+        kn: 'ಆರೋಗ್ಯ ದೃಷ್ಟಿ ದೂರದ ಬುಡಕಟ್ಟು ಪ್ರದೇಶಗಳಿಗಾಗಿ ಸಮುದಾಯ ಬಾಯಿಯ ಆರೋಗ್ಯ ತಪಾಸಣಾ ವೇದಿಕೆಯಾಗಿದೆ.',
+        ml: 'ആരോഗ്യ ദൃഷ്ടി വിദൂര ഗോത്രമേഖലകൾക്കായുള്ള സമൂഹ വാക്കാലുള്ള ആരോഗ്യ സ്ക്രീനിംഗ് പ്ലാറ്റ്ഫോമാണ്.',
+      }[lang],
       language: lang,
       topic: 'app_overview',
       animation: 'speaking',
@@ -600,10 +602,14 @@ export function generateLocalAssistantResponse(
 
     return {
       answerText: answers[lang] || answers.en,
-      speechText:
-        lang === 'te'
-          ? 'ఆరోగ్య దృష్టిలో నెట్‌వర్క్ లేకపోయినా స్క్రీనింగ్ వివరాలను సురక్షితంగా నమోదు చేయవచ్చు.'
-          : 'You can record screenings offline in remote hamlets without cellular coverage.',
+      speechText: {
+        en: 'You can record screenings offline in remote hamlets without cellular coverage.',
+        te: 'నెట్‌వర్క్ లేకపోయినా ఆరోగ్య దృష్టిలో స్క్రీనింగ్ వివరాలను సురక్షితంగా నమోదు చేయవచ్చు.',
+        hi: 'नेटवर्क न होने पर भी आरोग्य दृष्टि में स्क्रीनिंग की जानकारी सुरक्षित रूप से दर्ज की जा सकती है।',
+        ta: 'இணையம் இல்லாதபோதும் ஆரோக்கிய திருஷ்டியில் பரிசோதனை விவரங்களை பாதுகாப்பாக பதிவு செய்யலாம்.',
+        kn: 'ನೆಟ್‌ವರ್ಕ್ ಇಲ್ಲದಿದ್ದರೂ ಆರೋಗ್ಯ ದೃಷ್ಟಿಯಲ್ಲಿ ತಪಾಸಣೆಯ ವಿವರಗಳನ್ನು ಸುರಕ್ಷಿತವಾಗಿ ದಾಖಲಿಸಬಹುದು.',
+        ml: 'നെറ്റ്‌വർക്ക് ഇല്ലെങ്കിലും ആരോഗ്യ ദൃഷ്ടിയിൽ സ്ക്രീനിംഗ് വിവരങ്ങൾ സുരക്ഷിതമായി രേഖപ്പെടുത്താം.',
+      }[lang],
       language: lang,
       topic: 'offline_sync',
       animation: 'speaking',
@@ -840,10 +846,14 @@ export function generateLocalAssistantResponse(
 
     return {
       answerText: answers[lang] || answers.en,
-      speechText:
-        lang === 'te'
-          ? 'నోటి లోపల తెల్లటి లేదా ఎర్రటి మచ్చలు, మానని పుండ్లు కనిపిస్తే వెంటనే ఫోటో తీసి నమోదు చేయండి.'
-          : 'Observe for persistent patches or non-healing ulcers and capture a clear photograph.',
+      speechText: {
+        en: 'Observe for persistent patches or non-healing ulcers and capture a clear photograph.',
+        te: 'తెల్లటి లేదా ఎర్రటి మచ్చలు, మానని పుండ్లు కనిపిస్తే స్పష్టమైన ఫోటో తీసి నమోదు చేయండి.',
+        hi: 'सफेद या लाल धब्बे अथवा न भरने वाले छाले दिखें तो स्पष्ट फोटो लेकर दर्ज करें।',
+        ta: 'வெள்ளை அல்லது சிவப்பு திட்டுகள், ஆறாத புண்கள் தெரிந்தால் தெளிவான புகைப்படம் எடுத்து பதிவு செய்யவும்.',
+        kn: 'ಬಿಳಿ ಅಥವಾ ಕೆಂಪು ತೇಪೆಗಳು, ಗುಣವಾಗದ ಹುಣ್ಣುಗಳು ಕಂಡುಬಂದರೆ ಸ್ಪಷ್ಟವಾದ ಫೋಟೋ ತೆಗೆದು ದಾಖಲಿಸಿ.',
+        ml: 'വെളുത്തതോ ചുവന്നതോ ആയ പാടുകളോ മാറാത്ത വ്രണങ്ങളോ കണ്ടാൽ വ്യക്തമായ ചിത്രം എടുത്ത് രേഖപ്പെടുത്തുക.',
+      }[lang],
       language: lang,
       topic: 'screening_workflow',
       animation: 'speaking',

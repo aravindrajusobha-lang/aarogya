@@ -105,7 +105,7 @@ export const PortalShell: React.FC<PortalShellProps> = ({ t, lang, onChangeLang,
 
           <footer className="adp-footer">
             <span>© {new Date().getFullYear()} Aarogya-Drishti · ITDA Paderu</span>
-            <span className="adp-footer-sim">{t('common.demoAi')} · SIMULATION</span>
+            <span className="adp-footer-sim">{t('common.demoAi')} · {t('common.simulation')}</span>
           </footer>
         </div>
       </div>
@@ -164,8 +164,8 @@ export const Empty: React.FC<{ icon?: keyof typeof Icon; children: React.ReactNo
   return <div className="adp-empty"><span><IconCmp size={26} /></span><p>{children}</p>{action}</div>;
 };
 
-export const Skeleton: React.FC<{ rows?: number }> = ({ rows = 2 }) => (
-  <div className="adp-skeleton" role="status" aria-label="Loading">{Array.from({ length: rows }).map((_, index) => <span key={index} />)}</div>
+export const Skeleton: React.FC<{ rows?: number; label?: string }> = ({ rows = 2, label = 'Loading' }) => (
+  <div className="adp-skeleton" role="status" aria-label={label}>{Array.from({ length: rows }).map((_, index) => <span key={index} />)}</div>
 );
 
 export const StatusPill: React.FC<{ tone: 'green' | 'amber' | 'red' | 'gray' | 'blue'; children: React.ReactNode }> = ({ tone, children }) => (

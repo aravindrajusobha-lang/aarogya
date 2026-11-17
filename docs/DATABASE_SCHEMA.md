@@ -49,7 +49,7 @@ erDiagram
   - `userId`: `String` (Required, Unique, Indexed)
   - `username`: `String` (Required, Unique, Indexed, Trimmed)
   - `passwordHash`: `String` (Required, Argon2id hash)
-  - `role`: `Enum['system_admin', 'admin', 'medical_officer', 'specialist', 'anm', 'asha', 'patient']`
+  - `role`: `Enum['system_admin', 'admin', 'medical_officer', 'specialist', 'anm', 'asha', 'asha_worker', 'patient']`
   - `fullName`: `String` (Required)
   - `phone`: `String` (Optional, E.164 format)
   - `patientId`: `String` (Optional; generated `PAD-XXXXXX` for photo-registration accounts)
@@ -113,7 +113,7 @@ erDiagram
   - `assignmentId`: `String` (Required, Unique, Indexed)
   - `workerId`: `String` (Required, Indexed)
   - `workerName`: `String` (Required)
-  - `workerRole`: `Enum['asha', 'anm']`
+  - `workerRole`: `Enum['asha', 'asha_worker', 'anm']`
   - `hospitalId`: `String` (Required, Indexed)
   - `assignedMandal`: `String` (Required)
   - `assignedVillages`: `Array<String>` (Village IDs)

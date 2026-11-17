@@ -172,6 +172,8 @@ describe('Auth Security: Login, Lockout, Backoff, Token Rotation, Reuse Detectio
     expect(res.body.data.refreshToken).toBeDefined();
     // New refresh token must differ from old one
     expect(res.body.data.refreshToken).not.toBe(activeRefreshToken);
+    const refreshedSession = await DeviceSession.findOne({ sessionId: activeSessionId });
+    expect(refreshedSession?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
 
     const oldRefreshToken = activeRefreshToken;
     const newRefreshToken = res.body.data.refreshToken;

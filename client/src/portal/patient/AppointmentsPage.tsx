@@ -5,7 +5,7 @@ import { Icon } from '../icons';
 import { api, AppointmentItem, fmtDate, fmtDateTime, fmtDuration, fmtTime, followUpLabel, initials, newMutationId, sessionActive, SessionInfo, Translate, useApi } from '../lib';
 
 interface DoctorOption { userId: string; name: string; hospitalId: string; hospitalName: string; specialization?: string; availableSlotsCount: number; consultationFee?: number | null; experienceYears?: number | null; consultationModes?: string[] }
-interface Slot { startTime: string; endTime: string; isAvailable: boolean; status?: 'available' | 'booked' | 'past'; durationMinutes?: number }
+interface Slot { startTime: string; endTime: string; isAvailable: boolean; status?: 'available' | 'booked' | 'past'; durationMinutes?: number; consultationMode?: 'online' | 'offline' }
 
 const todayKey = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
@@ -87,12 +87,12 @@ const BookingForm: React.FC<{ t: Translate; lang: LanguageCode; patientId?: stri
   const doctors = useApi<{ doctors: DoctorOption[] }>(`/api/v1/consultations/availability?date=${date}`, [date]);
   const doctor = doctors.data?.doctors.find((item) => item.userId === doctorId) || null;
   const slots = useApi<{ slots: Slot[] }>(doctor ? `/api/v1/consultations/availability/${encodeURIComponent(doctor.userId)}?date=${date}` : null, [doctorId, date]);
-  const visibleSlots = useMemo(() => (slots.data?.slots || []).filter((item) => new Date(item.startTime).getTime() > Date.now() && item.status !== 'past'), [slots.data]);
+  const visibleSlots = useMemo(() => (slots.data?.slots || []).filter((item) => new Date(item.startTime).getTime() > Date.now() && item.status !== 'past' && (!item.consultationMode || item.consultationMode === mode)), [slots.data, mode]);
   const openSlots = useMemo(() => visibleSlots.filter((item) => item.isAvailable), [visibleSlots]);
   const screeningId = (() => { try { return sessionStorage.getItem('patient_booking_screening_id') || undefined; } catch { return undefined; } })();
 
   useEffect(() => { setDoctorId(''); setSlot(''); }, [date]);
-  useEffect(() => { setSlot(''); }, [doctorId]);
+  useEffect(() => { setSlot(''); }, [doctorId, mode]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -143,7 +143,7 @@ const BookingForm: React.FC<{ t: Translate; lang: LanguageCode; patientId?: stri
 
       <div className="adp-step">
         <h3><b>3</b>{t('appt.step3')}</h3>
-        {doctors.loading ? <Skeleton rows={2} /> : doctors.error ? <Notice tone="error">{doctors.error}</Notice>
+        {doctors.loading ? <Skeleton rows={2} label={t('common.loading')} /> : doctors.error ? <Notice tone="error">{doctors.error}</Notice>
           : !doctors.data?.doctors.length ? <Notice tone="info">{t('appt.noDoctors')}</Notice> : (
             <div className="adp-choice-grid">
               {doctors.data.doctors.filter((item) => !item.consultationModes?.length || item.consultationModes.includes(mode)).map((item) => (
@@ -160,7 +160,7 @@ const BookingForm: React.FC<{ t: Translate; lang: LanguageCode; patientId?: stri
       {doctor && (
         <div className="adp-step">
           <h3><b>4</b>{t('appt.step4')}</h3>
-          {slots.loading ? <Skeleton rows={1} /> : !visibleSlots.length ? <Notice tone="info">{t('appt.noDoctors')}</Notice> : (
+          {slots.loading ? <Skeleton rows={1} label={t('common.loading')} /> : !visibleSlots.length ? <Notice tone="info">{t('appt.noDoctors')}</Notice> : (
             <>
               <div className="adp-slot-legend">
                 <span className="adp-slot-chip is-available">{t('avail.available')} ({openSlots.length})</span>
@@ -215,7 +215,7 @@ export const AppointmentsPage: React.FC<{ t: Translate; lang: LanguageCode; pati
           <button type="button" aria-pressed={tab === 'past'} onClick={() => setTab('past')}>{t('appt.past')} ({past.length})</button>
         </div>
       }>
-        {loading ? <Skeleton rows={3} /> : error ? <Notice tone="error">{error}</Notice>
+        {loading ? <Skeleton rows={3} label={t('common.loading')} /> : error ? <Notice tone="error">{error}</Notice>
           : !visible.length ? <Empty icon="calendar">{t('appt.none')}</Empty>
           : <div className="adp-list">{visible.map((item) => <PatientAppointmentRow key={item.appointmentId} t={t} lang={lang} item={item} onChanged={() => void reload()} />)}</div>}
       </Card>

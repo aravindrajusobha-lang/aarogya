@@ -30,6 +30,7 @@ export const AssistantInput: React.FC<AssistantInputProps> = ({
   interimTranscript = '',
   placeholder = 'Type your question, attach photo, or tap mic...',
   quickSuggestions = [],
+  activeLang = 'en',
   onSelectSuggestion,
   errorMessage,
   onDismissError,
@@ -37,6 +38,14 @@ export const AssistantInput: React.FC<AssistantInputProps> = ({
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const voiceUnavailableText: Record<string, string> = {
+    en: 'Voice input is not supported in this browser. Type your question instead.',
+    te: 'ఈ బ్రౌజర్‌లో వాయిస్ గుర్తింపు అందుబాటులో లేదు. దయచేసి ప్రశ్నను టైప్ చేయండి.',
+    hi: 'इस ब्राउज़र में आवाज़ पहचान उपलब्ध नहीं है। कृपया अपना प्रश्न लिखें।',
+    ta: 'இந்த உலாவியில் குரல் அறிதல் இல்லை. உங்கள் கேள்வியைத் தட்டச்சு செய்யவும்.',
+    kn: 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.',
+    ml: 'ഈ ബ്രൗസറിൽ ശബ്ദ തിരിച്ചറിയൽ ലഭ്യമല്ല. ദയവായി ചോദ്യം ടൈപ്പ് ചെയ്യുക.',
+  };
 
   // Synchronize interim speech transcript into the input preview
   useEffect(() => {
@@ -249,23 +258,11 @@ export const AssistantInput: React.FC<AssistantInputProps> = ({
         {/* Camera / Photo Attachment Button */}
         <button
           type="button"
-          className="btn-input-photo min-touch-target"
+          className={`btn-input-photo min-touch-target ${selectedImage ? 'has-selected-image' : ''}`}
           onClick={() => fileInputRef.current?.click()}
           disabled={isThinking}
           title="Attach oral photo for Gemini AI screening"
           aria-label="Attach oral photo"
-          style={{
-            background: selectedImage ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)',
-            border: selectedImage ? '1.5px solid #10b981' : '1px solid rgba(255, 255, 255, 0.16)',
-            borderRadius: '10px',
-            color: selectedImage ? '#34d399' : '#cbd5e1',
-            padding: '8px 12px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '1.1rem',
-          }}
         >
           📷
         </button>
@@ -288,38 +285,40 @@ export const AssistantInput: React.FC<AssistantInputProps> = ({
         />
 
         {/* Microphone STT Button (Min 44px touch target) */}
-        {isVoiceSupported && (
-          <button
-            type="button"
-            className={`btn-input-mic min-touch-target ${
-              isListening ? 'listening-active' : ''
-            } ${isSpeaking ? 'speaking-interrupt' : ''}`}
-            onClick={onToggleVoice}
-            disabled={isThinking}
-            title={
-              isSpeaking
-                ? 'Interrupt and speak now (Barge-in)'
-                : isListening
-                ? 'Stop listening'
-                : 'Speak in Telugu, Hindi, or English'
-            }
-            aria-label={
-              isSpeaking
-                ? 'Interrupt and speak'
-                : isListening
-                ? 'Stop listening'
-                : 'Microphone voice input'
-            }
-          >
-            {isListening ? (
-              <span className="mic-pulse-wave">🎙️</span>
-            ) : isSpeaking ? (
-              <span className="mic-barge-in-icon">⚡</span>
-            ) : (
-              <span>🎤</span>
-            )}
-          </button>
-        )}
+        <button
+          type="button"
+          className={`btn-input-mic min-touch-target ${
+            isListening ? 'listening-active' : ''
+          } ${isSpeaking ? 'speaking-interrupt' : ''}`}
+          onClick={onToggleVoice}
+          disabled={!isVoiceSupported || isThinking}
+          title={
+            !isVoiceSupported
+              ? voiceUnavailableText[activeLang] || voiceUnavailableText.en
+              : isSpeaking
+              ? 'Interrupt and speak now (Barge-in)'
+              : isListening
+              ? 'Stop listening'
+              : 'Speak in the selected language'
+          }
+          aria-label={
+            !isVoiceSupported
+              ? voiceUnavailableText[activeLang] || voiceUnavailableText.en
+              : isSpeaking
+              ? 'Interrupt and speak'
+              : isListening
+              ? 'Stop listening'
+              : 'Microphone voice input'
+          }
+        >
+          {isListening ? (
+            <span className="mic-pulse-wave">🎙️</span>
+          ) : isSpeaking ? (
+            <span className="mic-barge-in-icon">⚡</span>
+          ) : (
+            <span>🎤</span>
+          )}
+        </button>
 
         {/* Send Button (Min 44px touch target) */}
         <button
@@ -334,6 +333,11 @@ export const AssistantInput: React.FC<AssistantInputProps> = ({
           </svg>
         </button>
       </form>
+      {!isVoiceSupported && (
+        <p className="assistant-voice-unavailable" role="status">
+          {voiceUnavailableText[activeLang] || voiceUnavailableText.en}
+        </p>
+      )}
     </div>
   );
 };

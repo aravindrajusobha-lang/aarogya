@@ -20,6 +20,7 @@ export const CapabilityMatrixViewer: React.FC<CapabilityMatrixViewerProps> = ({
     { key: 'medical_officer', label: 'Medical Officer' },
     { key: 'anm', label: 'ANM' },
     { key: 'asha', label: 'ASHA' },
+    { key: 'asha_worker', label: 'ASHA Worker' },
     { key: 'patient', label: 'Patient' },
   ];
 

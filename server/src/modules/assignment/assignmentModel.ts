@@ -4,7 +4,7 @@ export interface IHealthWorkerAssignment extends Document {
   assignmentId: string;
   workerId: string;
   workerName: string;
-  workerRole: 'asha' | 'anm';
+  workerRole: 'asha' | 'asha_worker' | 'anm';
   hospitalId: string;
   assignedMandal: string;
   assignedVillages: string[];
@@ -21,7 +21,7 @@ const HealthWorkerAssignmentSchema = new Schema<IHealthWorkerAssignment>(
     assignmentId: { type: String, required: true, unique: true, index: true },
     workerId: { type: String, required: true, index: true },
     workerName: { type: String, required: true },
-    workerRole: { type: String, required: true, enum: ['asha', 'anm'], index: true },
+    workerRole: { type: String, required: true, enum: ['asha', 'asha_worker', 'anm'], index: true },
     hospitalId: { type: String, required: true, index: true },
     assignedMandal: { type: String, required: true },
     assignedVillages: [{ type: String, required: true }],

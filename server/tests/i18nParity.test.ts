@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import en from '../src/i18n/locales/en.json';
 import te from '../src/i18n/locales/te.json';
 import hi from '../src/i18n/locales/hi.json';
+import clientEn from '../../client/src/i18n/locales/en.json';
+import clientTe from '../../client/src/i18n/locales/te.json';
+import clientHi from '../../client/src/i18n/locales/hi.json';
 
 function extractAllKeyPaths(obj: Record<string, unknown>, prefix = ''): string[] {
   let keys: string[] = [];
@@ -63,5 +66,14 @@ describe('i18n Key Parity & Completeness', () => {
       expect(typeof hiVal).toBe('string');
       expect((hiVal as string).trim().length).toBeGreaterThan(0);
     });
+  });
+
+  it('localizes the patient profile and live camera controls', () => {
+    for (const locale of [clientTe, clientHi]) {
+      expect(locale.portal.profile.title).not.toBe(clientEn.portal.profile.title);
+      expect(locale.portal.profile.save).not.toBe(clientEn.portal.profile.save);
+      expect(locale.portal.screening.useLiveCamera).not.toBe(clientEn.portal.screening.useLiveCamera);
+      expect(locale.portal.screening.cameraCaptureError).not.toBe(clientEn.portal.screening.cameraCaptureError);
+    }
   });
 });

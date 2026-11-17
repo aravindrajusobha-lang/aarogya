@@ -4,7 +4,7 @@ export interface AuthUser {
   userId: string;
   username: string;
   fullName: string;
-  role: 'system_admin' | 'admin' | 'medical_officer' | 'anm' | 'asha' | 'patient';
+  role: 'system_admin' | 'admin' | 'medical_officer' | 'anm' | 'asha' | 'asha_worker' | 'patient';
   hospitalId?: string;
   patientId?: string;
   phone?: string;
@@ -55,7 +55,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   const [regFullName, setRegFullName] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regPhone, setRegPhone] = useState('');
-  const [regRole, setRegRole] = useState<'patient' | 'asha' | 'anm' | 'medical_officer'>('patient');
+  const [regRole, setRegRole] = useState<'patient' | 'asha' | 'asha_worker' | 'anm' | 'medical_officer'>('patient');
   const [regHospitalId, setRegHospitalId] = useState('hosp_paderu_dh');
   const [regPhoneToken, setRegPhoneToken] = useState<string | null>(null);
   const [regOtpCode, setRegOtpCode] = useState('');
@@ -1223,6 +1223,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
                   >
                     <option value="patient">Tribal Patient / Citizen</option>
                     <option value="asha">ASHA Frontline Worker</option>
+                    <option value="asha_worker">ASHA Worker (Verified)</option>
                     <option value="anm">ANM Sub-Centre Staff</option>
                     <option value="medical_officer">Medical Officer (MO)</option>
                   </select>

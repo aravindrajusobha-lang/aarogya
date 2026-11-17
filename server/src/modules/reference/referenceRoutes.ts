@@ -48,7 +48,7 @@ router.get(
       if (hospitalId) filter.hospitalId = hospitalId;
 
       // 1. HEALTH WORKER STRICT ASSIGNMENT SCOPE
-      if (req.user!.role === 'asha' || req.user!.role === 'anm') {
+      if (req.user!.role === 'asha' || req.user!.role === 'asha_worker' || req.user!.role === 'anm') {
         const assignment = await HealthWorkerAssignment.findOne({
           workerId: req.user!.id,
           status: 'active',

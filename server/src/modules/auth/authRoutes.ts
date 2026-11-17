@@ -554,7 +554,7 @@ const RegisterSchema = z.object({
   username: z.string().min(3, 'Username must be at least 3 characters').regex(/^[a-zA-Z0-9._-]+$/, 'Username contains invalid characters'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   fullName: z.string().min(2, 'Full name required'),
-  role: z.enum(['system_admin', 'admin', 'medical_officer', 'anm', 'asha', 'patient']).default('asha'),
+  role: z.enum(['system_admin', 'admin', 'medical_officer', 'anm', 'asha', 'asha_worker', 'patient']).default('asha_worker'),
   phone: z.string().optional(),
   phoneToken: z.string().optional(),
   hospitalId: z.string().optional().default('hosp_paderu_dh'),

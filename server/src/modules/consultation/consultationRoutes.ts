@@ -347,6 +347,7 @@ const SlotRangeInput = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  consultationMode: z.enum(['online', 'offline']).optional(),
   durationMinutes: z.number().int().refine((v) => [10, 15, 20, 30, 45, 60].includes(v), 'Duration must be 10, 15, 20, 30, 45 or 60 minutes'),
   breakMinutes: z.number().int().min(0).max(30).optional().default(0),
   mutationId: z.string().uuid(),
@@ -361,7 +362,7 @@ consultationRouter.post('/doctor/availability/range', requireAuth, authorizeCapa
       if (replay.entityType !== 'doctor-slot-range' || replay.responsePayload?.doctorId !== user.userId) return res.status(409).envelopeError('MUTATION_CONFLICT', 'Request ID already used.', undefined, 409);
       return res.envelope({ ...replay.responsePayload, idempotentReplay: true });
     }
-    const { date, startTime, endTime, durationMinutes, breakMinutes } = req.body;
+    const { date, startTime, endTime, consultationMode, durationMinutes, breakMinutes } = req.body;
     const windowStart = new Date(`${date}T${startTime}:00+05:30`); const windowEnd = new Date(`${date}T${endTime}:00+05:30`);
     if (windowEnd <= windowStart) return res.status(400).envelopeError('INVALID_RANGE', 'End time must be after start time.', undefined, 400);
     if (windowEnd.getTime() - windowStart.getTime() > 12 * 60 * 60000) return res.status(400).envelopeError('INVALID_RANGE', 'A single window can be at most 12 hours.', undefined, 400);
@@ -371,7 +372,7 @@ consultationRouter.post('/doctor/availability/range', requireAuth, authorizeCapa
     for (let t = windowStart.getTime(); t + durationMinutes * 60000 <= windowEnd.getTime(); t += (durationMinutes + breakMinutes) * 60000) {
       const s = new Date(t); const e = new Date(t + durationMinutes * 60000);
       if (s.getTime() <= Date.now() || existing.some((x) => new Date(x.startTime) < e && new Date(x.endTime) > s)) { skipped += 1; continue; }
-      toCreate.push({ doctorId: user.userId, hospitalId: user.hospitalId, startTime: s, endTime: e, mutationId: `${req.body.mutationId}:${toCreate.length}` });
+      toCreate.push({ doctorId: user.userId, hospitalId: user.hospitalId, startTime: s, endTime: e, consultationMode, mutationId: `${req.body.mutationId}:${toCreate.length}` });
     }
     if (!toCreate.length) return res.status(409).envelopeError('NO_NEW_SLOTS', 'No new future slots fit in this window (they may already exist or be in the past).', undefined, 409);
     const created = await DoctorSlot.insertMany(toCreate, { ordered: false });
@@ -435,7 +436,11 @@ consultationRouter.get('/availability', requireAuth, authorizeCapability('appoin
     const doctors: any[] = await User.find({ role: { $in: ['medical_officer', 'specialist_doctor'] }, status: 'active', verificationStatus: { $in: ['verified', 'VERIFIED'] }, hospitalId: { $exists: true, $ne: '' } }).select('userId fullName hospitalId verificationDetails doctorCode').sort({ fullName: 1 }).lean();
     const hospitals: any[] = await Hospital.find({ hospitalId: { $in: doctors.map(d => d.hospitalId) } }).select('hospitalId name').lean();
     const nameById = new Map(hospitals.map(h => [h.hospitalId, h.name]));
-    const availableDoctors = (await Promise.all(doctors.map(async d => ({ userId: d.userId, name: d.fullName, hospitalId: d.hospitalId, hospitalName: nameById.get(d.hospitalId) || d.hospitalId, specialization: d.verificationDetails?.departmentName || d.verificationDetails?.specialization, consultationFee: d.verificationDetails?.consultationFee ?? null, experienceYears: d.verificationDetails?.experienceYears ?? null, consultationModes: d.verificationDetails?.consultationModes || [], doctorCode: d.doctorCode || null, availableSlotsCount: (await availableDoctorSlots(d.userId, date)).filter(s => s.isAvailable).length })))).filter(d => d.availableSlotsCount > 0);
+    const availableDoctors = (await Promise.all(doctors.map(async d => {
+      const slots = await availableDoctorSlots(d.userId, date);
+      const slotModes = [...new Set(slots.filter(slot => slot.isAvailable).map(slot => slot.consultationMode).filter(Boolean))];
+      return { userId: d.userId, name: d.fullName, hospitalId: d.hospitalId, hospitalName: nameById.get(d.hospitalId) || d.hospitalId, specialization: d.verificationDetails?.departmentName || d.verificationDetails?.specialization, consultationFee: d.verificationDetails?.consultationFee ?? null, experienceYears: d.verificationDetails?.experienceYears ?? null, consultationModes: slotModes.length ? slotModes : d.verificationDetails?.consultationModes || [], doctorCode: d.doctorCode || null, availableSlotsCount: slots.filter(slot => slot.isAvailable).length };
+    }))).filter(d => d.availableSlotsCount > 0);
     return res.envelope({ date, doctors: availableDoctors, availableDoctorCount: availableDoctors.length }, 'Verified doctors with free appointment slots retrieved.');
   } catch (err) { return error(res, err); }
 });

@@ -1,0 +1,29 @@
+{
+  "cli": {
+    "version": ">=16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://aarogya-drishti-l6fr.onrender.com",
+        "EXPO_PUBLIC_WEB_APP_URL": "https://aarogya-frontend-8jkx.onrender.com",
+        "NPM_CONFIG_CACHE": "/tmp/aarogya-mobile-npm-cache"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://aarogya-drishti-l6fr.onrender.com",
+        "EXPO_PUBLIC_WEB_APP_URL": "https://aarogya-frontend-8jkx.onrender.com",
+        "NPM_CONFIG_CACHE": "/tmp/aarogya-mobile-npm-cache"
+      }
+    }
+  }
+}

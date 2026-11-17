@@ -39,7 +39,7 @@ export function useLanguage(initialLang: LanguageCode = 'en') {
   const handleInputTextDetection = useCallback(
     (text: string) => {
       if (mode === 'auto') {
-        const detected = detectLanguageFromText(text);
+        const detected = detectLanguageFromText(text, currentLang);
         if (detected !== currentLang) {
           setCurrentLang(detected);
         }

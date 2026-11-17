@@ -12,7 +12,7 @@ const router = Router();
 const CreateAssignmentSchema = z.object({
   workerId: z.string().min(1, 'Worker ID required'),
   workerName: z.string().min(2, 'Worker name required'),
-  workerRole: z.enum(['asha', 'anm']),
+  workerRole: z.enum(['asha', 'asha_worker', 'anm']),
   hospitalId: z.string().min(1, 'Hospital ID required'),
   assignedMandal: z.string().min(1, 'Assigned mandal required'),
   assignedVillages: z.array(z.string()).min(1, 'At least one village required'),
@@ -88,7 +88,7 @@ router.get(
       const filter: Record<string, unknown> = { status: 'active' };
 
       // Health Workers can only see their own assignments
-      if (req.user!.role === 'asha' || req.user!.role === 'anm') {
+      if (req.user!.role === 'asha' || req.user!.role === 'asha_worker' || req.user!.role === 'anm') {
         filter.workerId = req.user!.id;
       }
 
@@ -116,7 +116,7 @@ router.get(
       const workerId = req.params.workerId as string;
 
       // Privacy guard: worker can only inspect their own assignment unless supervisor
-      if (req.user!.role === 'asha' || req.user!.role === 'anm') {
+      if (req.user!.role === 'asha' || req.user!.role === 'asha_worker' || req.user!.role === 'anm') {
         if (req.user!.id !== workerId) {
           res.envelopeError('FORBIDDEN', 'Workers can only access their own assignments', undefined, 403);
           return;

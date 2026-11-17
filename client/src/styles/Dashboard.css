@@ -849,8 +849,6 @@
 .patient-back-button { justify-self: start; min-height: 40px; padding: 7px 10px; border: 0; background: transparent; color: var(--success-text); font: inherit; font-weight: 750; cursor: pointer; }
 .patient-report-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(320px, 1.1fr); align-items: start; gap: 16px; }
 .patient-report-summary, .patient-report-chat { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
-.patient-report-photo { display: block; width: 100%; max-height: 320px; object-fit: contain; border-radius: 12px; background: var(--surface-2); }
-.patient-report-photo-placeholder { display: grid; place-items: center; min-height: 170px; border: 1px dashed var(--border); border-radius: 12px; color: var(--text-secondary); }
 .patient-report-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 14px 0; color: var(--text-secondary); font-size: .75rem; }
 .patient-report-badge { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 99px; background: var(--warning-bg); color: var(--warning-text); font-size: .7rem; font-weight: 800; }
 .patient-report-summary h2, .patient-report-summary h3 { margin: 12px 0 6px; }
@@ -1481,6 +1479,9 @@
 .live-appointment-room .live-appointment-controls .live-control-primary { grid-column: 1 / -1; min-height: 46px; border-color: #176c58; background: #176c58; color: #fff; }
 .live-appointment-room .live-appointment-controls .live-control-danger { border-color: #b74545; background: #b74545; color: #fff; }
 .live-appointment-room .live-appointment-controls .live-control-quiet { background: #fff; }
+.live-appointment-room .live-appointment-controls .live-mic-control { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-color: #176c58; background: #e8f7ed; color: #176c58; }
+.live-appointment-room .live-appointment-controls .live-mic-control svg { width: 20px; height: 20px; flex: none; }
+.live-appointment-room .live-appointment-controls .live-mic-control.is-muted { border-color: #b74545; background: #fff0f0; color: #a52e2e; }
 .live-appointment-room .live-appointment-controls button:hover, .live-room-chat form button:hover, .live-room-chat > button:hover, .live-room-clinical-notes > button:hover { filter: brightness(.97); }
 .live-room-chat-log { display: flex; flex-direction: column; gap: 9px; min-height: 90px; max-height: 260px; overflow: auto; margin: 12px 0; padding: 10px; border: 1px solid #e5ece9; border-radius: 11px; background: #f8faf9; }
 .live-room-chat-log p { display: grid; gap: 3px; margin: 0; color: #40564f; font-size: .76rem; line-height: 1.45; overflow-wrap: anywhere; }

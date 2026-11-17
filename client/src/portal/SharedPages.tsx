@@ -4,6 +4,7 @@ import { Card, Empty, Notice, PageHeader, Skeleton, StatusPill } from './PortalS
 import { Icon } from './icons';
 import { downloadPrescriptionPdf } from './prescriptionPdf';
 import { api, fmtDate, fmtDateTime, fmtDuration, fmtTime, followUpLabel, SessionInfo, Translate, useApi } from './lib';
+import { notificationContent, NotificationItem } from './notificationContent';
 
 interface HistoryEntry extends SessionInfo {
   appointmentId: string; patientId: string; patientName: string | null; doctorName: string | null; facilityName: string | null; scheduledStart: string | null;
@@ -17,7 +18,7 @@ export const ConsultationHistoryPage: React.FC<{ t: Translate; lang: LanguageCod
     <>
       <PageHeader title={t('session.history')} />
       <Card>
-        {loading ? <Skeleton rows={3} /> : error ? <Notice tone="error">{error}</Notice> : !sessions.length ? <Empty icon="history">{t('session.noHistory')}</Empty> : (
+        {loading ? <Skeleton rows={3} label={t('common.loading')} /> : error ? <Notice tone="error">{error}</Notice> : !sessions.length ? <Empty icon="history">{t('session.noHistory')}</Empty> : (
           <div className="adp-table-wrap">
             <table className="adp-table">
               <thead>
@@ -71,7 +72,7 @@ export const PrescriptionsPage: React.FC<{ t: Translate; lang: LanguageCode; pat
   return (
     <>
       <PageHeader title={t('nav.prescriptions')} action={<button className="adp-btn adp-btn-outline adp-btn-sm" onClick={() => void reload()}>{t('common.refresh')}</button>} />
-      {loading ? <Skeleton rows={3} /> : error ? <Notice tone="error">{error}</Notice> : !items.length ? <Card><Empty icon="pill">{t('common.noPrescriptions')}</Empty></Card> : (
+      {loading ? <Skeleton rows={3} label={t('common.loading')} /> : error ? <Notice tone="error">{error}</Notice> : !items.length ? <Card><Empty icon="pill">{t('common.noPrescriptions')}</Empty></Card> : (
         <div className="adp-list">
           {items.map((item) => (
             <Card key={item.prescriptionId} title={item.doctorName} icon="pill" action={<div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><StatusPill tone={item.status === 'active' ? 'green' : 'gray'}>{item.status}</StatusPill><button type="button" className="adp-btn adp-btn-outline adp-btn-sm" onClick={() => downloadPrescriptionPdf(item, patientName || '')}><Icon.file size={16} />{t('rx.download')}</button></div>}>
@@ -100,8 +101,6 @@ export const PrescriptionsPage: React.FC<{ t: Translate; lang: LanguageCode; pat
 };
 
 /* ---------- Notifications ---------- */
-interface NotificationItem { notificationId: string; title: string; body: string; read: boolean; createdAt: string; link?: string }
-
 export const NotificationsPage: React.FC<{ t: Translate; lang: LanguageCode; onChanged?: () => void }> = ({ t, lang, onChanged }) => {
   const { data, error, loading, reload } = useApi<{ notifications: NotificationItem[]; unreadCount: number }>('/api/v1/notifications?limit=50', []);
   const [busy, setBusy] = useState(false);
@@ -119,19 +118,20 @@ export const NotificationsPage: React.FC<{ t: Translate; lang: LanguageCode; onC
     <>
       <PageHeader title={t('nav.notifications')} action={data?.unreadCount ? <button type="button" className="adp-btn adp-btn-outline adp-btn-sm" disabled={busy} onClick={() => void markAll()}><Icon.check size={16} />{t('common.markAllRead')}</button> : undefined} />
       <Card>
-        {loading ? <Skeleton rows={3} /> : error ? <Notice tone="error">{error}</Notice> : !items.length ? <Empty icon="bell">{t('common.noNotifications')}</Empty> : (
+        {loading ? <Skeleton rows={3} label={t('common.loading')} /> : error ? <Notice tone="error">{error}</Notice> : !items.length ? <Empty icon="bell">{t('common.noNotifications')}</Empty> : (
           <div className="adp-list">
-            {items.map((item) => (
-              <button key={item.notificationId} type="button" className="adp-quick-item" style={{ alignItems: 'flex-start' }} onClick={() => void open(item)}>
+            {items.map((item) => {
+              const content = notificationContent(item, t, lang);
+              return <button key={item.notificationId} type="button" className="adp-quick-item" style={{ alignItems: 'flex-start' }} onClick={() => void open(item)}>
                 <span className="adp-quick-icon" style={{ width: 40, height: 40 }}><Icon.bell size={18} /></span>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <strong style={{ fontWeight: item.read ? 600 : 800 }}>{item.title}</strong>
-                  <small style={{ color: 'var(--adp-text-2)' }}>{item.body}</small>
+                  <strong style={{ fontWeight: item.read ? 600 : 800 }}>{content.title}</strong>
+                  <small style={{ color: 'var(--adp-text-2)' }}>{content.body}</small>
                   <small>{fmtDateTime(item.createdAt, lang)}</small>
                 </span>
-                {!item.read && <span className="adp-badge" style={{ minWidth: 10, height: 10, padding: 0 }} aria-label="unread" />}
-              </button>
-            ))}
+                {!item.read && <span className="adp-badge" style={{ minWidth: 10, height: 10, padding: 0 }} aria-label={t('common.unread')} />}
+              </button>;
+            })}
           </div>
         )}
       </Card>

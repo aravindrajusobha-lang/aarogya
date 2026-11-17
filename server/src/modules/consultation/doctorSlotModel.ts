@@ -5,6 +5,7 @@ const schema = new Schema({
   hospitalId: { type: String, required: true },
   startTime: { type: Date, required: true },
   endTime: { type: Date, required: true },
+  consultationMode: { type: String, enum: ['online', 'offline'] },
   mutationId: { type: String, required: true, unique: true },
 }, { timestamps: true });
 schema.index({ doctorId: 1, startTime: 1 }, { unique: true });
@@ -23,7 +24,7 @@ export async function doctorSlotsWithStatus(doctorId: string, from: Date, to: Da
   return slots.map((s) => {
     const booking = bookings.find((b) => new Date(b.slotStartTime) < new Date(s.endTime) && new Date(b.slotEndTime) > new Date(s.startTime));
     const status: SlotStatus = booking ? 'booked' : new Date(s.startTime).getTime() <= now ? 'past' : 'available';
-    return { slotId: String(s._id), startTime: s.startTime, endTime: s.endTime, durationMinutes: Math.round((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 60000), status, isAvailable: status === 'available', booking };
+    return { slotId: String(s._id), startTime: s.startTime, endTime: s.endTime, durationMinutes: Math.round((new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 60000), consultationMode: s.consultationMode, status, isAvailable: status === 'available', booking };
   });
 }
 

@@ -22,7 +22,7 @@ interface Props {
 export const AssistantChatPanel: React.FC<Props> = ({ messages, robotState, currentLang, langMode, onSelectLang, onSetAutoMode, onSendMessage, onToggleVoice, isListening, isThinking, isMuted, onToggleMute, isVoiceSupported, interimTranscript = '', isSpeaking = false, onStopVoice, onToggleSpeakMessage, speakingMessageId, voiceErrorMessage, onDismissVoiceError, onClose, onNavigateTab, isPatient = false, statusText, isSpeakingPaused }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, isThinking]);
-  return <div className="assistant-chat-panel assistant-simple-panel" role="dialog" aria-label="Dr. Drishti assistant">
+  return <div id="assistant-chat-panel" className="assistant-chat-panel assistant-simple-panel" role="dialog" aria-label="Dr. Drishti assistant">
     <header className="panel-header-bar assistant-simple-header">
       <div className="header-robot-brand"><RobotCharacter state={robotState} size={34}/><div className="assistant-brand-title"><span>{isPatient ? 'Dr. Drishti Health Guide' : 'Dr. Drishti AI'}</span></div></div>
       <div className="assistant-simple-actions">
@@ -32,11 +32,11 @@ export const AssistantChatPanel: React.FC<Props> = ({ messages, robotState, curr
     </header>
     <LanguageSelector currentLang={currentLang} mode={langMode} onSelectLang={onSelectLang} onSetAutoMode={onSetAutoMode || (() => {})}/>
     {(isListening || isSpeaking || isThinking) && <div className="assistant-simple-status" role="status">{statusText || (isListening ? `Listening in ${currentLang.toUpperCase()}…` : isThinking ? 'Thinking…' : 'Speaking…')} {isListening && interimTranscript ? ` “${interimTranscript}”` : ''}</div>}
-    {voiceErrorMessage && <div className="assistant-error-alert-banner" role="alert">{voiceErrorMessage}<button onClick={onDismissVoiceError}>×</button></div>}
+    {voiceErrorMessage && <div className="assistant-error-alert-banner" role="alert">{voiceErrorMessage}<button type="button" onClick={onDismissVoiceError} aria-label="Dismiss voice error">×</button></div>}
     <div className="assistant-simple-messages" ref={scrollRef}>
       <AssistantMessages messages={messages} onNavigateTab={onNavigateTab} onSelectAction={onSendMessage} onToggleSpeakMessage={onToggleSpeakMessage} speakingMessageId={speakingMessageId} isSpeakingPaused={isSpeakingPaused} isThinking={isThinking}/>
       {isThinking && <div className="assistant-simple-thinking">Thinking…</div>}
     </div>
-    <AssistantInput onSendMessage={onSendMessage} onToggleVoice={onToggleVoice} onStopSpeaking={onStopVoice} isListening={isListening} isThinking={isThinking} isSpeaking={isSpeaking} isVoiceSupported={isVoiceSupported} interimTranscript={interimTranscript} placeholder="Type a message or use the microphone…" quickSuggestions={[]} errorMessage={null}/>
+    <AssistantInput onSendMessage={onSendMessage} onToggleVoice={onToggleVoice} onStopSpeaking={onStopVoice} isListening={isListening} isThinking={isThinking} isSpeaking={isSpeaking} isVoiceSupported={isVoiceSupported} interimTranscript={interimTranscript} placeholder="Type a message or use the microphone…" quickSuggestions={[]} activeLang={currentLang} errorMessage={null}/>
   </div>;
 };

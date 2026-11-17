@@ -28,7 +28,7 @@ const InvitationSchema = new Schema<IInvitation>(
     role: {
       type: String,
       required: true,
-      enum: ['admin', 'medical_officer', 'anm', 'asha'],
+      enum: ['admin', 'medical_officer', 'anm', 'asha', 'asha_worker'],
       index: true,
     },
     token: { type: String, required: true, unique: true, index: true },

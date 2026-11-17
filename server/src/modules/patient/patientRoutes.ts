@@ -322,7 +322,7 @@ router.get(
       if (duplicateOnly === 'true') filter.isDuplicateCandidate = true;
 
       // HEALTH WORKER JURISDICTION SCOPING
-      if (req.user!.role === 'asha' || req.user!.role === 'anm') {
+      if (req.user!.role === 'asha' || req.user!.role === 'asha_worker' || req.user!.role === 'anm') {
         const assignment = await HealthWorkerAssignment.findOne({
           workerId: req.user!.id,
           status: 'active',
@@ -614,7 +614,7 @@ router.patch(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const patientId = req.params.id as string;
-      if (!['medical_officer', 'anm', 'asha'].includes(req.user!.role)) {
+      if (!['medical_officer', 'anm', 'asha', 'asha_worker'].includes(req.user!.role)) {
         res.envelopeError('FORBIDDEN', 'Only a health worker or medical officer may verify patient accounts', undefined, 403);
         return;
       }
@@ -624,7 +624,7 @@ router.patch(
         return;
       }
 
-      if (req.user!.role === 'asha' || req.user!.role === 'anm') {
+      if (req.user!.role === 'asha' || req.user!.role === 'asha_worker' || req.user!.role === 'anm') {
         const [assignment, village] = await Promise.all([
           HealthWorkerAssignment.findOne({ workerId: req.user!.id, status: 'active' }),
           Village.findOne({

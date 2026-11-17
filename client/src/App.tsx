@@ -29,7 +29,7 @@ import { ConsentManager } from './components/ConsentManager';
 import { CapabilityMatrixViewer } from './components/CapabilityMatrixViewer';
 import { AadhaarMockManager } from './components/AadhaarMockManager';
 import { AuthPanel, AuthUser, AuthTokens } from './components/AuthPanel';
-import { clearStoredAuth, readStoredAuth, storeAuth, validateAccessToken } from './utils/session';
+import { clearStoredAuth, readStoredAuth, refreshStoredAuth, storeAuth, validateStoredSession } from './utils/session';
 import { AIRobotAssistant } from './components/AIRobotAssistant';
 import AarogyaDrishtiIntro from './components/AarogyaDrishtiIntro';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -204,6 +204,14 @@ export const App: React.FC = () => {
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
+    const handleRefresh = (event: Event) => {
+      setTokens((event as CustomEvent<AuthTokens>).detail);
+    };
+    window.addEventListener('aarogya:auth-refreshed', handleRefresh);
+    return () => window.removeEventListener('aarogya:auth-refreshed', handleRefresh);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const boot = async () => {
       const stored = readStoredAuth();
@@ -211,12 +219,22 @@ export const App: React.FC = () => {
         if (!cancelled) { clearStoredAuth(); setAuthChecked(true); }
         return;
       }
-      const validated = await validateAccessToken(stored.tokens.accessToken);
+      let session: Awaited<ReturnType<typeof validateStoredSession>>;
+      try {
+        session = await validateStoredSession(stored.tokens);
+      } catch {
+        if (!cancelled) {
+          setCurrentUser(stored.user as AuthUser);
+          setTokens(stored.tokens as AuthTokens);
+          setAuthChecked(true);
+        }
+        return;
+      }
       if (cancelled) return;
-      if (validated) {
-        setCurrentUser(validated as AuthUser);
-        setTokens(stored.tokens as AuthTokens);
-        storeAuth(validated as any, stored.tokens as any);
+      if (session) {
+        setCurrentUser(session.user as AuthUser);
+        setTokens(session.tokens as AuthTokens);
+        storeAuth(session.user, session.tokens);
       } else {
         clearStoredAuth();
         setCurrentUser(null);
@@ -262,15 +280,35 @@ export const App: React.FC = () => {
       const destination = currentUser?.role?.toLowerCase().includes('patient') || currentUser?.role?.toLowerCase() === 'community_volunteer'
         ? '#/patient/login'
         : '#/login';
-      let expired = false;
-      const checkExpiry = () => {
-        if (expired || Date.now() < expiresAt) return;
-        expired = true;
-        void performLogout(destination, destination === '#/patient/login');
+      let cancelled = false;
+      let timer: number;
+      const canRefresh = Boolean(tokens?.refreshToken) && !/^(demo_|mock_|offline_)/i.test(tokens?.accessToken || '');
+      const refreshAt = canRefresh ? expiresAt - 60_000 : expiresAt;
+      const refresh = async () => {
+        if (cancelled) return;
+        if (!canRefresh) {
+          void performLogout(destination, destination === '#/patient/login');
+          return;
+        }
+        try {
+          const refreshedTokens = await refreshStoredAuth();
+          if (cancelled) return;
+          if (!refreshedTokens) {
+            void performLogout(destination, destination === '#/patient/login');
+            return;
+          }
+          setTokens(refreshedTokens);
+        } catch {
+          if (!cancelled) timer = window.setTimeout(() => void refresh(), 30_000);
+        }
       };
-      const timer = window.setTimeout(checkExpiry, Math.max(0, expiresAt - Date.now()));
+      const checkExpiry = () => {
+        if (Date.now() >= refreshAt) void refresh();
+      };
+      timer = window.setTimeout(checkExpiry, Math.max(0, refreshAt - Date.now()));
       document.addEventListener('visibilitychange', checkExpiry);
       return () => {
+        cancelled = true;
         window.clearTimeout(timer);
         document.removeEventListener('visibilitychange', checkExpiry);
       };

@@ -50,6 +50,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         role = 'anm';
       } else if (token.includes('patient')) {
         role = 'patient';
+      } else if (token.includes('asha_worker')) {
+        role = 'asha_worker';
       } else if (token.includes('asha')) {
         role = 'asha';
       }
@@ -123,6 +125,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
       else if (token.includes('admin')) role = 'admin';
       else if (token.includes('anm')) role = 'anm';
       else if (token.includes('patient')) role = 'patient';
+      else if (token.includes('asha_worker')) role = 'asha_worker';
       else if (token.includes('asha')) role = 'asha';
 
       req.user = {

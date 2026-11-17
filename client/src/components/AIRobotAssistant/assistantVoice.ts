@@ -88,6 +88,7 @@ export class AssistantVoiceEngine {
   private isContinuousMode = true;
   private currentText = '';
   private lastSpokenText = '';
+  private finalTranscript = '';
   private currentLang: LanguageCode = 'te';
   private callbacks: VoiceCallbacks = {};
   private voices: SpeechSynthesisVoice[] = [];
@@ -108,10 +109,7 @@ export class AssistantVoiceEngine {
   }
 
   public isSpeechRecognitionSupported(): boolean {
-    return (
-      typeof window !== 'undefined' &&
-      ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
-    );
+    return this.recognition !== null;
   }
 
   public isSpeechSynthesisSupported(): boolean {
@@ -136,7 +134,12 @@ export class AssistantVoiceEngine {
   }
 
   private initSpeechRecognition() {
-    if (!this.isSpeechRecognitionSupported()) return;
+    if (
+      typeof window === 'undefined' ||
+      !('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+    ) {
+      return;
+    }
 
     try {
       const SpeechRec =
@@ -145,7 +148,7 @@ export class AssistantVoiceEngine {
       this.recognition = new SpeechRec();
       this.recognition.continuous = false;
       this.recognition.interimResults = true;
-      this.recognition.maxAlternatives = 1;
+      this.recognition.maxAlternatives = 3;
 
       this.recognition.onstart = () => {
         this.isListening = true;
@@ -155,17 +158,27 @@ export class AssistantVoiceEngine {
 
       this.recognition.onresult = (event: any) => {
         this.resetSilenceTimer();
-        let transcript = '';
-        let isFinal = false;
+        let interimTranscript = '';
+        let hasInterimResult = false;
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            isFinal = true;
+          const result = event.results[i];
+          let bestAlternative = result[0];
+          for (let alternativeIndex = 1; alternativeIndex < result.length; alternativeIndex++) {
+            if (result[alternativeIndex].confidence > bestAlternative.confidence) {
+              bestAlternative = result[alternativeIndex];
+            }
+          }
+          if (result.isFinal) {
+            this.finalTranscript += bestAlternative.transcript;
+          } else {
+            interimTranscript += bestAlternative.transcript;
+            hasInterimResult = true;
           }
         }
 
-        this.callbacks.onTranscript?.(transcript, isFinal);
+        const transcript = `${this.finalTranscript}${interimTranscript}`.trim();
+        this.callbacks.onTranscript?.(transcript, !hasInterimResult && Boolean(this.finalTranscript.trim()));
       };
 
       this.recognition.onerror = (event: any) => {
@@ -173,12 +186,15 @@ export class AssistantVoiceEngine {
         this.isListening = false;
         this.callbacks.onStopListening?.();
         const errorKey = event.error;
+        if (errorKey === 'aborted') return;
         let userFriendly = 'Speech recognition error';
         if (errorKey === 'not-allowed' || errorKey === 'service-not-allowed') {
           userFriendly =
             'Microphone access was denied. Please allow microphone permissions in your browser.';
         } else if (errorKey === 'no-speech') {
           userFriendly = 'No speech was detected. Please try speaking again.';
+        } else if (errorKey === 'audio-capture') {
+          userFriendly = 'No microphone was found. Check your microphone and try again.';
         } else if (errorKey === 'network') {
           userFriendly = 'Network connection issue during speech recognition.';
         }
@@ -212,11 +228,7 @@ export class AssistantVoiceEngine {
     }
   }
 
-  /**
-   * Resolves the highest quality natural female voice for the specified language.
-   * ROBUST GUARANTEE: Never sets canSpeak = false on supported browsers;
-   * always finds a graceful regional voice so the assistant speaks audibly!
-   */
+  /** Resolves a voice for the requested language without substituting another language. */
   public resolveFemaleVoice(lang: LanguageCode): FemaleVoiceInfo {
     if (this.voices.length === 0 && this.isSpeechSynthesisSupported()) {
       this.voices = window.speechSynthesis.getVoices() || [];
@@ -230,14 +242,13 @@ export class AssistantVoiceEngine {
     // 1. Filter voices that strictly match the requested language
     const langMatchingVoices = this.voices.filter((v) => {
       const vLang = v.lang.toLowerCase().replace('_', '-');
-      const matchesPrefix = vLang.startsWith(langPrefix) || vLang.includes(bcp47.toLowerCase());
-      const isMale = MALE_KEYWORD_REGEX.test(v.name);
-      return matchesPrefix && !isMale;
+      return vLang.startsWith(langPrefix) || vLang.includes(bcp47.toLowerCase());
     });
+    const femaleVoices = langMatchingVoices.filter((voice) => !MALE_KEYWORD_REGEX.test(voice.name));
 
     // 2. Look for explicit female target name match
     for (const target of langTargets) {
-      const match = langMatchingVoices.find(
+      const match = femaleVoices.find(
         (v) =>
           v.name.toLowerCase().includes(target.toLowerCase()) ||
           v.name.toLowerCase().includes('female') ||
@@ -256,8 +267,8 @@ export class AssistantVoiceEngine {
     }
 
     // 3. If any voice matching the language exists, use female pitch adjustment
-    if (langMatchingVoices.length > 0) {
-      const chosen = langMatchingVoices[0];
+    if (femaleVoices.length > 0) {
+      const chosen = femaleVoices[0];
       return {
         voice: chosen,
         name: chosen.name,
@@ -268,43 +279,25 @@ export class AssistantVoiceEngine {
       };
     }
 
-    // 4. Fallback for Indian Languages (Telugu/Hindi):
-    // Search for Indian regional voices (*-IN, e.g. Heera, Neerja, Swara, Kalpana)
-    // These Indian voices have proper phoneme engines and can read Indian languages audibly!
-    const indianVoices = this.voices.filter((v) => {
-      const vLang = v.lang.toLowerCase();
-      const vName = v.name.toLowerCase();
-      const isInd = vLang.includes('-in') || vName.includes('india') || vName.includes('hindi') || vName.includes('telugu');
-      const isMale = MALE_KEYWORD_REGEX.test(v.name);
-      return isInd && !isMale;
-    });
-
-    if (indianVoices.length > 0) {
-      const chosen = indianVoices[0];
+    if (langMatchingVoices.length > 0) {
+      const chosen = langMatchingVoices[0];
       return {
         voice: chosen,
         name: chosen.name,
-        isExplicitFemale: true,
+        isExplicitFemale: false,
         canSpeak: true,
-        limitationNotice: `Using Indian regional voice (${chosen.name}) for ${langName}.`,
-        pitch: 1.1,
-        rate: 0.88,
+        pitch: 1,
+        rate: 0.9,
       };
     }
 
-    // 5. Ultimate Fallback: Any available browser voice with female formant pitch
-    // Guarantees the assistant NEVER remains silent or dead on any device!
-    const anyAvailableVoice =
-      this.voices.find((v) => !MALE_KEYWORD_REGEX.test(v.name)) ||
-      this.voices[0] ||
-      null;
-
     return {
-      voice: anyAvailableVoice,
-      name: anyAvailableVoice ? anyAvailableVoice.name : 'System Default',
+      voice: null,
+      name: `${langName} voice unavailable`,
       isExplicitFemale: false,
-      canSpeak: true,
-      pitch: 1.18,
+      canSpeak: false,
+      limitationNotice: `No ${langName} speech voice is installed. The reply is available as text.`,
+      pitch: 1,
       rate: 0.9,
     };
   }
@@ -327,6 +320,11 @@ export class AssistantVoiceEngine {
       return;
     }
 
+    if (this.resumeTimeoutTimer) {
+      clearTimeout(this.resumeTimeoutTimer);
+      this.resumeTimeoutTimer = null;
+    }
+
     this.stopSpeaking();
 
     if (this.isListening) {
@@ -337,6 +335,7 @@ export class AssistantVoiceEngine {
     const bcp47 = SUPPORTED_LANGUAGES[lang]?.bcp47 || 'te-IN';
     this.recognition.lang = bcp47;
     this.currentLang = lang;
+    this.finalTranscript = '';
 
     try {
       this.recognition.start();
@@ -347,6 +346,10 @@ export class AssistantVoiceEngine {
 
   public stopListening() {
     this.clearSilenceTimer();
+    if (this.resumeTimeoutTimer) {
+      clearTimeout(this.resumeTimeoutTimer);
+      this.resumeTimeoutTimer = null;
+    }
     if (this.recognition && this.isListening) {
       try {
         this.recognition.stop();
@@ -368,9 +371,7 @@ export class AssistantVoiceEngine {
 
   public interrupt() {
     this.stopSpeaking();
-    if (this.isContinuousMode) {
-      this.startListening(this.currentLang);
-    }
+    this.startListening(this.currentLang);
   }
 
   public endConversation() {
@@ -415,7 +416,15 @@ export class AssistantVoiceEngine {
    * Converts response text into natural female speech and vocalizes immediately.
    */
   public speakFemale(text: string, lang: LanguageCode) {
-    if (this.isMuted || !this.isSpeechSynthesisSupported() || !text) {
+    if (this.isMuted || !text) {
+      if (this.isContinuousMode) {
+        this.scheduleContinuousResume(lang);
+      }
+      return;
+    }
+
+    if (!this.isSpeechSynthesisSupported()) {
+      this.callbacks.onError?.('Speech playback is not supported in this browser. The reply is available as text.');
       if (this.isContinuousMode) {
         this.scheduleContinuousResume(lang);
       }
@@ -431,6 +440,15 @@ export class AssistantVoiceEngine {
     } catch {}
 
     const voiceInfo = this.resolveFemaleVoice(lang);
+    if (!voiceInfo.canSpeak) {
+      this.callbacks.onError?.(
+        voiceInfo.limitationNotice || `No ${SUPPORTED_LANGUAGES[lang]?.name || 'matching'} speech voice is installed.`
+      );
+      if (this.isContinuousMode) {
+        this.scheduleContinuousResume(lang);
+      }
+      return;
+    }
 
     const chunks = this.chunkText(text);
     if (chunks.length === 0) {
@@ -520,6 +538,10 @@ export class AssistantVoiceEngine {
   }
 
   public stopSpeaking() {
+    if (this.resumeTimeoutTimer) {
+      clearTimeout(this.resumeTimeoutTimer);
+      this.resumeTimeoutTimer = null;
+    }
     this.clearWatchdog();
     if (this.isSpeechSynthesisSupported()) {
       try {

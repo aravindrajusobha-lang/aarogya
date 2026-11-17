@@ -52,6 +52,8 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
     setMode: setLangMode,
     handleInputTextDetection,
   } = useLanguage(appLang);
+  const currentLangRef = useRef(currentLang);
+  currentLangRef.current = currentLang;
 
   // Synchronize with parent app language when manually switched
   useEffect(() => {
@@ -221,6 +223,7 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         const answer = await askAssistant({
           query: text,
           language: activeQueryLang,
+          languageMode: langMode,
           activeTab,
           authToken,
           conversationHistory: historyPayload,
@@ -228,13 +231,18 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         });
 
         const asstMsgId = `asst-${Date.now()}`;
+        const responseLang = answer.language || activeQueryLang;
+        if (langMode === 'auto' && responseLang !== currentLangRef.current) {
+          selectLanguage(responseLang, false);
+        }
+
         const assistantMsg: ChatMessage = {
           id: asstMsgId,
           sender: 'assistant',
           text: answer.answerText,
           speechText: answer.speechText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          language: activeQueryLang,
+          language: responseLang,
           navigateTo: answer.navigateTo,
           suggestedActions: answer.suggestedActions,
           doctorRecommendation: answer.doctorRecommendation,
@@ -252,8 +260,8 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         // Vocalize response aloud in natural female voice
         if (!isMuted && answer.speechText) {
           setSpeakingMessageId(asstMsgId);
-          setSpeakingLanguage(activeQueryLang);
-          voiceEngineRef.current?.speakFemale(answer.speechText, activeQueryLang);
+          setSpeakingLanguage(responseLang);
+          voiceEngineRef.current?.speakFemale(answer.speechText, responseLang);
         } else {
           setRobotState('success');
           setTimeout(() => setRobotState('idle'), 2000);
@@ -264,10 +272,17 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         setTimeout(() => setRobotState('idle'), 2500);
       }
     },
-    [isThinking, handleInputTextDetection, checkClinicalRedFlags, messages, activeTab, authToken, isMuted, onNavigateTab]
+    [isThinking, handleInputTextDetection, checkClinicalRedFlags, messages, activeTab, authToken, isMuted, langMode, selectLanguage, onNavigateTab]
   );
 
-  // Setup Voice Engine
+  const handleUserQueryRef = useRef(handleUserQuery);
+  handleUserQueryRef.current = handleUserQuery;
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  const isContinuousConversationRef = useRef(isContinuousConversation);
+  isContinuousConversationRef.current = isContinuousConversation;
+
+  // Keep the recognizer alive across renders so incoming messages do not reset the mic.
   useEffect(() => {
     const voiceEngine = new AssistantVoiceEngine({
       onStartListening: () => {
@@ -284,7 +299,7 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         setInterimTranscript(transcript);
         if (isFinal && transcript.trim()) {
           setInterimTranscript('');
-          handleUserQuery(transcript.trim());
+          handleUserQueryRef.current(transcript.trim());
         }
       },
       onStartSpeaking: (_text, lang, voiceInfo) => {
@@ -308,13 +323,16 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         setSpeakingMessageId(null);
         setRobotState('idle');
       },
-      onContinuousCycleReady: () => {
-        setRobotState('listening');
-        setIsListening(true);
-        setInterimTranscript('');
+      onContinuousCycleReady: (lang) => {
+        if (isContinuousConversationRef.current) {
+          voiceEngineRef.current?.startListening(lang);
+        }
       },
       onError: (errMsg) => {
         setIsListening(false);
+        setIsSpeaking(false);
+        setIsSpeakingPaused(false);
+        setSpeakingMessageId(null);
         setRobotState('error');
         setVoiceErrorMessage(errMsg);
         setTimeout(() => {
@@ -322,22 +340,31 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
         }, 4000);
       },
       onVoicesLoaded: () => {
-        if (voiceEngineRef.current) {
-          setFemaleVoiceInfo(voiceEngineRef.current.resolveFemaleVoice(currentLang));
+        const currentEngine = voiceEngineRef.current;
+        if (currentEngine) {
+          setFemaleVoiceInfo(currentEngine.resolveFemaleVoice(currentLangRef.current));
         }
       },
     });
 
-    voiceEngine.setMuted(isMuted);
+    voiceEngine.setMuted(isMutedRef.current);
     voiceEngine.enableContinuousConversation(isContinuousConversation);
     voiceEngineRef.current = voiceEngine;
-    setFemaleVoiceInfo(voiceEngine.resolveFemaleVoice(currentLang));
+    setFemaleVoiceInfo(voiceEngine.resolveFemaleVoice(currentLangRef.current));
 
     return () => {
-      voiceEngine.stopSpeaking();
-      voiceEngine.stopListening();
+      voiceEngine.endConversation();
+      voiceEngineRef.current = null;
     };
-  }, [isMuted, isContinuousConversation, handleUserQuery, currentLang]);
+  }, []);
+
+  useEffect(() => {
+    voiceEngineRef.current?.setMuted(isMuted);
+  }, [isMuted]);
+
+  useEffect(() => {
+    voiceEngineRef.current?.enableContinuousConversation(isContinuousConversation);
+  }, [isContinuousConversation]);
 
   // Synchronize female voice profile when language changes
   useEffect(() => {
@@ -403,15 +430,12 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
 
     if (isListening) {
       voiceEngineRef.current?.stopListening();
-      if (interimTranscript.trim()) {
-        handleUserQuery(interimTranscript.trim());
-        setInterimTranscript('');
-      }
+      setInterimTranscript('');
     } else {
-      // 2. Start speech recognition directly in user's selected language
+      // The recognizer uses this language; auto mode detects the final transcript script.
       voiceEngineRef.current?.startListening(currentLang);
     }
-  }, [isSpeaking, isListening, currentLang, interimTranscript, handleUserQuery]);
+  }, [isSpeaking, isListening, currentLang]);
 
   // Continuous Female Voice-First Conversation Controls
   const handleStartVoiceConversation = useCallback(() => {
@@ -567,7 +591,7 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
     ? 'hover'
     : 'idle';
 
-  const isVoiceSupported = voiceEngineRef.current?.isSpeechRecognitionSupported() ?? true;
+  const isVoiceSupported = voiceEngineRef.current?.isSpeechRecognitionSupported() ?? false;
 
   // Localized status text
   const voiceLangKey: VoiceLanguageCode = currentLang === 'te' ? 'te' : currentLang === 'hi' ? 'hi' : 'en';
@@ -655,14 +679,15 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
       )}
 
       {/* Floating Trigger Dock (Bottom-Right Mascot) */}
-      <div
+      <button
+        type="button"
         className={`robot-trigger-dock ${isVoiceConversationActive ? 'voice-convo-live' : ''}`}
         onClick={handleDockClick}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        role="button"
-        tabIndex={0}
-        aria-label="Toggle Dr. Drishti Female AI Guide"
+        aria-expanded={isOpen && !isMinimized}
+        aria-controls="assistant-chat-panel"
+        aria-label={isOpen && !isMinimized ? 'Minimize Dr. Drishti AI Guide' : 'Open Dr. Drishti AI Guide'}
         title="Dr. Drishti AI Guide"
       >
         <RobotCharacter
@@ -678,7 +703,7 @@ export const AIRobotAssistant: React.FC<AIRobotAssistantProps> = ({
           {isVoiceConversationActive && <span className="badge-live-mic">🎙️ LIVE</span>}
           {isSpeaking && !isSpeakingPaused && <span>🔊</span>}
         </div>
-      </div>
+      </button>
     </div>
   );
 };

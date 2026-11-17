@@ -144,9 +144,11 @@ export async function refreshDeviceSession(params: {
   const newRawRefreshToken = generateRawRefreshToken();
   const newHash = hashToken(newRawRefreshToken);
 
+  const refreshedAt = new Date();
+  session.expiresAt = new Date(refreshedAt.getTime() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
+  session.lastActiveAt = refreshedAt;
   session.previousRefreshTokenHash = session.refreshTokenHash;
   session.refreshTokenHash = newHash;
-  session.lastActiveAt = new Date();
   session.ip = params.ip;
   await session.save();
 

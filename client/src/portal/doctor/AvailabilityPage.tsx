@@ -6,6 +6,7 @@ import { api, fmtDate, fmtTime, newMutationId, Translate, useApi } from '../lib'
 
 interface Slot {
   slotId: string; startTime: string; endTime: string; durationMinutes: number; status: 'available' | 'booked' | 'past';
+  consultationMode?: 'online' | 'offline';
   booking: { appointmentId: string; patientName: string; status: string; consultationMode?: string } | null;
 }
 
@@ -19,6 +20,7 @@ export const AvailabilityPage: React.FC<{ t: Translate; lang: LanguageCode }> = 
   const [date, setDate] = useState(todayIst());
   const [start, setStart] = useState('10:00');
   const [end, setEnd] = useState('13:00');
+  const [consultationMode, setConsultationMode] = useState<'online' | 'offline'>('online');
   const [duration, setDuration] = useState(20);
   const [gap, setGap] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -36,7 +38,7 @@ export const AvailabilityPage: React.FC<{ t: Translate; lang: LanguageCode }> = 
     try {
       const result = await api<{ created: number }>('/api/v1/consultations/doctor/availability/range', {
         method: 'POST',
-        body: JSON.stringify({ date, startTime: start, endTime: end, durationMinutes: duration, breakMinutes: gap, mutationId: newMutationId() }),
+        body: JSON.stringify({ date, startTime: start, endTime: end, consultationMode, durationMinutes: duration, breakMinutes: gap, mutationId: newMutationId() }),
       });
       setMessage({ tone: 'success', text: t('avail.published', { n: result.created }) });
       await reload();
@@ -64,6 +66,15 @@ export const AvailabilityPage: React.FC<{ t: Translate; lang: LanguageCode }> = 
       <Card title={t('avail.publish')} icon="calendar">
         <form className="adp-form-grid adp-avail-form" onSubmit={publish}>
           <label className="adp-field">{t('avail.date')}<input type="date" required min={todayIst()} value={date} onChange={(e) => setDate(e.target.value)} /></label>
+          <label className="adp-field">{t('avail.mode')}
+            <select value={consultationMode} onChange={(e) => {
+              const mode = e.target.value;
+              if (mode === 'online' || mode === 'offline') setConsultationMode(mode);
+            }}>
+              <option value="online">{t('appt.online')}</option>
+              <option value="offline">{t('appt.offline')}</option>
+            </select>
+          </label>
           <label className="adp-field">{t('avail.duration')}
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>{DURATIONS.map((d) => <option key={d} value={d}>{t('avail.minutes', { n: d })}</option>)}</select>
           </label>
@@ -97,6 +108,7 @@ export const AvailabilityPage: React.FC<{ t: Translate; lang: LanguageCode }> = 
                     <div key={slot.slotId} className={`adp-slot-card is-${slot.status}`}>
                       <strong>{fmtTime(slot.startTime, lang)} – {fmtTime(slot.endTime, lang)}</strong>
                       <small>{t('avail.minutes', { n: slot.durationMinutes })}</small>
+                      {slot.consultationMode && <small>{t(slot.consultationMode === 'online' ? 'appt.online' : 'appt.offline')}</small>}
                       <span className={`adp-slot-chip is-${slot.status}`}>{t(`avail.${slot.status}`)}</span>
                       {slot.booking && <small>{t('avail.bookedBy', { name: slot.booking.patientName })}</small>}
                       {slot.status === 'available' && <button type="button" className="adp-link" onClick={() => void remove(slot.slotId)}>{t('avail.remove')}</button>}

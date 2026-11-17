@@ -238,8 +238,9 @@ export class AppointmentService {
     // 1. Slot validation
     if (data.assignedDoctorId) {
       const doctor = await BookingDoctor.findOne({ userId: data.assignedDoctorId, hospitalId: data.destinationHospitalId, status: 'active', verificationStatus: { $in: ['verified', 'VERIFIED'] }, role: { $in: ['medical_officer', 'specialist_doctor'] } });
-      const published = await DoctorSlot.findOne({ doctorId: data.assignedDoctorId, hospitalId: data.destinationHospitalId, startTime: slotStart, endTime: slotEnd });
+      const published = await DoctorSlot.findOne({ doctorId: data.assignedDoctorId, hospitalId: data.destinationHospitalId, startTime: slotStart, endTime: slotEnd }).lean<{ consultationMode?: 'online' | 'offline' }>();
       if (!doctor || !published || slotStart.getTime() <= Date.now()) throw Object.assign(new Error('Choose a future slot published by an approved doctor.'), { statusCode: 400, code: 'DOCTOR_SLOT_UNAVAILABLE' });
+      if (published.consultationMode && published.consultationMode !== data.consultationMode) throw Object.assign(new Error('Choose a slot that matches the selected consultation mode.'), { statusCode: 400, code: 'DOCTOR_SLOT_MODE_MISMATCH' });
       data.assignedDoctorName = doctor.fullName;
     } else this.validateSlot(slotStart, slotEnd);
 
@@ -619,8 +620,9 @@ export class AppointmentService {
 
     // Validate new slot
     if (appointment.assignedDoctorId) {
-      const published = await DoctorSlot.exists({ doctorId: appointment.assignedDoctorId, hospitalId: appointment.destinationHospitalId, startTime: newStart, endTime: newEnd });
+      const published = await DoctorSlot.findOne({ doctorId: appointment.assignedDoctorId, hospitalId: appointment.destinationHospitalId, startTime: newStart, endTime: newEnd }).lean<{ consultationMode?: 'online' | 'offline' }>();
       if (!published || newStart.getTime() <= Date.now()) throw Object.assign(new Error('Choose a future slot published by the assigned doctor.'), { code: 'DOCTOR_SLOT_UNAVAILABLE', statusCode: 400 });
+      if (published.consultationMode && published.consultationMode !== appointment.consultationMode) throw Object.assign(new Error('Choose a slot that matches the appointment consultation mode.'), { statusCode: 400, code: 'DOCTOR_SLOT_MODE_MISMATCH' });
     } else this.validateSlot(newStart, newEnd);
 
     // Check slot conflict
