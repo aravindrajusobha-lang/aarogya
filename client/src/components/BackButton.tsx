@@ -5,7 +5,7 @@ import './BackButton.css';
 
 const currentHash = () => window.location.hash || '#/';
 const routePath = (hash: string) => (hash.split('?')[0].replace(/\/+$/, '') || '#/').toLowerCase();
-const hiddenPaths = new Set(['#/', '#/home', '#/login', '#/patient/login', '#/register', '#/forgot-password', '#/reset-password']);
+const hiddenPaths = new Set(['#/', '#/home', '#/login', '#/asha', '#/asha/register', '#/patient/login', '#/register', '#/forgot-password', '#/reset-password']);
 
 function fallbackRoute(hash: string): string {
   if (routePath(hash).startsWith('#/patient')) return '#/patient/dashboard';

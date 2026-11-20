@@ -848,6 +848,30 @@ body {
   color: var(--color-status-danger);
 }
 
+.field-worker-logout-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% - 20px);
+  margin: 4px 10px 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.field-worker-logout-action:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: #34d399;
+}
+
 .sidebar-guest-card {
   padding: 4px 0;
 }

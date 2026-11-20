@@ -21,6 +21,7 @@ import { Consent } from '../consent/consentModel.js';
 import { analyzeOralScreeningImage, AiProviderUnavailableError, InvalidScreeningImageError } from './aiAnalysisService.js';
 import { getModelCard } from './modelEvaluation.js';
 import { buildPatientScreeningSummary } from './patientScreeningSummary.js';
+import { FIELD_WORKER_ROLES, getWorkerAccessiblePatient } from '../patient/workerPatientScope.js';
 
 export const aiRouter = Router();
 
@@ -50,7 +51,7 @@ function requireScreeningRole(req: Request, res: Response, next: NextFunction): 
   }
 
   const role = req.user.role;
-  const allowedRoles = ['asha', 'anm', 'medical_officer', 'admin', 'system_admin', 'patient'];
+  const allowedRoles = ['asha', 'asha_worker', 'anm', 'medical_officer', 'admin', 'system_admin', 'patient'];
 
   if (!allowedRoles.includes(role)) {
     res.envelopeError(
@@ -109,6 +110,17 @@ async function validatePatientScreeningAccess(
       return undefined;
     }
     hospitalId = actor.hospitalId;
+  } else if (FIELD_WORKER_ROLES.has(actor.role)) {
+    const workerPatient = await getWorkerAccessiblePatient(actor.id, actor.hospitalId, patientId);
+    if (!workerPatient) {
+      res.envelopeError('PATIENT_SCOPE_DENIED', 'This patient is outside your assigned patient scope.', undefined, 403);
+      return undefined;
+    }
+    if (requestedHospitalId && requestedHospitalId !== workerPatient.hospitalId) {
+      res.envelopeError('FORBIDDEN', 'Screening records outside your assigned facility are not accessible.', undefined, 403);
+      return undefined;
+    }
+    hospitalId = workerPatient.hospitalId;
   } else if (actor.role !== 'system_admin') {
     if (!actor.hospitalId) {
       res.envelopeError('HOSPITAL_REQUIRED', 'Your account must be assigned to a facility before screening.', undefined, 403);
@@ -156,6 +168,23 @@ async function validatePatientScreeningAccess(
   }
 
   return hospitalId;
+}
+
+function buildWorkerScreeningSummary(screening: any) {
+  const summary = buildPatientScreeningSummary(screening);
+  return {
+    screeningId: summary.screeningId,
+    createdAt: summary.createdAt,
+    riskLevel: summary.riskLevel,
+    summary: summary.summary,
+    findingTypeLabel: summary.findingTypeLabel,
+    nextStep: summary.nextStep,
+    clinicianReview: {
+      status: summary.clinicianReview.status,
+      reviewedAt: summary.clinicianReview.reviewedAt,
+    },
+    disclaimer: summary.disclaimer,
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -732,11 +761,20 @@ aiRouter.get('/screenings/:screeningId/summary', requireAuth, async (req: Reques
         res.envelopeError('FORBIDDEN', 'Patients may only access their own screening records.', undefined, 403);
         return;
       }
+    } else if (FIELD_WORKER_ROLES.has(role)) {
+      const workerPatient = await getWorkerAccessiblePatient(req.user!.id, req.user!.hospitalId, screening.patientId);
+      if (!workerPatient || workerPatient.hospitalId !== screening.hospitalId) {
+        res.envelopeError('PATIENT_SCOPE_DENIED', 'This screening is outside your assigned patient scope.', undefined, 403);
+        return;
+      }
     } else if (role !== 'system_admin' && (!req.user!.hospitalId || screening.hospitalId !== req.user!.hospitalId)) {
       res.envelopeError('HOSPITAL_SCOPE_DENIED', 'This screening belongs to another facility.', undefined, 403);
       return;
     }
-    res.envelope({ ...buildPatientScreeningSummary(screening), modelCard: getModelCard() }, 'Screening summary retrieved');
+    res.envelope({
+      ...(FIELD_WORKER_ROLES.has(role) ? buildWorkerScreeningSummary(screening) : buildPatientScreeningSummary(screening)),
+      modelCard: getModelCard(),
+    }, 'Screening summary retrieved');
   } catch (err: any) {
     logger.error({ err }, 'Error in GET /api/ai/screenings/:screeningId/summary');
     res.envelopeError('SCREENING_SUMMARY_ERROR', 'Screening summary could not be loaded.', undefined, 500);
@@ -844,11 +882,26 @@ aiRouter.get('/screenings', requireAuth, async (req: Request, res: Response): Pr
     }
 
     const query: any = { patientId };
-    if (req.user!.role !== 'system_admin' && req.user!.role !== 'patient' && req.user!.hospitalId) {
+    if (FIELD_WORKER_ROLES.has(req.user!.role)) {
+      const workerPatient = await getWorkerAccessiblePatient(req.user!.id, req.user!.hospitalId, patientId);
+      if (!workerPatient) {
+        res.envelopeError('PATIENT_SCOPE_DENIED', 'This patient is outside your assigned patient scope.', undefined, 403);
+        return;
+      }
+      query.hospitalId = workerPatient.hospitalId;
+    } else if (req.user!.role !== 'system_admin' && req.user!.role !== 'patient' && req.user!.hospitalId) {
       query.hospitalId = req.user!.hospitalId;
     }
 
     const screenings = await AiScreening.find(query).sort({ createdAt: -1 });
+
+    if (FIELD_WORKER_ROLES.has(req.user!.role)) {
+      res.envelope(
+        screenings.map(buildWorkerScreeningSummary),
+        'Patient screening history retrieved safely'
+      );
+      return;
+    }
 
     // Patients see safe summary without raw probabilities (Invariant 1 & Privacy)
     if (req.user!.role === 'patient') {

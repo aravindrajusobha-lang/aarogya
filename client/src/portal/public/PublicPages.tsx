@@ -196,7 +196,15 @@ export const PatientLoginPage: React.FC<{ lang: LanguageCode; onChangeLang: (lan
 };
 
 /* ---------- Staff login (doctor / admin) ---------- */
-export const StaffLoginPage: React.FC<{ lang: LanguageCode; onChangeLang: (lang: LanguageCode) => void; onLoggedIn: (result: AuthResult) => void }> = ({ lang, onChangeLang, onLoggedIn }) => {
+export const StaffLoginPage: React.FC<{
+  lang: LanguageCode;
+  onChangeLang: (lang: LanguageCode) => void;
+  onLoggedIn: (result: AuthResult) => void;
+  ashaPortal?: boolean;
+  onRegister?: () => void;
+  onOpenAsha?: () => void;
+  onBackToStaff?: () => void;
+}> = ({ lang, onChangeLang, onLoggedIn, ashaPortal = false, onRegister, onOpenAsha, onBackToStaff }) => {
   const t = useMemo(() => makeT(lang), [lang]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -222,12 +230,18 @@ export const StaffLoginPage: React.FC<{ lang: LanguageCode; onChangeLang: (lang:
   return (
     <PublicShell lang={lang} onChangeLang={onChangeLang} t={t} narrow>
       <section className="adp-auth-card">
-        <a href="#/" className="adp-link">← {t('public.back')}</a>
-        <h1>{t('public.staffLogin.title')}</h1>
-        <p className="adp-auth-sub">{t('public.staffLogin.subtitle')}</p>
+        <a href={ashaPortal ? '#/login' : '#/'} className="adp-link" onClick={ashaPortal && onBackToStaff ? (event) => { event.preventDefault(); onBackToStaff(); } : undefined}>← {ashaPortal ? t('public.ashaRegistration.backToStaff') : t('public.back')}</a>
+        <h1>{ashaPortal ? t('public.staffLogin.ashaTitle') : t('public.staffLogin.title')}</h1>
+        {ashaPortal && !mfaToken && (
+          <div className="adp-tabs" role="tablist" aria-label={t('public.ashaRegistration.authTabs')}>
+            <button type="button" role="tab" aria-selected="true" aria-pressed="true">{t('public.ashaRegistration.loginTab')}</button>
+            <button type="button" role="tab" aria-selected="false" aria-pressed="false" onClick={onRegister}>{t('public.ashaRegistration.registerTab')}</button>
+          </div>
+        )}
+        <p className="adp-auth-sub">{ashaPortal ? t('public.staffLogin.ashaSubtitle') : t('public.staffLogin.subtitle')}</p>
         <form onSubmit={submit} className="adp-auth-form">
           {!mfaToken ? <>
-            <label className="adp-field adp-field-xl">{t('public.staffLogin.username')}<input autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="AD-DR-00012" /></label>
+            <label className="adp-field adp-field-xl">{ashaPortal ? t('public.ashaRegistration.username') : t('public.staffLogin.username')}<input autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder={ashaPortal ? undefined : 'AD-DR-00012'} /></label>
             <label className="adp-field adp-field-xl">{t('public.staffLogin.password')}
               <span className="adp-password-field">
                 <input type={showPassword ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -256,8 +270,144 @@ export const StaffLoginPage: React.FC<{ lang: LanguageCode; onChangeLang: (lang:
           {error && <p className="adp-notice adp-notice-error" role="alert">{error}</p>}
           <button type="submit" className="adp-btn adp-btn-primary adp-btn-xl" disabled={busy || (mfaToken ? code.length !== 6 : !username || !password)}>{busy ? t('common.loading') : t('public.staffLogin.submit')}</button>
         </form>
-        <p className="adp-auth-switch">{t('public.staffLogin.patientInstead')} <a href="#/patient/login">{t('public.login')}</a></p>
+        {!mfaToken && !ashaPortal && <p className="adp-auth-switch">{onOpenAsha
+          ? <button type="button" className="adp-link" onClick={onOpenAsha}>{t('public.staffLogin.ashaAccessLink')}</button>
+          : <a href="#/asha?mode=register">{t('public.staffLogin.ashaAccessLink')}</a>}</p>}
+        {!ashaPortal && <p className="adp-auth-switch">{t('public.staffLogin.patientInstead')} <a href="#/patient/login">{t('public.login')}</a></p>}
       </section>
     </PublicShell>
   );
+};
+
+/* ---------- ASHA worker self-registration ---------- */
+interface AshaFacility { hospitalId: string; name: string; mandal: string }
+
+export const AshaRegistrationPage: React.FC<{
+  lang: LanguageCode;
+  onChangeLang: (lang: LanguageCode) => void;
+  ashaPortal?: boolean;
+  onSignIn?: () => void;
+  onBackToStaff?: () => void;
+}> = ({ lang, onChangeLang, ashaPortal = false, onSignIn, onBackToStaff }) => {
+  const t = useMemo(() => makeT(lang), [lang]);
+  const tr = (key: string) => t(`public.ashaRegistration.${key}`);
+  const [facilities, setFacilities] = useState<AshaFacility[]>([]);
+  const [loadingFacilities, setLoadingFacilities] = useState(true);
+  const [form, setForm] = useState({ fullName: '', username: '', phone: '', hospitalId: '', village: '', password: '', confirmPassword: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [applicationReference, setApplicationReference] = useState('');
+  const selectedFacility = facilities.find((item) => item.hospitalId === form.hospitalId);
+
+  useEffect(() => {
+    let active = true;
+    void publicApi<{ facilities: AshaFacility[] }>('/api/v1/asha-registration/facilities')
+      .then((data) => { if (active) setFacilities(data.facilities); })
+      .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : t('common.error')); })
+      .finally(() => { if (active) setLoadingFacilities(false); });
+    return () => { active = false; };
+  }, [t]);
+
+  const update = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setForm((current) => ({ ...current, [key]: event.target.value }));
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (form.password !== form.confirmPassword) { setError(tr('passwordsMismatch')); return; }
+    if (!selectedFacility) { setError(tr('selectFacilityError')); return; }
+    setBusy(true);
+    try {
+      const data = await publicApi<{ applicationReference: string }>('/api/v1/asha-registration/register', {
+        username: form.username.trim(),
+        password: form.password,
+        fullName: form.fullName.trim(),
+        phone: form.phone.trim(),
+        hospitalId: selectedFacility.hospitalId,
+        mandal: selectedFacility.mandal,
+        village: form.village.trim(),
+      });
+      setApplicationReference(data.applicationReference);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('common.error'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <PublicShell lang={lang} onChangeLang={onChangeLang} t={t} narrow>
+      <section className="adp-auth-card">
+        <a href="#/login" className="adp-link" onClick={onBackToStaff ? (event) => { event.preventDefault(); onBackToStaff(); } : undefined}>← {tr('backToStaff')}</a>
+        <h1>{tr('title')}</h1>
+        <div className="adp-notice adp-notice-info" role="note">
+          <strong>{tr('purposeTitle')}</strong>
+          <p className="adp-auth-sub" style={{ marginTop: 6, marginBottom: 0 }}>{tr('purpose')}</p>
+        </div>
+        {ashaPortal && (
+          <div className="adp-tabs" role="tablist" aria-label={tr('authTabs')}>
+            <button type="button" role="tab" aria-selected="false" aria-pressed="false" onClick={onSignIn}>{tr('loginTab')}</button>
+            <button type="button" role="tab" aria-selected="true" aria-pressed="true">{tr('registerTab')}</button>
+          </div>
+        )}
+        {applicationReference ? (
+          <div className="adp-auth-form">
+            <p className="adp-notice adp-notice-success" role="status">{tr('pending')}</p>
+            <p className="adp-auth-sub">{tr('reference')} <strong>{applicationReference}</strong></p>
+            <p className="adp-auth-sub">{tr('waitApproval')}</p>
+            <a className="adp-btn adp-btn-primary adp-btn-xl" href={ashaPortal ? '#/asha' : '#/login'} onClick={onSignIn ? (event) => { event.preventDefault(); onSignIn(); } : undefined}>{tr('returnToLogin')}</a>
+          </div>
+        ) : (
+          <>
+            <p className="adp-auth-sub">{tr('subtitle')}</p>
+            <form onSubmit={submit} className="adp-auth-form">
+              <label className="adp-field adp-field-xl">{tr('fullName')}<input required minLength={3} maxLength={120} autoComplete="name" value={form.fullName} onChange={update('fullName')} /></label>
+              <label className="adp-field adp-field-xl">{tr('username')}<input required minLength={3} maxLength={50} autoComplete="username" pattern="[A-Za-z0-9._-]+" value={form.username} onChange={update('username')} /></label>
+              <label className="adp-field adp-field-xl">{tr('phone')}<input required type="tel" inputMode="tel" autoComplete="tel" pattern="\+?[0-9 ]{10,15}" value={form.phone} onChange={update('phone')} placeholder="+91 98765 43210" /></label>
+              <label className="adp-field adp-field-xl">{tr('facility')}
+                <select required value={form.hospitalId} onChange={update('hospitalId')} disabled={loadingFacilities || !facilities.length}>
+                  <option value="">{loadingFacilities ? tr('loadingFacilities') : tr('chooseFacility')}</option>
+                  {facilities.map((facility) => <option key={facility.hospitalId} value={facility.hospitalId}>{facility.name} — {facility.mandal}</option>)}
+                </select>
+              </label>
+              <label className="adp-field adp-field-xl">{tr('village')}<input required minLength={2} maxLength={100} value={form.village} onChange={update('village')} /></label>
+              <label className="adp-field adp-field-xl">{tr('password')}<input required type="password" autoComplete="new-password" minLength={10} maxLength={72} value={form.password} onChange={update('password')} /><small className="adp-hint">{tr('passwordHint')}</small></label>
+              <label className="adp-field adp-field-xl">{tr('confirmPassword')}<input required type="password" autoComplete="new-password" minLength={10} maxLength={72} value={form.confirmPassword} onChange={update('confirmPassword')} /></label>
+              {error && <p className="adp-notice adp-notice-error" role="alert">{error}</p>}
+              <button type="submit" className="adp-btn adp-btn-primary adp-btn-xl" disabled={busy || loadingFacilities || !facilities.length}>{busy ? t('common.loading') : tr('submit')}</button>
+            </form>
+          </>
+        )}
+      </section>
+    </PublicShell>
+  );
+};
+
+export const AshaPortalPage: React.FC<{
+  lang: LanguageCode;
+  onChangeLang: (lang: LanguageCode) => void;
+  onLoggedIn: (result: AuthResult) => void;
+  onBackToStaff?: () => void;
+  initialMode?: 'login' | 'register';
+}> = ({ lang, onChangeLang, onLoggedIn, onBackToStaff, initialMode = 'login' }) => {
+  const [mode, setMode] = useState(initialMode);
+  useEffect(() => setMode(initialMode), [initialMode]);
+
+  if (mode === 'register') {
+    return <AshaRegistrationPage lang={lang} onChangeLang={onChangeLang} ashaPortal onSignIn={() => setMode('login')} onBackToStaff={onBackToStaff} />;
+  }
+  return <StaffLoginPage lang={lang} onChangeLang={onChangeLang} onLoggedIn={onLoggedIn} ashaPortal onRegister={() => setMode('register')} onBackToStaff={onBackToStaff} />;
+};
+
+export const StaffAccessPage: React.FC<{
+  lang: LanguageCode;
+  onChangeLang: (lang: LanguageCode) => void;
+  onLoggedIn: (result: AuthResult) => void;
+}> = ({ lang, onChangeLang, onLoggedIn }) => {
+  const [ashaMode, setAshaMode] = useState(false);
+  if (ashaMode) {
+    return <AshaPortalPage lang={lang} onChangeLang={onChangeLang} onLoggedIn={onLoggedIn} onBackToStaff={() => setAshaMode(false)} />;
+  }
+  return <StaffLoginPage lang={lang} onChangeLang={onChangeLang} onLoggedIn={onLoggedIn} onOpenAsha={() => setAshaMode(true)} />;
 };

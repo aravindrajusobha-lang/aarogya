@@ -43,6 +43,7 @@ import { patientReportChatRouter } from './modules/patient/patientReportChatRout
 import { patientSupportRouter } from './modules/patient/patientSupportRoutes.js';
 import { patientTreatmentRouter } from './modules/treatment/patientTreatmentRoutes.js';
 import { patientProfileRouter } from './modules/patient/patientProfileRoutes.js';
+import { ashaRegistrationRouter } from './modules/worker/ashaRegistrationRoutes.js';
 
 
 
@@ -108,6 +109,7 @@ export function createApp(): Express {
   app.use('/api/v1/health', healthRouter);
   app.use('/api/v1/storage', storageRouter);
   app.use('/api/v1/auth', authRouter);
+  app.use('/api/v1/asha-registration', ashaRegistrationRouter);
   app.use('/api/v1/patient/auth', patientAuthRouter);
   app.use('/api/v1/patient/easy', patientEasyAuthRouter);
   app.use('/api/patient', patientReportChatRouter);

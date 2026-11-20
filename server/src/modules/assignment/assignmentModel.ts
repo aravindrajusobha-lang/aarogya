@@ -40,6 +40,6 @@ const HealthWorkerAssignmentSchema = new Schema<IHealthWorkerAssignment>(
   }
 );
 
-export const HealthWorkerAssignment =
-  mongoose.models.HealthWorkerAssignment ||
+export const HealthWorkerAssignment: mongoose.Model<IHealthWorkerAssignment> =
+  (mongoose.models.HealthWorkerAssignment as mongoose.Model<IHealthWorkerAssignment> | undefined) ||
   mongoose.model<IHealthWorkerAssignment>('HealthWorkerAssignment', HealthWorkerAssignmentSchema);

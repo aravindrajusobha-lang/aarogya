@@ -323,7 +323,7 @@ describe('Phase 4: Patients, Duplicate Review & Idempotent Sync Foundation', () 
     expect(updatedPatient?.isDuplicateCandidate).toBe(false);
   });
 
-  it('Health Worker sees ONLY patients in explicitly assigned villages; unassigned sees zero', async () => {
+  it('Health Worker sees patients in assigned villages; unassigned sees only their own facility registrations', async () => {
     // 1. Assigned ASHA queries patients (assigned to vil_vankachinta_01)
     const assignedRes = await request(app)
       .get('/api/v1/patients')
@@ -346,7 +346,8 @@ describe('Phase 4: Patients, Duplicate Review & Idempotent Sync Foundation', () 
     expect(unassignedRes.body.success).toBe(true);
     expect(unassignedRes.body.data.patients.length).toBe(0);
     expect(unassignedRes.body.data.total).toBe(0);
-    expect(unassignedRes.body.data.assignedScopeOnly).toBe(true);
+    expect(unassignedRes.body.data.facilityScopeOnly).toBe(true);
+    expect(unassignedRes.body.data.ownRegistrationsOnly).toBe(true);
   });
 
   it('NO VILLAGE ID REQUIRED: registers a patient without entering Village ID, resolving village mapping internally from villageName & mandal', async () => {

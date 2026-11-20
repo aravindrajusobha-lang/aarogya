@@ -83,6 +83,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   if (allowedRoles && allowedRoles.length > 0) {
     const userRole = (checkedUser.role || '').toUpperCase();
+    const isFieldWorker = ['ASHA', 'ASHA_WORKER', 'ANM'].includes(userRole);
     const isAuthorized = allowedRoles.some((role) => {
       const targetRole = role.toUpperCase();
       if (targetRole === 'ADMIN' && (userRole === 'SYSTEM_ADMIN' || userRole === 'ADMIN' || userRole === 'DISTRICT_OFFICER')) return true;
@@ -106,11 +107,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
                 if (userRole.includes('ADMIN')) window.location.hash = '#/admin';
                 else if (userRole.includes('DOCTOR') || userRole.includes('MEDICAL')) window.location.hash = '#/doctor';
                 else if (userRole.includes('PATIENT')) window.location.hash = '#/patient';
+                else if (isFieldWorker) window.location.hash = '#/';
                 else window.location.hash = '#/login';
               }}
               style={{ marginTop: '20px' }}
             >
-              Return to Your Authorized Dashboard
+              {isFieldWorker ? 'Open ASHA Worker Portal' : 'Return to Your Authorized Dashboard'}
             </button>
           </div>
         </div>

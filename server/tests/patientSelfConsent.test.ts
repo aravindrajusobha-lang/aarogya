@@ -6,6 +6,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { createApp } from '../src/app.js';
 import { User } from '../src/modules/auth/userModel.js';
 import { Consent } from '../src/modules/consent/consentModel.js';
+import { Patient } from '../src/modules/patient/patientModel.js';
 import { getRoleCapabilities } from '../src/modules/auth/authorizationEngine.js';
 import { signAccessToken } from '../src/modules/auth/tokenService.js';
 import { createTestReplicaSet } from './setupReplSet.js';
@@ -30,6 +31,47 @@ describe('Patient self-consent for their own photo analysis', () => {
       { userId: 'sc_pat', username: 'sc_pat', fullName: 'Synthetic Patient', role: 'patient', patientId: 'PAT-SC-1', hospitalId: 'hosp_sc', passwordHash: 'x', status: 'active' },
       { userId: 'sc_asha', username: 'sc_asha', fullName: 'Synthetic ASHA', role: 'asha', hospitalId: 'hosp_sc', passwordHash: 'x', status: 'active' },
     ]);
+    await Patient.create([
+      {
+        patientId: 'PAT-SC-1',
+        fullName: 'Synthetic Patient',
+        gender: 'female',
+        ageEstimated: 42,
+        villageId: 'VIL-SC-1',
+        villageName: 'Synthetic Village',
+        mandal: 'Synthetic Mandal',
+        district: 'Synthetic District',
+        originalAddressText: 'Synthetic address',
+        hospitalId: 'hosp_sc',
+        registeredBy: 'sc_asha',
+      },
+      {
+        patientId: 'PAT-SC-ASHA-1',
+        fullName: 'Synthetic ASHA Patient',
+        gender: 'male',
+        ageEstimated: 35,
+        villageId: 'VIL-SC-2',
+        villageName: 'Synthetic Village',
+        mandal: 'Synthetic Mandal',
+        district: 'Synthetic District',
+        originalAddressText: 'Synthetic address',
+        hospitalId: 'hosp_sc',
+        registeredBy: 'sc_asha',
+      },
+      {
+        patientId: 'PAT-SC-OTHER',
+        fullName: 'Other Worker Patient',
+        gender: 'female',
+        ageEstimated: 39,
+        villageId: 'VIL-SC-3',
+        villageName: 'Other Village',
+        mandal: 'Other Mandal',
+        district: 'Synthetic District',
+        originalAddressText: 'Synthetic address',
+        hospitalId: 'hosp_sc',
+        registeredBy: 'sc_other',
+      },
+    ]);
     patientToken = signAccessToken({ userId: 'sc_pat', role: 'patient', scopes: getRoleCapabilities('patient'), patientId: 'PAT-SC-1' } as any);
     ashaToken = signAccessToken({ userId: 'sc_asha', role: 'asha', hospitalId: 'hosp_sc', scopes: getRoleCapabilities('asha') });
     const realFetch = globalThis.fetch;
@@ -52,6 +94,36 @@ describe('Patient self-consent for their own photo analysis', () => {
     const res = await analyze(ashaToken, 'PAT-SC-1', 'true');
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('CONSENT_REQUIRED');
+  });
+
+  it('allows an ASHA to screen and track only their own registered patients', async () => {
+    const consent = await request(app)
+      .post('/api/v1/consent')
+      .set('Authorization', `Bearer ${ashaToken}`)
+      .send({ patientId: 'PAT-SC-ASHA-1', purpose: 'screening_ai_analysis' });
+    expect(consent.status).toBe(201);
+
+    const analysis = await analyze(ashaToken, 'PAT-SC-ASHA-1', 'true');
+    expect(analysis.status).toBe(200);
+    const screeningId = analysis.body.data.screeningId;
+
+    const history = await request(app)
+      .get('/api/ai/screenings?patientId=PAT-SC-ASHA-1')
+      .set('Authorization', `Bearer ${ashaToken}`);
+    expect(history.status).toBe(200);
+    expect(history.body.data).toHaveLength(1);
+    expect(history.body.data[0]).toMatchObject({
+      screeningId,
+      clinicianReview: { status: 'PENDING' },
+      disclaimer: expect.any(String),
+    });
+    expect(history.body.data[0]).not.toHaveProperty('imageRef');
+
+    const outOfScope = await request(app)
+      .get('/api/ai/screenings?patientId=PAT-SC-OTHER')
+      .set('Authorization', `Bearer ${ashaToken}`);
+    expect(outOfScope.status).toBe(403);
+    expect(outOfScope.body.error.code).toBe('PATIENT_SCOPE_DENIED');
   });
 
   it("records the patient's own agreement as a consent and analyses the photo", async () => {

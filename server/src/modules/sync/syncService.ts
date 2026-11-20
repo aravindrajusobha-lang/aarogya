@@ -5,6 +5,7 @@ import { ScreeningCase } from '../screening/screeningCaseModel.js';
 import { Appointment } from '../appointment/appointmentModel.js';
 import { Referral } from '../referral/referralModel.js';
 import { AuditLog } from '../audit/auditModel.js';
+import { FIELD_WORKER_ROLES, resolveWorkerPatientScope } from '../patient/workerPatientScope.js';
 
 export const ENCRYPTION_STRENGTH_REPORT = {
   algorithm: 'AES-GCM-256',
@@ -70,9 +71,54 @@ export class SyncService {
     for (const item of items) {
       const { clientMutationId, type, payload, expectedVersion, originalSha256 } = item;
 
+      let workerPatientScope: Awaited<ReturnType<typeof resolveWorkerPatientScope>> | null = null;
+      if (FIELD_WORKER_ROLES.has(actor.role)) {
+        if (type !== 'patient_registration') {
+          results.push({
+            clientMutationId,
+            type,
+            status: 'failed',
+            error: 'Field workers may only sync patient registrations.',
+          });
+          continue;
+        }
+        try {
+          workerPatientScope = await resolveWorkerPatientScope({
+            workerId: actor.userId,
+            authenticatedHospitalId: actor.hospitalId,
+            requestedHospitalId: payload.hospitalId,
+            mandal: payload.mandal || '',
+            villageId: payload.villageId,
+            villageName: payload.villageName || '',
+          });
+        } catch (err) {
+          results.push({
+            clientMutationId,
+            type,
+            status: 'failed',
+            error: err instanceof Error ? err.message : 'Patient registration is outside your assigned scope.',
+          });
+          continue;
+        }
+      }
+
       // 1. Idempotency Check via SyncLedger
       const existingLedger = await SyncLedger.findOne({ clientMutationId });
       if (existingLedger) {
+        if (workerPatientScope) {
+          const existingPatient = await Patient.findOne({ patientId: existingLedger.entityId }).select('villageId hospitalId').lean();
+          if (!existingPatient
+            || existingPatient.villageId !== workerPatientScope.villageId
+            || existingPatient.hospitalId !== workerPatientScope.hospitalId) {
+            results.push({
+              clientMutationId,
+              type,
+              status: 'failed',
+              error: 'This registration belongs to a patient outside your assigned scope.',
+            });
+            continue;
+          }
+        }
         results.push({
           clientMutationId,
           type,
@@ -144,12 +190,12 @@ export class SyncService {
             fullName: payload.fullName || 'Anonymous Patient',
             gender: genderNorm,
             ageEstimated: payload.ageEstimated || 35,
-            villageId: payload.villageId || 'vil_offline_01',
-            villageName: payload.villageName || 'Dumbriguda Tribal Village',
-            mandal: payload.mandal || 'Paderu',
+            villageId: workerPatientScope?.villageId || payload.villageId || 'vil_offline_01',
+            villageName: workerPatientScope?.villageName || payload.villageName || 'Dumbriguda Tribal Village',
+            mandal: workerPatientScope?.mandal || payload.mandal || 'Paderu',
             district: payload.district || 'Alluri Sitharama Raju',
             originalAddressText: payload.originalAddressText || payload.address || 'Near Primary Health Centre, Paderu',
-            hospitalId: actor.hospitalId || payload.hospitalId || 'hosp_paderu_01',
+            hospitalId: workerPatientScope?.hospitalId || actor.hospitalId || payload.hospitalId || 'hosp_paderu_01',
             registeredBy: actor.userId,
             registeredAt: new Date(),
             clientMutationId,

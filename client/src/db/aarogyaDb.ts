@@ -58,6 +58,21 @@ export interface CachedCamp {
   active: boolean;
 }
 
+export interface CachedWorkerScope {
+  workerId: string;
+  hospitalId: string;
+  scopeType?: 'assignment' | 'facility';
+  assignedMandal: string;
+  assignedVillages: string[];
+  villages: Array<{
+    villageId: string;
+    villageName: string;
+    mandal: string;
+    hospitalId: string;
+  }>;
+  cachedAt: number;
+}
+
 export type OfflineActionType =
   | 'patient_registration'
   | 'screening_submission'
@@ -96,6 +111,7 @@ export class AarogyaDatabase extends Dexie {
   screenings!: Table<OfflineScreening, number>;
   syncQueue!: Table<SyncQueueItem, number>;
   camps!: Table<CachedCamp, string>;
+  workerScopes!: Table<CachedWorkerScope, string>;
   encryptedQueue!: Table<EncryptedQueueItem, number>;
   offlineAiScreenings!: Table<OfflineAiScreening, number>;
 
@@ -125,16 +141,25 @@ export class AarogyaDatabase extends Dexie {
       encryptedQueue: '++id, clientMutationId, type, status, createdAt',
       offlineAiScreenings: '++id, clientId, patientId, syncStatus, createdAt',
     });
+    this.version(5).stores({
+      screenings: '++id, patientDemoId, campId, syncStatus, createdAt',
+      syncQueue: '++id, action, retryCount, createdAt',
+      camps: 'campId, panchayat, targetDate, active',
+      workerScopes: 'workerId, cachedAt',
+      encryptedQueue: '++id, clientMutationId, type, status, createdAt',
+      offlineAiScreenings: '++id, clientId, patientId, syncStatus, createdAt',
+    });
   }
 
   /**
    * Completely wipes offline queues and local caches on logout or device revocation.
    */
   async clearAllOfflineData(): Promise<void> {
-    await this.transaction('rw', [this.screenings, this.syncQueue, this.encryptedQueue, this.offlineAiScreenings], async () => {
+    await this.transaction('rw', [this.screenings, this.syncQueue, this.workerScopes, this.encryptedQueue, this.offlineAiScreenings], async () => {
       await this.encryptedQueue.clear();
       await this.screenings.clear();
       await this.syncQueue.clear();
+      await this.workerScopes.clear();
       await this.offlineAiScreenings.clear();
     });
   }

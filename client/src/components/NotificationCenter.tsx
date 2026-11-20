@@ -326,12 +326,12 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       {/* Header Banner */}
       <div
         style={{
-          background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
+          background: 'var(--surface)',
           borderRadius: '16px',
-          padding: '1.75rem',
-          color: '#f8fafc',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          padding: '1.5rem',
+          color: 'var(--text-primary)',
+          boxShadow: 'var(--surface-shadow)',
+          border: '1px solid var(--border)',
           marginBottom: '1.5rem',
           display: 'flex',
           justifyContent: 'space-between',
@@ -343,8 +343,8 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
             <span style={{ fontSize: '1.75rem' }}>🔔</span>
-            <h2 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-              Notification Core
+            <h2 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+              Notifications
             </h2>
             {unreadCount > 0 && (
               <span
@@ -362,31 +362,31 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               </span>
             )}
           </div>
-          <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.9rem' }}>
-            Logged in as <strong>{currentUser?.fullName || currentUser?.userId || 'Health Worker'}</strong> ({currentUser?.role?.toUpperCase() || 'SESSION'}) — In-App Notification Dispatcher, Preferences, Delivery Status Tracking, and Simulation BLOCKED Stubs
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.5 }}>
+            Signed in as <strong style={{ color: 'var(--text-primary)' }}>{currentUser?.fullName || currentUser?.userId || 'Health Worker'}</strong>
+            <span> · {currentUser?.role?.replace(/_/g, ' ') || 'Account'}</span>
           </p>
         </div>
 
         {/* Safety & Adapter Banner */}
         <div
           style={{
-            background: 'rgba(245, 158, 11, 0.12)',
-            border: '1px solid rgba(245, 158, 11, 0.3)',
+            background: 'var(--warning-bg)',
+            border: '1px solid var(--warning-text)',
             borderRadius: '10px',
             padding: '0.6rem 0.9rem',
-            color: '#fcd34d',
-            fontSize: '0.8rem',
-            maxWidth: '380px',
-            lineHeight: 1.4,
+            color: 'var(--warning-text)',
+            fontSize: '0.875rem',
+            maxWidth: '420px',
+            lineHeight: 1.5,
           }}
         >
-          <strong>⚠️ Truth in Delivery:</strong> SMS and Email adapters are explicit{' '}
-          <span style={{ textDecoration: 'underline' }}>BLOCKED stubs</span> in simulation mode. No external carrier delivery is claimed.
+          <strong>Demo delivery:</strong> SMS and email are unavailable. Notifications are shown in the app only.
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <button
           onClick={() => setActiveTab('inbox')}
           style={{
@@ -394,9 +394,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             borderRadius: '8px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: activeTab === 'inbox' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
-            background: activeTab === 'inbox' ? '#1d4ed8' : 'rgba(30, 41, 59, 0.6)',
-            color: '#fff',
+            border: `1px solid ${activeTab === 'inbox' ? 'var(--btn-primary-bg)' : 'var(--border)'}`,
+            background: activeTab === 'inbox' ? 'var(--btn-primary-bg)' : 'var(--surface)',
+            color: activeTab === 'inbox' ? 'var(--btn-primary-text)' : 'var(--text-primary)',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
@@ -411,9 +411,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             borderRadius: '8px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: activeTab === 'compose' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
-            background: activeTab === 'compose' ? '#1d4ed8' : 'rgba(30, 41, 59, 0.6)',
-            color: '#fff',
+            border: `1px solid ${activeTab === 'compose' ? 'var(--btn-primary-bg)' : 'var(--border)'}`,
+            background: activeTab === 'compose' ? 'var(--btn-primary-bg)' : 'var(--surface)',
+            color: activeTab === 'compose' ? 'var(--btn-primary-text)' : 'var(--text-primary)',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
@@ -428,9 +428,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             borderRadius: '8px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: activeTab === 'preferences' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
-            background: activeTab === 'preferences' ? '#1d4ed8' : 'rgba(30, 41, 59, 0.6)',
-            color: '#fff',
+            border: `1px solid ${activeTab === 'preferences' ? 'var(--btn-primary-bg)' : 'var(--border)'}`,
+            background: activeTab === 'preferences' ? 'var(--btn-primary-bg)' : 'var(--surface)',
+            color: activeTab === 'preferences' ? 'var(--btn-primary-text)' : 'var(--text-primary)',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
@@ -452,24 +452,24 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               flexWrap: 'wrap',
               gap: '0.75rem',
               marginBottom: '1rem',
-              background: 'rgba(30, 41, 59, 0.5)',
+              background: 'var(--surface)',
               padding: '0.75rem 1rem',
               borderRadius: '10px',
-              border: '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid var(--border)',
             }}
           >
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Filter Category:</label>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Filter category</label>
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
                 style={{
-                  background: '#0f172a',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
                   padding: '0.4rem 0.75rem',
                   borderRadius: '6px',
-                  fontSize: '0.85rem',
+                  fontSize: '0.9rem',
                 }}
               >
                 <option value="all">All Categories</option>
@@ -481,7 +481,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 <option value="advisory">Advisory</option>
               </select>
 
-              <label style={{ fontSize: '0.85rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={unreadOnly}
@@ -496,11 +496,11 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 onClick={fetchNotifications}
                 style={{
                   padding: '0.4rem 0.85rem',
-                  background: 'rgba(255,255,255,0.08)',
-                  color: '#cbd5e1',
-                  border: '1px solid rgba(255,255,255,0.15)',
+                  background: 'var(--surface-2)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
                   borderRadius: '6px',
-                  fontSize: '0.85rem',
+                  fontSize: '0.9rem',
                   cursor: 'pointer',
                 }}
               >
@@ -535,7 +535,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
           {/* Loading indicator */}
           {loading && (
-            <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
               Loading in-app notifications...
             </div>
           )}
@@ -546,15 +546,15 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               style={{
                 textAlign: 'center',
                 padding: '3rem 1rem',
-                background: 'rgba(30, 41, 59, 0.3)',
+                background: 'var(--surface)',
                 borderRadius: '12px',
-                border: '1px dashed rgba(255,255,255,0.15)',
-                color: '#94a3b8',
+                border: '1px dashed var(--border)',
+                color: 'var(--text-secondary)',
               }}
             >
               <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📭</div>
-              <h3 style={{ margin: '0 0 0.5rem 0', color: '#f8fafc' }}>No notifications found</h3>
-              <p style={{ margin: 0, fontSize: '0.85rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)' }}>No notifications yet</h3>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                 Your inbox has no notifications matching the current filter.
               </p>
             </div>
@@ -726,16 +726,17 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       {activeTab === 'compose' && (
         <div
           style={{
-            background: 'rgba(30, 41, 59, 0.5)',
+            background: 'var(--surface)',
             borderRadius: '12px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            border: '1px solid var(--border)',
             padding: '1.5rem',
+            boxShadow: 'var(--surface-shadow)',
           }}
         >
-          <h3 style={{ margin: '0 0 1rem 0', color: '#f8fafc', fontSize: '1.2rem' }}>
+          <h3 style={{ margin: '0 0 1rem 0', color: 'var(--text-primary)', fontSize: '1.2rem' }}>
             Enqueue & Dispatch Notification
           </h3>
-          <p style={{ margin: '0 0 1.5rem 0', color: '#94a3b8', fontSize: '0.85rem' }}>
+          <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
             Simulate event-driven notification generation across in-app, SMS, and Email channels.
             External adapters are strictly BLOCKED stubs in simulation mode.
           </p>
@@ -743,7 +744,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
           <form onSubmit={handleDispatchNotification}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#cbd5e1', marginBottom: '0.35rem' }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.35rem' }}>
                   Select Clinical Safety Template:
                 </label>
                 <select
@@ -759,9 +760,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   }}
                   style={{
                     width: '100%',
-                    background: '#0f172a',
-                    color: '#fff',
-                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'var(--surface)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
                     padding: '0.6rem',
                     borderRadius: '6px',
                   }}
@@ -775,7 +776,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#cbd5e1', marginBottom: '0.35rem' }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.35rem' }}>
                   Priority:
                 </label>
                 <select
@@ -783,9 +784,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   onChange={(e: any) => setComposePriority(e.target.value)}
                   style={{
                     width: '100%',
-                    background: '#0f172a',
-                    color: '#fff',
-                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'var(--surface)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
                     padding: '0.6rem',
                     borderRadius: '6px',
                   }}
@@ -801,14 +802,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             {/* Template Parameters */}
             <div
               style={{
-                background: 'rgba(15, 23, 42, 0.6)',
-                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
                 borderRadius: '8px',
                 padding: '1rem',
                 marginBottom: '1.25rem',
               }}
             >
-              <h5 style={{ margin: '0 0 0.75rem 0', color: '#93c5fd', fontSize: '0.9rem' }}>
+              <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--accent)', fontSize: '0.95rem' }}>
                 Template Parameters:
               </h5>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
@@ -816,7 +817,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   composeTemplate === 'REFERRAL_DISPATCHED' ||
                   composeTemplate === 'DUPLICATE_ALERT') && (
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.25rem' }}>
                       Patient ID:
                     </label>
                     <input
@@ -825,9 +826,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                       onChange={(e) => setComposePatientId(e.target.value)}
                       style={{
                         width: '100%',
-                        background: '#0f172a',
-                        color: '#fff',
-                        border: '1px solid rgba(255,255,255,0.2)',
+                        background: 'var(--surface)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
                         padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.85rem',
@@ -838,7 +839,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
                 {composeTemplate === 'REFERRAL_DISPATCHED' && (
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.25rem' }}>
                       Specialist Facility:
                     </label>
                     <input
@@ -847,9 +848,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                       onChange={(e) => setComposeFacility(e.target.value)}
                       style={{
                         width: '100%',
-                        background: '#0f172a',
-                        color: '#fff',
-                        border: '1px solid rgba(255,255,255,0.2)',
+                        background: 'var(--surface)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
                         padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.85rem',
@@ -861,7 +862,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 {composeTemplate === 'CAMP_SCHEDULED' && (
                   <>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.25rem' }}>
                         Village / Habitation:
                       </label>
                       <input
@@ -870,9 +871,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                         onChange={(e) => setComposeVillage(e.target.value)}
                         style={{
                           width: '100%',
-                          background: '#0f172a',
-                          color: '#fff',
-                          border: '1px solid rgba(255,255,255,0.2)',
+                          background: 'var(--surface)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border)',
                           padding: '0.5rem',
                           borderRadius: '6px',
                           fontSize: '0.85rem',
@@ -880,7 +881,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                       />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.25rem' }}>
                         Camp Date:
                       </label>
                       <input
@@ -889,9 +890,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                         onChange={(e) => setComposeCampDate(e.target.value)}
                         style={{
                           width: '100%',
-                          background: '#0f172a',
-                          color: '#fff',
-                          border: '1px solid rgba(255,255,255,0.2)',
+                          background: 'var(--surface)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border)',
                           padding: '0.5rem',
                           borderRadius: '6px',
                           fontSize: '0.85rem',
@@ -903,7 +904,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
                 {composeTemplate === 'DUPLICATE_ALERT' && (
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.25rem' }}>
                       Duplicate Similarity Score (%):
                     </label>
                     <input
@@ -912,9 +913,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                       onChange={(e) => setComposeScore(parseInt(e.target.value, 10))}
                       style={{
                         width: '100%',
-                        background: '#0f172a',
-                        color: '#fff',
-                        border: '1px solid rgba(255,255,255,0.2)',
+                        background: 'var(--surface)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
                         padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.85rem',
@@ -927,11 +928,11 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
             {/* Channels Selection */}
             <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', color: '#cbd5e1', marginBottom: '0.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.5rem' }}>
                 Delivery Channels:
               </label>
               <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#34d399', fontSize: '0.85rem', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent)', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={composeChannels.in_app}
@@ -939,7 +940,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   />
                   📱 In-App (Real Inbox Delivery)
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontSize: '0.85rem', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={composeChannels.sms}
@@ -947,7 +948,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   />
                   💬 SMS (BLOCKED STUB)
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontSize: '0.85rem', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={composeChannels.email}
@@ -963,13 +964,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               disabled={sending}
               style={{
                 padding: '0.75rem 1.75rem',
-                background: sending ? '#475569' : '#2563eb',
-                color: '#fff',
+                background: 'var(--btn-primary-bg)',
+                color: 'var(--btn-primary-text)',
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 600,
                 cursor: sending ? 'not-allowed' : 'pointer',
-                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+                boxShadow: 'var(--shadow-sm)',
+                opacity: sending ? 0.7 : 1,
               }}
             >
               {sending ? 'Dispatching...' : '🚀 Enqueue & Dispatch Notification'}
@@ -983,18 +985,18 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 marginTop: '1.5rem',
                 padding: '1rem 1.25rem',
                 borderRadius: '8px',
-                background: sendResult.success ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                border: `1px solid ${sendResult.success ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                background: sendResult.success ? 'var(--success-bg)' : 'var(--danger-bg)',
+                border: `1px solid ${sendResult.success ? 'var(--success-text)' : 'var(--danger-text)'}`,
               }}
             >
-              <h4 style={{ margin: '0 0 0.5rem 0', color: sendResult.success ? '#34d399' : '#f87171' }}>
+              <h4 style={{ margin: '0 0 0.5rem 0', color: sendResult.success ? 'var(--success-text)' : 'var(--danger-text)' }}>
                 {sendResult.success ? '✓ Dispatch Successful' : '✕ Dispatch Failed'}
               </h4>
-              <p style={{ margin: '0 0 0.5rem 0', color: '#e2e8f0', fontSize: '0.9rem' }}>
+              <p style={{ margin: '0 0 0.5rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                 {sendResult.message}
               </p>
               {sendResult.notice && (
-                <div style={{ background: 'rgba(245, 158, 11, 0.15)', borderLeft: '3px solid #f59e0b', padding: '0.5rem 0.75rem', color: '#fbbf24', fontSize: '0.8rem', borderRadius: '4px' }}>
+                <div style={{ background: 'var(--warning-bg)', borderLeft: '3px solid var(--warning-text)', padding: '0.5rem 0.75rem', color: 'var(--warning-text)', fontSize: '0.85rem', borderRadius: '4px' }}>
                   {sendResult.notice}
                 </div>
               )}
@@ -1007,28 +1009,29 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       {activeTab === 'preferences' && (
         <div
           style={{
-            background: 'rgba(30, 41, 59, 0.5)',
+            background: 'var(--surface)',
             borderRadius: '12px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            border: '1px solid var(--border)',
             padding: '1.5rem',
+            boxShadow: 'var(--shadow-sm)',
           }}
         >
-          <h3 style={{ margin: '0 0 0.5rem 0', color: '#f8fafc', fontSize: '1.2rem' }}>
+          <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)', fontSize: '1.2rem' }}>
             Recipient Notification Preferences
           </h3>
-          <p style={{ margin: '0 0 1.5rem 0', color: '#94a3b8', fontSize: '0.85rem' }}>
+          <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
             Configure delivery channels, subscribed notification categories, and language localization.
           </p>
 
           {prefSuccess && (
-            <div style={{ background: '#065f46', color: '#6ee7b7', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.25rem' }}>
+            <div style={{ background: 'var(--success-bg)', color: 'var(--success-text)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.25rem' }}>
               ✓ {prefSuccess}
             </div>
           )}
 
           {/* Language Preference */}
           <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'block', fontSize: '0.85rem', color: '#cbd5e1', marginBottom: '0.35rem' }}>
+            <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
               Preferred Notification Language:
             </label>
             <select
@@ -1037,9 +1040,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 setPreferences((p) => ({ ...p, preferredLanguage: e.target.value }))
               }
               style={{
-                background: '#0f172a',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'var(--surface)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
                 padding: '0.6rem 1rem',
                 borderRadius: '6px',
                 fontSize: '0.9rem',
@@ -1053,13 +1056,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
           {/* Delivery Channels */}
           <div style={{ marginBottom: '1.5rem' }}>
-            <h4 style={{ margin: '0 0 0.75rem 0', color: '#cbd5e1', fontSize: '0.95rem' }}>
+            <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-primary)', fontSize: '0.95rem' }}>
               Channel Preferences:
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.channels.inApp}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1071,9 +1075,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 In-App Notifications (Active Web App Session)
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.channels.sms}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1085,9 +1090,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 SMS Notifications (Enforces BLOCKED Stub in Simulation)
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.channels.email}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1103,13 +1109,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
           {/* Category Subscriptions */}
           <div style={{ marginBottom: '1.5rem' }}>
-            <h4 style={{ margin: '0 0 0.75rem 0', color: '#cbd5e1', fontSize: '0.95rem' }}>
+            <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-primary)', fontSize: '0.95rem' }}>
               Subscribed Categories:
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.categories.screening}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1121,9 +1128,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 Oral Health Screenings
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.categories.referral}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1135,9 +1143,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 Specialist Referrals
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.categories.camp}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1149,9 +1158,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 Community Screening Camps
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.categories.duplicateAlert}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1163,9 +1173,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 Duplicate Intake Alerts
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.categories.securityAlert}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1177,9 +1188,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 Security & Session Alerts
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: 'var(--accent)' }}
                   checked={preferences.categories.advisory}
                   onChange={(e) =>
                     setPreferences((p) => ({
@@ -1198,13 +1210,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             disabled={prefLoading}
             style={{
               padding: '0.65rem 1.5rem',
-              background: prefLoading ? '#475569' : '#059669',
-              color: '#fff',
+              background: 'var(--btn-primary-bg)',
+              color: 'var(--btn-primary-text)',
               border: 'none',
               borderRadius: '8px',
               fontWeight: 600,
               cursor: prefLoading ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 12px rgba(5, 150, 105, 0.4)',
+              boxShadow: 'var(--shadow-sm)',
+              opacity: prefLoading ? 0.7 : 1,
             }}
           >
             {prefLoading ? 'Saving...' : '💾 Save Notification Preferences'}

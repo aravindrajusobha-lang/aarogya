@@ -435,6 +435,11 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
   { method: 'POST', path: '/api/v1/auth/patient/qr-scan', requiredCapability: 'public', description: 'Process scanned Aarogya Setu QR code and send verification OTP' },
   { method: 'POST', path: '/api/v1/auth/patient/send-otp', requiredCapability: 'public', description: 'Send mobile OTP to patient' },
   { method: 'POST', path: '/api/v1/auth/patient/verify-otp', requiredCapability: 'public', description: 'Verify patient mobile OTP' },
+  { method: 'GET', path: '/api/v1/asha-registration/facilities', requiredCapability: 'public', description: 'List active facilities for ASHA applications' },
+  { method: 'POST', path: '/api/v1/asha-registration/register', requiredCapability: 'public', description: 'Submit an ASHA worker account application for administrator review' },
+  { method: 'GET', path: '/api/v1/asha-registration/applications', requiredCapability: 'hospital:manage', description: 'List ASHA account applications in the administrator facility scope' },
+  { method: 'POST', path: '/api/v1/asha-registration/:userId/approve', requiredCapability: 'hospital:manage', description: 'Approve an ASHA worker account application' },
+  { method: 'POST', path: '/api/v1/asha-registration/:userId/reject', requiredCapability: 'hospital:manage', description: 'Reject an ASHA worker account application' },
 
   // Auth - Protected User & MFA
   { method: 'GET', path: '/api/v1/auth/me', requiredCapability: 'auth:me', description: 'Get logged in user profile' },
@@ -512,7 +517,7 @@ export const ENDPOINT_CAPABILITY_TABLE: EndpointRouteConfig[] = [
   { method: 'POST', path: '/api/v1/assignments/:id/revoke', requiredCapability: 'assignment:create', description: 'Revoke health worker village assignment' },
 
   // Phase 3: Administration - Village Reference Data
-  { method: 'GET', path: '/api/v1/reference/villages', requiredCapability: 'reference:villages', description: 'List tribal villages (scoped to worker assignments)' },
+  { method: 'GET', path: '/api/v1/reference/villages', requiredCapability: 'reference:villages', description: 'List facility villages, narrowed to explicit worker assignments when present' },
   { method: 'POST', path: '/api/v1/reference/villages', requiredCapability: 'reference:manage', description: 'Register tribal village reference data' },
   { method: 'GET', path: '/api/v1/reference/asr/mandals', requiredCapability: 'reference:villages', description: 'Get all 22 mandals in Alluri Sitharama Raju district' },
   { method: 'GET', path: '/api/v1/reference/asr/panchayats', requiredCapability: 'reference:villages', description: 'Get gram panchayats for ASR district mandals' },

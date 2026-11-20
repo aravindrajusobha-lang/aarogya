@@ -35,8 +35,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isPatient = currentUser?.role?.toLowerCase() === 'patient';
   const userRole = (currentUser?.role || '').toUpperCase();
   const isAdmin = userRole.includes('ADMIN') || userRole.includes('SYSTEM');
+  const isFieldWorker = ['ASHA', 'ASHA_WORKER', 'ANM'].includes(userRole);
+  const fieldWorkerTabIds = new Set(['patients', 'ai-screening', 'notifications', 'auth']);
 
   const getItemLabel = (item: NavItem): string => {
+    if (isFieldWorker) {
+      const fieldWorkerLabels: Record<string, Record<string, string>> = {
+        patients: { en: 'My Patients', te: 'నా రోగులు', hi: 'मेरे मरीज़', ta: 'என் நோயாளிகள்', kn: 'ನನ್ನ ರೋಗಿಗಳು', ml: 'എന്റെ രോഗികൾ' },
+        'ai-screening': { en: 'AI Screening', te: 'AI స్క్రీనింగ్', hi: 'AI स्क्रीनिंग', ta: 'AI பரிசோதனை', kn: 'AI ಸ್ಕ್ರೀನಿಂಗ್', ml: 'AI സ്ക്രീനിംഗ്' },
+        notifications: { en: 'Notifications', te: 'నోటిఫికేషన్లు', hi: 'सूचनाएँ', ta: 'அறிவிப்புகள்', kn: 'ಅಧಿಸೂಚನೆಗಳು', ml: 'അറിയിപ്പുകൾ' },
+        auth: { en: 'My Account', te: 'నా ఖాతా', hi: 'मेरा खाता', ta: 'என் கணக்கு', kn: 'ನನ್ನ ಖಾತೆ', ml: 'എന്റെ അക്കൗണ്ട്' },
+      };
+      const label = fieldWorkerLabels[item.id]?.[currentLang];
+      if (label) return label;
+    }
     if (isPatient && PATIENT_ITEM_LABELS[item.id]) {
       const pl = PATIENT_ITEM_LABELS[item.id];
       if (currentLang === 'te') return pl.labelTe;
@@ -68,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Governance & Admin settings are hidden from Doctors and only shown to Super Admins
   const visibleCategories = categories.filter((cat) => {
+    if (isFieldWorker) return cat.key === 'clinical' || cat.key === 'account';
     if (cat.key === 'governance') {
       return isAdmin;
     }
@@ -105,7 +118,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-  const getCategoryTitle = (cat: { title: string; titleTe: string; titleHi: string; titleTa?: string; titleKn?: string; titleMl?: string }) => {
+  const getCategoryTitle = (cat: { key?: string; title: string; titleTe: string; titleHi: string; titleTa?: string; titleKn?: string; titleMl?: string }) => {
+    if (isFieldWorker && cat.key === 'clinical') {
+      return currentLang === 'te' ? 'క్షేత్ర పని' : currentLang === 'hi' ? 'फील्ड कार्य' : currentLang === 'ta' ? 'களப்பணி' : currentLang === 'kn' ? 'ಕ್ಷೇತ್ರ ಕಾರ್ಯ' : currentLang === 'ml' ? 'ഫീൽഡ് പ്രവർത്തനം' : 'Field Work';
+    }
+    if (isFieldWorker && cat.key === 'account') {
+      return currentLang === 'te' ? 'సహాయం & ఖాతా' : currentLang === 'hi' ? 'सहायता और खाता' : currentLang === 'ta' ? 'உதவி & கணக்கு' : currentLang === 'kn' ? 'ಸಹಾಯ ಮತ್ತು ಖಾತೆ' : currentLang === 'ml' ? 'സഹായവും അക്കൗണ്ടും' : 'Support & Account';
+    }
     if (currentLang === 'te') return cat.titleTe;
     if (currentLang === 'hi') return cat.titleHi;
     if (currentLang === 'ta' && cat.titleTa) return cat.titleTa;
@@ -176,8 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Voice Assistant Shortcut Card in Sidebar */}
-        <div className="sidebar-voice-card">
+        {!isFieldWorker && <div className="sidebar-voice-card">
           <button
             type="button"
             className={`voice-assistant-trigger ${isVoiceAssistantActive ? 'active-pulse' : ''}`}
@@ -200,7 +218,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
           </button>
-        </div>
+        </div>}
 
         {/* Scrollable Navigation Groups */}
         <nav className="sidebar-nav">
@@ -250,7 +268,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             })
           ) : (
             visibleCategories.map((cat) => {
-              const items = NAV_ITEMS.filter((item) => item.category === cat.key);
+              const items = NAV_ITEMS.filter((item) => {
+                if (!isFieldWorker) return item.category === cat.key;
+                if (!fieldWorkerTabIds.has(item.id)) return false;
+                return cat.key === 'clinical'
+                    ? ['patients', 'ai-screening'].includes(item.id)
+                  : cat.key === 'account' && ['notifications', 'auth'].includes(item.id);
+              });
               if (items.length === 0) return null;
 
               return (
@@ -300,6 +324,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             })
           )}
         </nav>
+
+        {isFieldWorker && (
+          <button
+            type="button"
+            className="field-worker-logout-action"
+            onClick={onLogout}
+            title="Log out"
+            aria-label="Log out"
+          >
+            <span aria-hidden="true">⎋</span>
+            {!isCollapsed && <span>Log out</span>}
+          </button>
+        )}
 
         {/* Bottom User Profile & Controls */}
         <div className="sidebar-footer">
@@ -371,15 +408,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               )}
 
-              <button
-                type="button"
-                className="logout-icon-btn"
-                onClick={onLogout}
-                title="Log Out Session"
-                aria-label="Logout"
-              >
-                ⎋
-              </button>
+              {!isFieldWorker && (
+                <button
+                  type="button"
+                  className="logout-icon-btn"
+                  onClick={onLogout}
+                  title="Log Out Session"
+                  aria-label="Logout"
+                >
+                  ⎋
+                </button>
+              )}
             </div>
           ) : (
             <div className="sidebar-guest-card">

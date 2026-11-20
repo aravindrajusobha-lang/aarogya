@@ -17,13 +17,30 @@ interface Patient {
   villageId: string;
   mandal: string;
   district: string;
-  originalAddressText: string;
-  hospitalId: string;
+  originalAddressText?: string;
+  hospitalId?: string;
   isDuplicateCandidate: boolean;
   duplicateReviewStatus: string;
   matchScore?: number;
   matchReasons?: string[];
   registeredAt: string;
+  flow?: {
+    screening: string;
+    aiScreening?: { screeningId?: string; createdAt?: string; reviewStatus?: string; status: string };
+    referral: string;
+    appointment: string;
+  };
+}
+
+interface AiScreeningHistoryItem {
+  screeningId: string;
+  createdAt: string;
+  riskLevel: string;
+  summary?: string | null;
+  findingTypeLabel?: string | null;
+  nextStep: { text: string; withinDays: number };
+  clinicianReview: { status: string; reviewedAt?: string | null };
+  disclaimer: string;
 }
 
 interface DuplicateReviewTicket {
@@ -38,12 +55,27 @@ interface DuplicateReviewTicket {
   existingPatient?: Patient;
 }
 
+interface WorkerAssignment {
+  hospitalId: string;
+  assignedMandal: string;
+  assignedVillages: string[];
+  scopeType?: 'assignment' | 'facility';
+}
+
+interface ReferenceVillage {
+  villageId: string;
+  villageName: string;
+  mandal: string;
+  hospitalId: string;
+}
+
 interface PatientManagerProps {
   accessToken: string | null;
   currentUser: AuthUser | null;
   onRequireLogin?: (role?: 'asha' | 'doctor') => void;
   onGoToAuth?: () => void;
   currentLang?: LanguageCode;
+  onStartAiScreening?: (patient: { patientId: string; fullName: string }) => void;
 }
 
 export const PatientManager: React.FC<PatientManagerProps> = ({
@@ -52,13 +84,18 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
   onRequireLogin,
   onGoToAuth,
   currentLang = 'en',
+  onStartAiScreening,
 }) => {
+  const isFieldWorker = ['asha', 'asha_worker', 'anm'].includes(currentUser?.role?.toLowerCase() || '');
   const [activeTab, setActiveTab] = useState<'register' | 'patients' | 'duplicates' | 'queue'>('register');
 
   // Registration Method & Mode State
-  const [regMethod, setRegMethod] = useState<'aadhaar_assisted' | 'manual' | 'health_worker_assisted'>('aadhaar_assisted');
+  const [regMethod, setRegMethod] = useState<'aadhaar_assisted' | 'manual' | 'health_worker_assisted'>(isFieldWorker ? 'health_worker_assisted' : 'aadhaar_assisted');
   const [aadhaarFront, setAadhaarFront] = useState<string | null>(null);
   const [aadhaarBack, setAadhaarBack] = useState<string | null>(null);
+  const [showAadhaarScan, setShowAadhaarScan] = useState(false);
+  const [cameraSide, setCameraSide] = useState<'front' | 'back' | null>(null);
+  const [cameraError, setCameraError] = useState('');
   const [extractingOcr, setExtractingOcr] = useState<boolean>(false);
   const [maskedAadhaar, setMaskedAadhaar] = useState<string>('');
   const [maskedAbha, setMaskedAbha] = useState<string>('');
@@ -76,25 +113,36 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
   const [consentObtained, setConsentObtained] = useState<boolean>(true);
 
   // Registration Form State
-  const [fullName, setFullName] = useState('Korra Somulu');
-  const [gender, setGender] = useState<'male' | 'female' | 'other'>('male');
-  const [ageEstimated, setAgeEstimated] = useState<number>(54);
-  const [phone, setPhone] = useState<string>('9440188990');
-  const [guardianName, setGuardianName] = useState<string>('Korra Somanna');
-  const [villageName, setVillageName] = useState<string>('Vankachinta');
-  const [mandal, setMandal] = useState<string>('Paderu');
+  const [fullName, setFullName] = useState(isFieldWorker ? '' : 'Korra Somulu');
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>(isFieldWorker ? '' : 'male');
+  const [ageEstimated, setAgeEstimated] = useState<number | ''>(isFieldWorker ? '' : 54);
+  const [phone, setPhone] = useState<string>(isFieldWorker ? '' : '9440188990');
+  const [guardianName, setGuardianName] = useState<string>(isFieldWorker ? '' : 'Korra Somanna');
+  const [villageName, setVillageName] = useState<string>(isFieldWorker ? '' : 'Vankachinta');
+  const [villageId, setVillageId] = useState<string>('');
+  const [mandal, setMandal] = useState<string>(isFieldWorker ? '' : 'Paderu');
   const [originalAddressText, setOriginalAddressText] = useState<string>(
-    'Near Old Water Tank, Vankachinta Upper Habitation, Paderu Mandal, ASR District'
+    isFieldWorker ? '' : 'Near Old Water Tank, Vankachinta Upper Habitation, Paderu Mandal, ASR District'
   );
-  const [hospitalId, setHospitalId] = useState<string>(currentUser?.hospitalId || 'hosp_paderu_dh');
+  const [hospitalId, setHospitalId] = useState<string>(isFieldWorker ? currentUser?.hospitalId || '' : currentUser?.hospitalId || 'hosp_paderu_dh');
   const [submitting, setSubmitting] = useState(false);
+  const [savingOffline, setSavingOffline] = useState(false);
   const [regMsg, setRegMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string; details?: any } | null>(null);
-  const [referenceVillages, setReferenceVillages] = useState<Array<{ villageName: string; mandal: string }>>([]);
+  const [referenceVillages, setReferenceVillages] = useState<ReferenceVillage[]>([]);
+  const [workerAssignment, setWorkerAssignment] = useState<WorkerAssignment | null>(null);
+  const [workerScopeError, setWorkerScopeError] = useState('');
+  const [usingCachedWorkerScope, setUsingCachedWorkerScope] = useState(false);
+  const [patientLoadError, setPatientLoadError] = useState('');
 
   // Patients List State
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loadingPatients, setLoadingPatients] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
+  const [screeningHistory, setScreeningHistory] = useState<AiScreeningHistoryItem[]>([]);
+  const [loadingScreeningHistory, setLoadingScreeningHistory] = useState(false);
+  const [screeningHistoryError, setScreeningHistoryError] = useState('');
+  const screeningHistoryRequestRef = useRef(0);
 
   // Duplicate Review Tickets State
   const [reviews, setReviews] = useState<DuplicateReviewTicket[]>([]);
@@ -107,10 +155,109 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
   const [queueMsg, setQueueMsg] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(() => navigator.onLine);
   const registrationFormRef = useRef<HTMLFormElement>(null);
+  const aadhaarFrontInputRef = useRef<HTMLInputElement>(null);
+  const aadhaarBackInputRef = useRef<HTMLInputElement>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef(0);
+  const pendingPatientMutationRef = useRef<{ fingerprint: string; clientMutationId: string } | null>(null);
+  const publicRegText = (key: string) => getClientTranslation(translations[uiLanguage], `public.reg.${key}`);
+
+  const stopAadhaarCamera = () => {
+    cameraRequestRef.current += 1;
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
+    setCameraSide(null);
+  };
+
+  const startAadhaarCamera = async (side: 'front' | 'back') => {
+    stopAadhaarCamera();
+    const requestId = cameraRequestRef.current;
+    setCameraError('');
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access is unavailable.');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      if (cameraRequestRef.current !== requestId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      cameraStreamRef.current = stream;
+      setCameraSide(side);
+    } catch (error) {
+      if (cameraRequestRef.current === requestId) {
+        const detail = error instanceof Error ? ` ${error.message}` : '';
+        setCameraError(`${publicRegText('cameraError')}${detail}`);
+        stopAadhaarCamera();
+      }
+    }
+  };
+
+  const captureAadhaarCamera = () => {
+    const video = cameraVideoRef.current;
+    if (!video?.videoWidth || !cameraSide) return;
+    const canvas = document.createElement('canvas');
+    const scale = Math.min(1, 1200 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    const context = canvas.getContext('2d');
+    if (!context) {
+      setCameraError(publicRegText('cameraError'));
+      stopAadhaarCamera();
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const image = canvas.toDataURL('image/jpeg', 0.82);
+    if (cameraSide === 'front') setAadhaarFront(image);
+    else setAadhaarBack(image);
+    stopAadhaarCamera();
+  };
+
+  const clearAadhaarImages = () => {
+    setAadhaarFront(null);
+    setAadhaarBack(null);
+    stopAadhaarCamera();
+    setCameraError('');
+    if (aadhaarFrontInputRef.current) aadhaarFrontInputRef.current.value = '';
+    if (aadhaarBackInputRef.current) aadhaarBackInputRef.current.value = '';
+  };
+
+  useEffect(() => {
+    const video = cameraVideoRef.current;
+    const stream = cameraStreamRef.current;
+    if (cameraSide && video && stream) {
+      video.srcObject = stream;
+      void video.play().catch(() => {
+        setCameraError(publicRegText('cameraError'));
+        stopAadhaarCamera();
+      });
+    }
+  }, [cameraSide]);
+
+  useEffect(() => {
+    const stopCamera = () => {
+      cameraRequestRef.current += 1;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+      if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
+      setCameraSide(null);
+    };
+    window.addEventListener('aarogya:stop-camera', stopCamera);
+    return () => {
+      window.removeEventListener('aarogya:stop-camera', stopCamera);
+      cameraRequestRef.current += 1;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    };
+  }, []);
 
   const fetchPatients = async () => {
     if (!accessToken) return;
     setLoadingPatients(true);
+    setPatientLoadError('');
     try {
       const res = await fetch('/api/v1/patients', {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -118,16 +265,55 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
       const payload = await res.json();
       if (res.ok && payload.success) {
         setPatients(payload.data?.patients || []);
+      } else {
+        throw new Error(payload.error?.message || 'Unable to load patients in your assigned scope.');
       }
     } catch (err) {
-      // ignore
+      setPatientLoadError(err instanceof Error ? err.message : 'Unable to load patients in your assigned scope.');
     } finally {
       setLoadingPatients(false);
     }
   };
 
+  const togglePatientProfile = async (patientId: string) => {
+    const requestId = ++screeningHistoryRequestRef.current;
+    if (expandedPatientId === patientId) {
+      setExpandedPatientId(null);
+      setScreeningHistory([]);
+      setScreeningHistoryError('');
+      setLoadingScreeningHistory(false);
+      return;
+    }
+
+    setExpandedPatientId(patientId);
+    setScreeningHistory([]);
+    setScreeningHistoryError('');
+    if (!accessToken) {
+      setScreeningHistoryError('Sign in again to load this patient’s check-up history.');
+      return;
+    }
+
+    setLoadingScreeningHistory(true);
+    try {
+      const response = await fetch(`/api/ai/screenings?patientId=${encodeURIComponent(patientId)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success || !Array.isArray(payload.data)) {
+        throw new Error(payload.error?.message || 'Unable to load this patient’s screening history.');
+      }
+      if (requestId === screeningHistoryRequestRef.current) setScreeningHistory(payload.data);
+    } catch (error) {
+      if (requestId === screeningHistoryRequestRef.current) {
+        setScreeningHistoryError(error instanceof Error ? error.message : 'Unable to load this patient’s screening history.');
+      }
+    } finally {
+      if (requestId === screeningHistoryRequestRef.current) setLoadingScreeningHistory(false);
+    }
+  };
+
   const fetchReviews = async () => {
-    if (!accessToken) return;
+    if (!accessToken || isFieldWorker) return;
     setLoadingReviews(true);
     try {
       const res = await fetch('/api/v1/patients/duplicates/review', {
@@ -154,25 +340,170 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
     fetchReviews();
     refreshQueue();
 
-    if (accessToken) {
-      fetch('/api/v1/reference/villages', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-        .then((res) => res.json())
-        .then((payload) => {
-          if (payload?.success && Array.isArray(payload.data?.villages)) {
-            setReferenceVillages(payload.data.villages);
+    let active = true;
+    const loadFieldWorkerScope = async () => {
+      if (!accessToken) return;
+      setWorkerScopeError('');
+      setUsingCachedWorkerScope(false);
+      if (isFieldWorker) {
+        setWorkerAssignment(null);
+        setReferenceVillages([]);
+      }
+      let serviceUnavailable = false;
+      try {
+        if (isFieldWorker) {
+          if (!currentUser?.userId) throw new Error('Your account is missing its worker ID.');
+          const workerId = currentUser.userId;
+          const assignmentResponse = await fetch(`/api/v1/assignments/worker/${encodeURIComponent(currentUser.userId)}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          const assignmentPayload = await assignmentResponse.json();
+          if (!assignmentResponse.ok || !assignmentPayload.success) {
+            serviceUnavailable = assignmentResponse.status >= 500;
+            throw new Error(assignmentPayload.error?.message || 'Unable to load your village assignment.');
           }
-        })
-        .catch(() => {});
-    }
-  }, [accessToken]);
+          const assignment = assignmentPayload.data?.assignment as WorkerAssignment | null;
+          const assignedVillageIds = assignment?.assignedVillages || [];
+          const hasVillageAssignment = assignedVillageIds.length > 0;
+
+          const villagesResponse = await fetch('/api/v1/reference/villages', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          const villagesPayload = await villagesResponse.json();
+          if (!villagesResponse.ok || !villagesPayload.success) {
+            serviceUnavailable = villagesResponse.status >= 500;
+            throw new Error(villagesPayload.error?.message || 'Unable to load your assigned villages.');
+          }
+          const facilityId = assignment?.hospitalId
+            || villagesPayload.data?.hospitalId
+            || currentUser.hospitalId
+            || '';
+          const villages = ((villagesPayload.data?.villages || []) as ReferenceVillage[])
+            .filter((village) => hasVillageAssignment
+              ? assignedVillageIds.includes(village.villageId)
+              : village.hospitalId === facilityId);
+          if (!active) return;
+          if (!facilityId || villages.length === 0) {
+            setWorkerAssignment(null);
+            setReferenceVillages([]);
+            await db.workerScopes.delete(workerId);
+            setWorkerScopeError(hasVillageAssignment
+              ? 'Your assignment has no active village records. Ask your administrator to update the village assignment.'
+              : 'No active villages are available for your healthcare facility. Ask your administrator to verify the facility village list.');
+            return;
+          }
+          const workerScope: WorkerAssignment = {
+            hospitalId: facilityId,
+            assignedMandal: hasVillageAssignment ? assignment?.assignedMandal || '' : '',
+            assignedVillages: hasVillageAssignment ? assignedVillageIds : villages.map((village) => village.villageId),
+            scopeType: hasVillageAssignment ? 'assignment' : 'facility',
+          };
+          setWorkerAssignment(workerScope);
+          setHospitalId(workerScope.hospitalId);
+          setMandal(workerScope.assignedMandal);
+          setReferenceVillages(villages);
+          try {
+            await db.workerScopes.put({
+              workerId,
+              hospitalId: workerScope.hospitalId,
+              scopeType: workerScope.scopeType,
+              assignedMandal: workerScope.assignedMandal,
+              assignedVillages: workerScope.assignedVillages,
+              villages,
+              cachedAt: Date.now(),
+            });
+          } catch (cacheError) {
+            if (active) {
+              setWorkerScopeError(
+                `Your assignment is loaded, but could not be saved for offline use: ${
+                  cacheError instanceof Error ? cacheError.message : 'local storage is unavailable.'
+                }`
+              );
+            }
+          }
+        } else {
+          const villagesResponse = await fetch('/api/v1/reference/villages', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          const villagesPayload = await villagesResponse.json();
+          if (villagesResponse.ok && villagesPayload.success && Array.isArray(villagesPayload.data?.villages)) {
+            setReferenceVillages(villagesPayload.data.villages);
+          }
+        }
+      } catch (err) {
+        if (!active) return;
+        if (isFieldWorker && currentUser?.userId
+          && (!navigator.onLine || err instanceof TypeError || serviceUnavailable)) {
+          try {
+            const cachedScope = await db.workerScopes.get(currentUser.userId);
+            const cachedVillages = cachedScope?.villages.filter((village) =>
+              cachedScope.assignedVillages.includes(village.villageId)
+            ) || [];
+            if (!active) return;
+            if (cachedScope && cachedScope.assignedVillages.length > 0 && cachedVillages.length > 0) {
+              setWorkerAssignment({
+                hospitalId: cachedScope.hospitalId,
+                assignedMandal: cachedScope.assignedMandal,
+                assignedVillages: cachedScope.assignedVillages,
+                scopeType: cachedScope.scopeType || 'assignment',
+              });
+              setHospitalId(cachedScope.hospitalId);
+              setMandal(cachedScope.assignedMandal);
+              setReferenceVillages(cachedVillages);
+              setUsingCachedWorkerScope(true);
+              return;
+            }
+            setWorkerScopeError('Offline registration needs a saved facility village list. Connect while online to load it, or ask your administrator to verify your facility villages.');
+          } catch (cacheError) {
+            setWorkerScopeError(
+              `Unable to load your saved village assignment: ${
+                cacheError instanceof Error ? cacheError.message : 'local storage is unavailable.'
+              }`
+            );
+          }
+          return;
+        }
+        setWorkerScopeError(err instanceof Error ? err.message : 'Unable to load your assigned villages.');
+      }
+    };
+    void loadFieldWorkerScope();
+    return () => { active = false; };
+  }, [accessToken, currentUser?.userId, isFieldWorker]);
 
   useEffect(() => {
-    if (currentUser?.hospitalId) {
+    if (!isFieldWorker && currentUser?.hospitalId) {
       setHospitalId(currentUser.hospitalId);
     }
-  }, [currentUser]);
+  }, [currentUser, isFieldWorker]);
+
+  useEffect(() => {
+    if (!isFieldWorker) return;
+    setActiveTab('register');
+    setFullName('');
+    setGender('');
+    setAgeEstimated('');
+    setPhone('');
+    setGuardianName('');
+    setVillageName('');
+    setVillageId('');
+    setMandal('');
+    setOriginalAddressText('');
+    setHospitalId('');
+    setRegMethod('health_worker_assisted');
+    setShowAadhaarScan(false);
+    setIdentityDocKind('aadhaar');
+    setMaskedAadhaar('');
+    setMaskedAbha('');
+  }, [isFieldWorker]);
+
+  useEffect(() => {
+    if (activeTab !== 'register') {
+      clearAadhaarImages();
+      setShowAadhaarScan(false);
+      setMaskedAadhaar('');
+      setMaskedAbha('');
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     const updateConnection = () => setIsOnline(navigator.onLine);
@@ -190,20 +521,70 @@ export const PatientManager: React.FC<PatientManagerProps> = ({
     ageEstimated: Number(ageEstimated),
     phone: phone.trim() || undefined,
     guardianName: guardianName.trim() || undefined,
+    villageId: villageId || undefined,
     villageName: villageName.trim(),
     mandal: mandal.trim(),
     district: district.trim(),
-    originalAddressText: originalAddressText.trim(),
+    originalAddressText: isFieldWorker
+      ? [villageName.trim(), mandal.trim()].join(', ')
+      : originalAddressText.trim(),
     hospitalId,
-    maskedAadhaar: maskedAadhaar || undefined,
+    maskedAadhaar: isFieldWorker ? undefined : maskedAadhaar || undefined,
     registrationMethod: regMethod,
     consentObtained,
-    emergencyContact: emergencyName.trim() ? { name: emergencyName.trim(), phone: emergencyPhone.trim() } : undefined,
-    caregiverDetails: caregiverName.trim() ? { name: caregiverName.trim(), phone: caregiverPhone.trim() } : undefined,
+    emergencyContact: [
+      emergencyName.trim() && `Name: ${emergencyName.trim()}`,
+      emergencyPhone.trim() && `Phone: ${emergencyPhone.trim()}`,
+    ].filter(Boolean).join('; ') || undefined,
+    caregiverDetails: [
+      caregiverName.trim() && `Name: ${caregiverName.trim()}`,
+      caregiverPhone.trim() && `Phone: ${caregiverPhone.trim()}`,
+    ].filter(Boolean).join('; ') || undefined,
   });
+
+  const availableMandals = Array.from(new Set(referenceVillages.map((village) => village.mandal))).sort();
+  const registrationVillages = workerAssignment?.scopeType === 'facility'
+    ? mandal
+      ? referenceVillages.filter((village) => village.mandal.toLowerCase() === mandal.toLowerCase())
+      : []
+    : referenceVillages;
+  const selectableMandals = workerAssignment?.scopeType === 'assignment'
+    ? availableMandals.filter((availableMandal) =>
+      availableMandal.toLowerCase() === workerAssignment.assignedMandal.toLowerCase())
+    : availableMandals;
+
+  const getWorkerLocationError = () => {
+    if (!workerAssignment || referenceVillages.length === 0) {
+      return workerScopeError || 'Your authorized village list is not loaded yet. Please try again.';
+    }
+
+    const hasAuthorizedMandal = workerAssignment.scopeType === 'assignment'
+      ? mandal.trim().toLowerCase() === workerAssignment.assignedMandal.trim().toLowerCase()
+      : availableMandals.some((availableMandal) =>
+        availableMandal.trim().toLowerCase() === mandal.trim().toLowerCase());
+    if (!villageName.trim() || !hasAuthorizedMandal) {
+      return workerAssignment.scopeType === 'facility'
+        ? 'Enter a village or habitation and choose a mandal with active villages in your facility.'
+        : 'Enter a village or habitation in your assigned mandal.';
+    }
+
+    if (!villageId) return null;
+
+    const selectedVillage = referenceVillages.find((village) => village.villageId === villageId);
+    if (!selectedVillage
+      || selectedVillage.villageName.trim().toLowerCase() !== villageName.trim().toLowerCase()
+      || selectedVillage.mandal.trim().toLowerCase() !== mandal.trim().toLowerCase()) {
+      return 'Choose a listed village or enter an unlisted habitation in an authorized mandal.';
+    }
+
+    return null;
+  };
 
   const saveRegistrationOffline = async () => {
     const queuedItem = await enqueueOfflinePatient(buildPatientPayload());
+    clearAadhaarImages();
+    setMaskedAadhaar('');
+    setMaskedAbha('');
     await refreshQueue();
     setRegMsg({
       type: 'success',
@@ -263,45 +644,65 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
     setExtractingOcr(true);
     setOcrProgress(0);
     setRegMsg(null);
+    let extractedSuccessfully = false;
     try {
       const fields = await extractIdentityFromImages(images, identityDocKind, setOcrProgress);
-      const foundAnyField = Boolean(fields.fullName || fields.dob || fields.address || fields.gender || fields.guardianName);
+      const foundAnyField = isFieldWorker
+        ? Boolean(fields.fullName || fields.gender || fields.village || fields.habitation || fields.mandal)
+        : Boolean(fields.fullName || fields.dob || fields.gender || fields.guardianName || fields.address);
       if (!foundAnyField) throw new Error(ocrText('noFields'));
 
       if (fields.fullName) setFullName(fields.fullName);
       if (fields.gender) setGender(fields.gender === 'transgender' ? 'other' : fields.gender);
-      if (fields.ageEstimated) setAgeEstimated(fields.ageEstimated);
-      if (fields.dob) setDob(fields.dob);
-      if (fields.guardianName) setGuardianName(fields.guardianName);
-      if (fields.address) setOriginalAddressText(fields.address);
-      if (identityDocKind === 'aadhaar' && fields.maskedIdentity) {
+      if (!isFieldWorker && fields.ageEstimated) setAgeEstimated(fields.ageEstimated);
+      if (!isFieldWorker && fields.dob) setDob(fields.dob);
+      if (!isFieldWorker && fields.guardianName) setGuardianName(fields.guardianName);
+      if (!isFieldWorker && fields.address) setOriginalAddressText(fields.address);
+      if (isFieldWorker && workerAssignment?.scopeType === 'facility' && fields.mandal) {
+        const recognizedMandal = availableMandals.find((candidate) =>
+          candidate.trim().toLowerCase() === fields.mandal?.trim().toLowerCase()
+        );
+        if (recognizedMandal) setMandal(recognizedMandal);
+      }
+      if (isFieldWorker && (fields.village || fields.habitation)) {
+        const recognizedVillage = (fields.village || fields.habitation)!.trim();
+        const selectedVillage = referenceVillages.find((village) =>
+          village.villageName.trim().toLowerCase() === recognizedVillage.toLowerCase()
+        );
+        setVillageName(selectedVillage?.villageName || recognizedVillage);
+        setVillageId(selectedVillage?.villageId || '');
+        if (selectedVillage) setMandal(selectedVillage.mandal);
+      }
+      if (!isFieldWorker && identityDocKind === 'aadhaar' && fields.maskedIdentity) {
         setMaskedAadhaar(fields.maskedIdentity);
         setMaskedAbha('');
-      } else if (identityDocKind === 'abha' && fields.maskedIdentity) {
+      } else if (!isFieldWorker && identityDocKind === 'abha' && fields.maskedIdentity) {
         setMaskedAbha(fields.maskedIdentity);
         setMaskedAadhaar('');
       }
 
       setRegMsg({ type: 'warning', text: ocrText('reviewExtracted') });
+      extractedSuccessfully = true;
     } catch (err: any) {
       setRegMsg({ type: 'error', text: err.message || ocrText('ocrFailed') });
     } finally {
+      if (extractedSuccessfully) clearAadhaarImages();
       setExtractingOcr(false);
     }
   };
   // Online Registration
   const handleRegisterOnline = async (e: React.FormEvent) => {
     e.preventDefault();
+    const locationError = isFieldWorker ? getWorkerLocationError() : null;
+    if (locationError) {
+      setRegMsg({ type: 'error', text: locationError });
+      return;
+    }
     if (!navigator.onLine) {
-      setSubmitting(true);
-      setRegMsg(null);
-      try {
-        await saveRegistrationOffline();
-      } catch (err: any) {
-        setRegMsg({ type: 'error', text: `Could not save registration offline: ${err.message}` });
-      } finally {
-        setSubmitting(false);
-      }
+      setRegMsg({
+        type: 'warning',
+        text: 'You are offline, so no online registration was sent. Reconnect to register, or choose Save Offline (Optional) to queue it on this device.',
+      });
       return;
     }
     if (!accessToken) {
@@ -313,17 +714,29 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
     setRegMsg(null);
 
     try {
+      const patientPayload = buildPatientPayload();
+      const fingerprint = JSON.stringify(patientPayload);
+      if (pendingPatientMutationRef.current?.fingerprint !== fingerprint) {
+        pendingPatientMutationRef.current = { fingerprint, clientMutationId: crypto.randomUUID() };
+      }
       const res = await fetch('/api/v1/patients', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify(buildPatientPayload()),
+        body: JSON.stringify({
+          ...patientPayload,
+          clientMutationId: pendingPatientMutationRef.current.clientMutationId,
+        }),
       });
 
       const payload = await res.json();
       if (res.ok && payload.success) {
+        pendingPatientMutationRef.current = null;
+        clearAadhaarImages();
+        setMaskedAadhaar('');
+        setMaskedAbha('');
         const patient = payload.data?.patient;
         const dup = payload.data?.duplicateReview;
 
@@ -347,11 +760,10 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
       }
     } catch (err: any) {
       if (err instanceof TypeError || !navigator.onLine) {
-        try {
-          await saveRegistrationOffline();
-        } catch (queueErr: any) {
-          setRegMsg({ type: 'error', text: `Network unavailable and offline save failed: ${queueErr.message}` });
-        }
+        setRegMsg({
+          type: 'warning',
+          text: 'The server connection was lost, so registration could not be confirmed. Check My Patients before retrying, or choose Save Offline (Optional) to queue a local copy.',
+        });
       } else {
         setRegMsg({ type: 'error', text: err.message });
       }
@@ -362,35 +774,19 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
 
   // Offline Encrypted Queue Save
   const handleSaveToEncryptedQueue = async () => {
+    const locationError = isFieldWorker ? getWorkerLocationError() : null;
+    if (locationError) {
+      setRegMsg({ type: 'error', text: locationError });
+      return;
+    }
     if (!registrationFormRef.current?.reportValidity()) return;
+    setSavingOffline(true);
     try {
-      const patientPayload = {
-        fullName: fullName.trim(),
-        gender,
-        ageEstimated: Number(ageEstimated),
-        phone: phone.trim() || undefined,
-        guardianName: guardianName.trim() || undefined,
-        villageName: villageName.trim(),
-        mandal: mandal.trim(),
-        district: district.trim(),
-        originalAddressText: originalAddressText.trim(),
-        hospitalId,
-        maskedAadhaar: maskedAadhaar || undefined,
-        registrationMethod: regMethod,
-        consentObtained,
-        emergencyContact: emergencyName.trim() ? { name: emergencyName.trim(), phone: emergencyPhone.trim() } : undefined,
-        caregiverDetails: caregiverName.trim() ? { name: caregiverName.trim(), phone: caregiverPhone.trim() } : undefined,
-      };
-
-      const queuedItem = await enqueueOfflinePatient(patientPayload);
-      await refreshQueue();
-
-      setRegMsg({
-        type: 'success',
-        text: `🔒 Saved to Offline Encrypted Queue! (AES-GCM-256, Mutation ID: ${queuedItem.clientMutationId.substring(0, 16)}...). Will sync idempotently once network is available.`,
-      });
+      await saveRegistrationOffline();
     } catch (err: any) {
-      setRegMsg({ type: 'error', text: `Offline encryption failed: ${err.message}` });
+      setRegMsg({ type: 'error', text: `Could not save registration offline: ${err.message}` });
+    } finally {
+      setSavingOffline(false);
     }
   };
 
@@ -464,15 +860,15 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
           <div>
             <div className="eyebrow" style={{ marginBottom: '8px' }}>
               <span className="eyebrow-dot" style={{ background: 'var(--mint-strong)' }} />
-              <span>TRIBAL PATIENT INTAKE & REGISTRY • గిరిజన రోగుల నమోదు</span>
+              <span>{isFieldWorker ? 'ASHA FIELD WORK' : 'TRIBAL PATIENT INTAKE & REGISTRY • గిరిజన రోగుల నమోదు'}</span>
             </div>
             <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.4rem', fontWeight: 600, margin: '0 0 8px', color: 'var(--slate)' }}>
-              Patients Registry & Idempotent Offline Sync
+              {isFieldWorker ? 'Patient workspace' : 'Patients Registry & Idempotent Offline Sync'}
             </h2>
             <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', maxWidth: '820px', margin: 0, lineHeight: 1.5 }}>
-              <strong>OTP-Free Registration</strong> designed for remote agency habitations with zero cellular connectivity. 
-              Features a composite duplicate-detection engine (duplicates are <em>never auto-merged</em>), verbatim address preservation, 
-              and client-side <strong>AES-GCM-256 WebCrypto</strong> offline queue surviving reloads and syncing exactly once.
+              {isFieldWorker
+                ? 'Register patients in your assigned villages and review their care records. Your work is saved securely when offline.'
+                : <><strong>OTP-Free Registration</strong> designed for remote agency habitations with zero cellular connectivity. Features a composite duplicate-detection engine (duplicates are <em>never auto-merged</em>), verbatim address preservation, and client-side <strong>AES-GCM-256 WebCrypto</strong> offline queue surviving reloads and syncing exactly once.</>}
             </p>
           </div>
 
@@ -510,22 +906,26 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
           className={`auth-tab ${activeTab === 'register' ? 'active' : ''}`}
           onClick={() => setActiveTab('register')}
         >
-          📝 OTP-Free Registration
+          📝 {isFieldWorker ? 'Register Patient' : 'OTP-Free Registration'}
         </button>
         <button
           type="button"
           className={`auth-tab ${activeTab === 'patients' ? 'active' : ''}`}
           onClick={() => setActiveTab('patients')}
         >
-          🗂️ Patient Registry ({patients.length})
+          🗂️ {isFieldWorker
+            ? workerAssignment?.scopeType === 'facility' ? 'My Patient Registrations' : 'My Assigned Patients'
+            : 'Patient Registry'} ({patients.length})
         </button>
-        <button
-          type="button"
-          className={`auth-tab ${activeTab === 'duplicates' ? 'active' : ''}`}
-          onClick={() => setActiveTab('duplicates')}
-        >
-          ⚠️ Duplicate Review Queue ({reviews.length})
-        </button>
+        {!isFieldWorker && (
+          <button
+            type="button"
+            className={`auth-tab ${activeTab === 'duplicates' ? 'active' : ''}`}
+            onClick={() => setActiveTab('duplicates')}
+          >
+            ⚠️ Duplicate Review Queue ({reviews.length})
+          </button>
+        )}
         <button
           type="button"
           className={`auth-tab ${activeTab === 'queue' ? 'active' : ''}`}
@@ -542,14 +942,30 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
             <div className="card-header">
               <div>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
-                  Smart Patient Registration (OTP-Free)
+                  {isFieldWorker ? 'Register a Patient in Your Assigned Area' : 'Smart Patient Registration (OTP-Free)'}
                 </h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '4px 0 0' }}>
-                  Choose registration method. Generates standard Unique Tribal Patient ID (e.g. <code>PAD-2026-XXXXX</code>).
+                  {isFieldWorker
+                    ? 'Register online first for immediate confirmation. Saving offline is optional; records remain pending until synced.'
+                    : <>Choose registration method. Generates standard Unique Tribal Patient ID (e.g. <code>PAD-2026-XXXXX</code>).</>}
                 </p>
               </div>
-              <span className="badge badge-mock">Zero-Connectivity Ready</span>
+              <span className="badge badge-mock">{isFieldWorker ? 'Offline-ready' : 'Zero-Connectivity Ready'}</span>
             </div>
+
+            {isFieldWorker && (
+              <div role="status" style={{ marginTop: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: workerScopeError ? 'rgba(230, 57, 70, 0.12)' : usingCachedWorkerScope ? 'rgba(255, 183, 3, 0.12)' : 'rgba(6, 214, 160, 0.10)', color: 'var(--color-text-primary)', fontSize: '0.84rem' }}>
+                {workerScopeError || (usingCachedWorkerScope
+                  ? workerAssignment?.scopeType === 'facility'
+                    ? `Using the saved village list for ${workerAssignment.hospitalId}. Choose a mandal and village; the server will re-check facility access when records sync.`
+                    : `Using your saved assignment for ${workerAssignment?.assignedMandal}. Registrations stay on this device until sync, when the server re-checks your access.`
+                  : workerAssignment
+                    ? workerAssignment.scopeType === 'facility'
+                      ? `Select any active village in your facility (${workerAssignment.hospitalId}).`
+                      : `Assigned facility: ${workerAssignment.hospitalId} · Mandal: ${workerAssignment.assignedMandal}`
+                    : 'Loading your facility villages...')}
+              </div>
+            )}
 
             <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: `1px solid ${isOnline ? 'var(--color-status-success)' : 'var(--color-status-warning)'}`, background: isOnline ? 'rgba(6, 214, 160, 0.10)' : 'rgba(255, 183, 3, 0.12)' }}>
               <span style={{ fontSize: '0.82rem', color: 'var(--color-text-primary)' }}>
@@ -562,7 +978,24 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
             </div>
 
             {/* 3-Method Registration Selector */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginTop: '14px' }}>
+            {isFieldWorker && (
+              <button
+                type="button"
+                className={`auth-tab ${showAadhaarScan ? 'active' : ''}`}
+                aria-pressed={showAadhaarScan}
+                onClick={() => {
+                  if (showAadhaarScan) {
+                    clearAadhaarImages();
+                    setMaskedAadhaar('');
+                  }
+                  setShowAadhaarScan((visible) => !visible);
+                }}
+                style={{ marginTop: '14px' }}
+              >
+                🪪 {ocrText('aadhaarCard')}
+              </button>
+            )}
+            {!isFieldWorker && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginTop: '14px' }}>
               <button
                 type="button"
                 className={`auth-tab ${regMethod === 'aadhaar_assisted' ? 'active' : ''}`}
@@ -587,11 +1020,11 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
               >
                 👩‍⚕️ Health Worker Assisted
               </button>
-            </div>
+            </div>}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '14px' }}>
               {/* MODE A: AADHAAR OCR EXTRACTION BOX */}
-              {regMethod === 'aadhaar_assisted' && (
+              {(regMethod === 'aadhaar_assisted' || (isFieldWorker && showAadhaarScan)) && (
                 <div style={{ padding: '12px', background: 'rgba(56, 189, 248, 0.08)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <strong style={{ fontSize: '0.86rem', color: 'var(--color-brand-primary)' }}>
@@ -603,7 +1036,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                     {ocrText('privacyNote')}
                   </p>
 
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                  {!isFieldWorker && <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                     {(['aadhaar', 'abha'] as const).map((kind) => (
                       <button
                         key={kind}
@@ -619,14 +1052,25 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                         {kind === 'aadhaar' ? ocrText('aadhaarCard') : ocrText('abhaCard')}
                       </button>
                     ))}
-                  </div>
+                  </div>}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div style={{ border: '1px dashed rgba(255,255,255,0.25)', padding: '10px', borderRadius: '6px', textAlign: 'center', background: 'rgba(255,255,255,0.03)' }}>
                       <span style={{ fontSize: '0.78rem', display: 'block', marginBottom: '4px', fontWeight: 600 }}>{ocrText('frontImage')}</span>
+                      {isFieldWorker && <button
+                        type="button"
+                        className="button-outline"
+                        onClick={() => void startAadhaarCamera('front')}
+                        disabled={extractingOcr}
+                        style={{ marginBottom: '8px' }}
+                      >
+                        📷 {publicRegText('useCamera')}
+                      </button>}
                       <input
+                        ref={aadhaarFrontInputRef}
                         type="file"
                         accept="image/*"
+                        capture="environment"
                         style={{ fontSize: '0.72rem', maxWidth: '100%' }}
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
@@ -649,9 +1093,20 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                     </div>
                     <div style={{ border: '1px dashed rgba(255,255,255,0.25)', padding: '10px', borderRadius: '6px', textAlign: 'center', background: 'rgba(255,255,255,0.03)' }}>
                       <span style={{ fontSize: '0.78rem', display: 'block', marginBottom: '4px', fontWeight: 600 }}>{ocrText('backImage')}</span>
+                      {isFieldWorker && <button
+                        type="button"
+                        className="button-outline"
+                        onClick={() => void startAadhaarCamera('back')}
+                        disabled={extractingOcr}
+                        style={{ marginBottom: '8px' }}
+                      >
+                        📷 {publicRegText('useCamera')}
+                      </button>}
                       <input
+                        ref={aadhaarBackInputRef}
                         type="file"
                         accept="image/*"
+                        capture="environment"
                         style={{ fontSize: '0.72rem', maxWidth: '100%' }}
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
@@ -674,6 +1129,23 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                     </div>
                   </div>
 
+                  {cameraSide && (
+                    <div className="adp-camera">
+                      <video ref={cameraVideoRef} playsInline muted autoPlay />
+                      <div className="adp-camera-frame" aria-hidden="true" />
+                      <p>{publicRegText('cameraHelp')}</p>
+                      <div className="adp-camera-actions">
+                        <button type="button" className="button-outline" onClick={stopAadhaarCamera}>
+                          {getClientTranslation(translations[uiLanguage], 'common.cancel')}
+                        </button>
+                        <button type="button" className="button-forest-primary button" onClick={captureAadhaarCamera}>
+                          {publicRegText('capture')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {cameraError && <p role="alert" style={{ color: 'var(--color-status-error)' }}>{cameraError}</p>}
+
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap', gap: '8px' }}>
                     <button
                       type="button"
@@ -684,12 +1156,12 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                     >
                       {extractingOcr ? `${ocrText('scanning')} ${ocrProgress}%` : ocrText('extractButton')}
                     </button>
-                    {maskedAadhaar && (
+                    {!isFieldWorker && maskedAadhaar && (
                       <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 600 }}>
                         🔒 {ocrText('maskedAadhaar')}: {maskedAadhaar}
                       </span>
                     )}
-                    {maskedAbha && (
+                    {!isFieldWorker && maskedAbha && (
                       <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 600 }}>
                         🔒 {ocrText('maskedAbha')}: {maskedAbha}
                       </span>
@@ -728,7 +1200,10 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                       Quick Village Picker:
                     </span>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {['Vankachinta', 'Minumuluru', 'Dumbriguda', 'Araku Valley', 'Munchingiputtu', 'Chintapalli'].map((v) => (
+                      {(isFieldWorker
+                        ? referenceVillages.map((village) => village.villageName)
+                        : ['Vankachinta', 'Minumuluru', 'Dumbriguda', 'Araku Valley', 'Munchingiputtu', 'Chintapalli']
+                      ).map((v) => (
                         <button
                           key={v}
                           type="button"
@@ -741,7 +1216,11 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                           }}
                           onClick={() => {
                             setVillageName(v);
-                            if (v === 'Vankachinta' || v === 'Minumuluru') setMandal('Paderu');
+                            if (isFieldWorker) {
+                              const selectedVillage = referenceVillages.find((village) => village.villageName === v);
+                              setVillageId(selectedVillage?.villageId || '');
+                              if (selectedVillage?.mandal) setMandal(selectedVillage.mandal);
+                            } else if (v === 'Vankachinta' || v === 'Minumuluru') setMandal('Paderu');
                             else if (v === 'Dumbriguda') setMandal('Dumbriguda');
                             else if (v === 'Araku Valley') setMandal('Araku Valley');
                             else if (v === 'Munchingiputtu') setMandal('Munchingiputtu');
@@ -763,7 +1242,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                         type="button"
                         className="button-outline"
                         style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                        onClick={() => setAgeEstimated((prev) => Math.max(1, Math.min(115, prev + delta)))}
+                        onClick={() => setAgeEstimated((prev) => Math.max(1, Math.min(115, Number(prev || 0) + delta)))}
                       >
                         {delta > 0 ? `+${delta}` : delta}
                       </button>
@@ -790,8 +1269,10 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                   <select
                     className="form-select"
                     value={gender}
-                    onChange={(e) => setGender(e.target.value as any)}
+                    onChange={(e) => setGender(e.target.value as 'male' | 'female' | 'other' | '')}
+                    required
                   >
+                    {isFieldWorker && <option value="" disabled>Select gender</option>}
                     <option value="male">👨 Male</option>
                     <option value="female">👩 Female</option>
                     <option value="other">⚧ Other</option>
@@ -806,7 +1287,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                     type="number"
                     className="form-input"
                     value={ageEstimated}
-                    onChange={(e) => setAgeEstimated(Number(e.target.value))}
+                    onChange={(e) => setAgeEstimated(e.target.value ? Number(e.target.value) : '')}
                     min={1}
                     max={120}
                     required
@@ -909,82 +1390,129 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="form-group">
-                  <label className="form-label">Mandal</label>
+                  <label className="form-label">
+                    {isFieldWorker && workerAssignment?.scopeType === 'assignment' ? 'Assigned Mandal' : 'Mandal'}
+                  </label>
                   <input
                     type="text"
                     className="form-input"
                     value={mandal}
-                    onChange={(e) => setMandal(e.target.value)}
-                    placeholder="e.g. Paderu, Araku Valley"
+                    onChange={(e) => {
+                      const nextMandal = e.target.value;
+                      setMandal(nextMandal);
+                      if (regMsg?.type === 'error') setRegMsg(null);
+                      const selectedVillage = referenceVillages.find((village) => village.villageId === villageId);
+                      if (isFieldWorker && selectedVillage
+                        && selectedVillage.mandal.toLowerCase() !== nextMandal.trim().toLowerCase()) {
+                        setVillageId('');
+                        setVillageName('');
+                      }
+                    }}
+                    list={isFieldWorker ? 'worker-mandal-suggestions' : undefined}
+                    placeholder={isFieldWorker
+                      ? workerAssignment?.scopeType === 'assignment' ? 'Type your assigned mandal' : 'Type or select a mandal'
+                      : 'e.g. Paderu, Araku Valley'}
                     required
                   />
+                  {isFieldWorker && selectableMandals.length > 0 && (
+                    <datalist id="worker-mandal-suggestions">
+                      {selectableMandals.map((availableMandal) => (
+                        <option key={availableMandal} value={availableMandal} />
+                      ))}
+                    </datalist>
+                  )}
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Village / Habitation Name</label>
+                  <label className="form-label">
+                    {isFieldWorker && workerAssignment?.scopeType === 'assignment'
+                      ? 'Assigned Village / Habitation'
+                      : 'Village / Habitation Name'}
+                  </label>
                   <input
                     type="text"
                     className="form-input"
                     value={villageName}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      setVillageName(val);
-                      const matched = referenceVillages.find(
-                        (v) => v.villageName.toLowerCase() === val.trim().toLowerCase()
+                      const nextVillageName = e.target.value;
+                      setVillageName(nextVillageName);
+                      if (regMsg?.type === 'error') setRegMsg(null);
+                      const candidates = referenceVillages.filter(
+                        (village) => village.villageName.trim().toLowerCase() === nextVillageName.trim().toLowerCase()
                       );
-                      if (matched?.mandal) {
-                        setMandal(matched.mandal);
-                      }
+                      const selectedVillage = candidates.find(
+                        (village) => village.mandal.trim().toLowerCase() === mandal.trim().toLowerCase()
+                      ) || (candidates.length === 1 ? candidates[0] : undefined);
+                      setVillageId(selectedVillage?.villageId || '');
+                      if (selectedVillage) setMandal(selectedVillage.mandal);
                     }}
-                    list="village-suggestions"
-                    placeholder="e.g. Vankachinta, Minumuluru"
+                    list={isFieldWorker ? 'worker-village-suggestions' : 'village-suggestions'}
+                    placeholder="Enter village name manually or choose a suggestion"
                     required
                   />
                   {referenceVillages.length > 0 && (
-                    <datalist id="village-suggestions">
-                      {referenceVillages.map((v, idx) => (
-                        <option key={`${v.villageName}-${idx}`} value={v.villageName}>
-                          {v.villageName} ({v.mandal})
-                        </option>
+                    <datalist id={isFieldWorker ? 'worker-village-suggestions' : 'village-suggestions'}>
+                      {(isFieldWorker && workerAssignment?.scopeType === 'facility' && mandal
+                        ? registrationVillages
+                        : referenceVillages).map((village) => (
+                        <option
+                          key={village.villageId}
+                          value={village.villageName}
+                          label={`${village.villageName} (${village.mandal})`}
+                        />
                       ))}
                     </datalist>
+                  )}
+                  {isFieldWorker && (
+                    <span style={{ display: 'block', marginTop: '4px', fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                      {workerAssignment?.scopeType === 'facility' && referenceVillages.length > 0
+                        ? 'Manual entry is enabled. Unlisted habitations are grouped under an active village in the selected facility mandal.'
+                        : workerAssignment && referenceVillages.length > 0
+                          ? 'Manual entry is enabled for villages and habitations within your assigned mandal.'
+                          : 'No active facility villages are available. Ask your administrator to verify the facility village list.'}
+                    </span>
                   )}
                 </div>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Affiliated Healthcare Facility</label>
-                <select
-                  className="form-select"
-                  value={hospitalId}
-                  onChange={(e) => setHospitalId(e.target.value)}
-                >
-                  <option value="hosp_paderu_dh">District Hospital Paderu (DH Paderu)</option>
-                  <option value="hosp_araku_ah">Area Hospital Araku (AH Araku)</option>
-                  <option value="hosp_chintapalli_chc">Community Health Centre Chintapalli (CHC)</option>
-                  <option value="hosp_hukumpeta_phc">Primary Health Centre Hukumpeta (PHC)</option>
-                </select>
+                {isFieldWorker ? (
+                  <input className="form-input" value={hospitalId} readOnly aria-readonly="true" />
+                ) : (
+                  <select
+                    className="form-select"
+                    value={hospitalId}
+                    onChange={(e) => setHospitalId(e.target.value)}
+                  >
+                    <option value="hosp_paderu_dh">District Hospital Paderu (DH Paderu)</option>
+                    <option value="hosp_araku_ah">Area Hospital Araku (AH Araku)</option>
+                    <option value="hosp_chintapalli_chc">Community Health Centre Chintapalli (CHC)</option>
+                    <option value="hosp_hukumpeta_phc">Primary Health Centre Hukumpeta (PHC)</option>
+                  </select>
+                )}
                 <span style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)' }}>
                   Nearest clinical referral facility for triage and teleconsultation navigation.
                 </span>
               </div>
 
-              {/* Original Address Text: Mandatory & Verbatim */}
-              <div className="form-group">
-                <label className="form-label">
-                  Original Submitted Address Text (Stored Verbatim)
-                </label>
-                <textarea
-                  className="form-input"
-                  rows={2}
-                  value={originalAddressText}
-                  onChange={(e) => setOriginalAddressText(e.target.value)}
-                  required
-                />
-                <span style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)' }}>
-                  Mandatory: Preserved without transformation to capture local tribal dialect landmarks and hamlet directions.
-                </span>
-              </div>
+              {!isFieldWorker && (
+                <div className="form-group">
+                  <label className="form-label">
+                    Original Submitted Address Text (Stored Verbatim)
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows={2}
+                    value={originalAddressText}
+                    onChange={(e) => setOriginalAddressText(e.target.value)}
+                    required
+                  />
+                  <span style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)' }}>
+                    Mandatory: Preserved without transformation to capture local tribal dialect landmarks and hamlet directions.
+                  </span>
+                </div>
+              )}
 
               {/* Informed Consent Checkbox */}
               <div className="form-group" style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -1033,20 +1561,21 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
                 <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={submitting || savingOffline || (isFieldWorker && (!workerAssignment || referenceVillages.length === 0))}
+                  style={{ flex: 1, fontSize: '0.88rem' }}
+                >
+                  {submitting ? 'Registering...' : '🚀 Register Patient Online'}
+                </button>
+                <button
                   type="button"
                   className="button-outline"
                   onClick={handleSaveToEncryptedQueue}
+                  disabled={submitting || savingOffline || (isFieldWorker && (!workerAssignment || referenceVillages.length === 0))}
                   style={{ flex: 1, fontSize: '0.88rem' }}
                 >
-                  🔒 Save to Encrypted Offline Queue
-                </button>
-                <button
-                  type="submit"
-                  className="button-coral"
-                  disabled={submitting}
-                  style={{ flex: 1, fontSize: '0.88rem' }}
-                >
-                  {submitting ? 'Registering...' : '🚀 Submit Online'}
+                  {savingOffline ? 'Saving Offline...' : '🔒 Save Offline (Optional)'}
                 </button>
               </div>
             </div>
@@ -1071,19 +1600,6 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                 🛡️ <strong>Safety Invariant:</strong> Scores $\ge 75$ open a review ticket. The platform <em>never auto-merges</em> clinical records to prevent disastrous patient misidentification.
               </div>
             </div>
-
-            <div className="card" style={{ borderLeft: '4px solid var(--color-brand-primary)' }}>
-              <h4 style={{ fontSize: '0.98rem', fontWeight: 700, margin: '0 0 8px' }}>
-                Offline Queue Cryptographic Strength
-              </h4>
-              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-                <div>🔐 <strong>Algorithm:</strong> AES-GCM (Galois/Counter Mode) 256-bit key</div>
-                <div>🔑 <strong>Key Derivation:</strong> PBKDF2-HMAC-SHA256 (100,000 iterations)</div>
-                <div>🎲 <strong>Nonce / IV:</strong> 96-bit unique cryptographically random IV per record</div>
-                <div>🛡️ <strong>Integrity Tag:</strong> 128-bit AEAD authentication tag</div>
-                <div>💾 <strong>Persistence:</strong> IndexedDB (Dexie) stores only ciphertext; zero plaintext at rest.</div>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -1093,7 +1609,9 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
-              Agency Patient Registry ({filteredPatients.length})
+              {isFieldWorker
+                ? workerAssignment?.scopeType === 'facility' ? 'My Patient Registrations' : 'My Assigned Patients'
+                : 'Agency Patient Registry'} ({filteredPatients.length})
             </h3>
             <input
               type="text"
@@ -1106,6 +1624,7 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
           </div>
 
           {loadingPatients && <div style={{ color: 'var(--color-text-muted)', padding: '24px', textAlign: 'center' }}>Loading patients...</div>}
+          {patientLoadError && <div role="alert" style={{ color: 'var(--color-status-danger)', padding: '12px 0' }}>{patientLoadError}</div>}
 
           {!loadingPatients && filteredPatients.length === 0 && (
             <div style={{ color: 'var(--color-text-secondary)', padding: '32px 0', textAlign: 'center' }}>
@@ -1122,36 +1641,100 @@ function compressCardImage(file: File, maxDim = 1200): Promise<string> {
                     <th>Full Name</th>
                     <th>Age/Gender</th>
                     <th>Village & Mandal</th>
-                    <th>Original Submitted Address</th>
-                    <th>Duplicate Status</th>
+                    {!isFieldWorker && <th>Original Submitted Address</th>}
+                    {!isFieldWorker && <th>Duplicate Status</th>}
+                    {isFieldWorker && <th>Screening</th>}
+                    {isFieldWorker && <th>AI Screening</th>}
+                    {isFieldWorker && <th>Referral</th>}
+                    {isFieldWorker && <th>Appointment</th>}
                     <th>Registered</th>
+                    {isFieldWorker && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPatients.map((p) => (
-                    <tr key={p.patientId}>
-                      <td><code style={{ color: 'var(--color-brand-accent)', fontWeight: 700 }}>{p.patientId}</code></td>
-                      <td><strong>{p.fullName}</strong></td>
-                      <td>{p.ageEstimated} yrs • {p.gender.toUpperCase()}</td>
-                      <td>{p.villageName} ({p.mandal})</td>
-                      <td style={{ maxWidth: '240px', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-                        {p.originalAddressText}
-                      </td>
-                      <td>
-                        {p.isDuplicateCandidate ? (
-                          <span className="badge" style={{ background: 'var(--color-status-warning)', color: '#000', fontSize: '0.7rem' }}>
-                            ⚠️ {p.duplicateReviewStatus.toUpperCase()} ({p.matchScore} pts)
-                          </span>
-                        ) : (
-                          <span className="badge badge-real" style={{ fontSize: '0.7rem' }}>
-                            ✓ UNIQUE
-                          </span>
+                    <React.Fragment key={p.patientId}>
+                      <tr>
+                        <td><code style={{ color: 'var(--color-brand-accent)', fontWeight: 700 }}>{p.patientId}</code></td>
+                        <td><strong>{p.fullName}</strong></td>
+                        <td>{p.ageEstimated} yrs • {p.gender.toUpperCase()}</td>
+                        <td>{p.villageName} ({p.mandal})</td>
+                        {!isFieldWorker && <td style={{ maxWidth: '240px', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{p.originalAddressText}</td>}
+                        {!isFieldWorker && <td>
+                          {p.isDuplicateCandidate ? (
+                            <span className="badge" style={{ background: 'var(--color-status-warning)', color: '#000', fontSize: '0.7rem' }}>
+                              ⚠️ {p.duplicateReviewStatus.toUpperCase()} ({p.matchScore} pts)
+                            </span>
+                          ) : (
+                            <span className="badge badge-real" style={{ fontSize: '0.7rem' }}>✓ UNIQUE</span>
+                          )}
+                        </td>}
+                        {isFieldWorker && <td>{(p.flow?.screening || 'not_started').replace(/_/g, ' ')}</td>}
+                        {isFieldWorker && <td>{(p.flow?.aiScreening?.status || 'not_started').replace(/_/g, ' ')}</td>}
+                        {isFieldWorker && <td>{(p.flow?.referral || 'not_referred').replace(/_/g, ' ')}</td>}
+                        {isFieldWorker && <td>{(p.flow?.appointment || 'not_booked').replace(/_/g, ' ')}</td>}
+                        <td style={{ fontSize: '0.75rem' }}>
+                          {new Date(p.registeredAt).toLocaleDateString()}
+                        </td>
+                        {isFieldWorker && (
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button
+                              type="button"
+                              className="button-outline"
+                              onClick={() => void togglePatientProfile(p.patientId)}
+                            >
+                              {expandedPatientId === p.patientId ? 'Hide profile' : 'Check-up history'}
+                            </button>
+                            {onStartAiScreening && (
+                              <button
+                                type="button"
+                                className="button-forest-primary button"
+                                style={{ marginLeft: 8 }}
+                                onClick={() => onStartAiScreening({ patientId: p.patientId, fullName: p.fullName })}
+                              >
+                                Start AI screening
+                              </button>
+                            )}
+                          </td>
                         )}
-                      </td>
-                      <td style={{ fontSize: '0.75rem' }}>
-                        {new Date(p.registeredAt).toLocaleDateString()}
-                      </td>
-                    </tr>
+                      </tr>
+                      {isFieldWorker && expandedPatientId === p.patientId && (
+                        <tr>
+                          <td colSpan={9} style={{ padding: 16, background: 'var(--color-surface-subtle, #f8faf8)' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                              <div>
+                                <strong>{p.fullName} · Check-up history</strong>
+                                <p style={{ margin: '4px 0', color: 'var(--color-text-secondary)' }}>
+                                  Screening: {(p.flow?.screening || 'not_started').replace(/_/g, ' ')} ·
+                                  {' '}AI screening: {(p.flow?.aiScreening?.status || 'not_started').replace(/_/g, ' ')} ·
+                                  {' '}Referral: {(p.flow?.referral || 'not_referred').replace(/_/g, ' ')} ·
+                                  {' '}Appointment: {(p.flow?.appointment || 'not_booked').replace(/_/g, ' ')}
+                                </p>
+                              </div>
+                              {loadingScreeningHistory && <p role="status">Loading AI screening history...</p>}
+                              {screeningHistoryError && <p role="alert" style={{ color: 'var(--color-status-danger)' }}>{screeningHistoryError}</p>}
+                              {!loadingScreeningHistory && !screeningHistoryError && screeningHistory.length === 0 && (
+                                <p style={{ margin: 0 }}>No AI screening records yet.</p>
+                              )}
+                              {screeningHistory.map((record) => (
+                                <article key={record.screeningId} style={{ padding: 12, border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface, #fff)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                                    <strong>{record.riskLevel.replace(/_/g, ' ')} · {record.findingTypeLabel || 'Screening completed'}</strong>
+                                    <span>{new Date(record.createdAt).toLocaleString()}</span>
+                                  </div>
+                                  <p style={{ margin: '8px 0' }}>
+                                    Clinician review: {record.clinicianReview.status.replace(/_/g, ' ').toLowerCase()}.
+                                    {' '}{record.nextStep.text} (within {record.nextStep.withinDays} days)
+                                  </p>
+                                  {record.summary && <p style={{ margin: '4px 0' }}>{record.summary}</p>}
+                                  <small>{record.disclaimer}</small>
+                                </article>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

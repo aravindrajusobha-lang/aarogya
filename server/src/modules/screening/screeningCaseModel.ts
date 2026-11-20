@@ -217,6 +217,6 @@ const ScreeningCaseSchema = new Schema<IScreeningCase>(
   }
 );
 
-export const ScreeningCase =
-  mongoose.models.ScreeningCase ||
+export const ScreeningCase: mongoose.Model<IScreeningCase> =
+  (mongoose.models.ScreeningCase as mongoose.Model<IScreeningCase> | undefined) ||
   mongoose.model<IScreeningCase>('ScreeningCase', ScreeningCaseSchema);

@@ -137,17 +137,178 @@ describe('Phase 3 Administration: Health Worker Village Assignments & Scoping', 
     if (replSet) await replSet.stop();
   });
 
-  it('HEALTH WORKER SCOPE IS EMPTY WITHOUT EXPLICIT ASSIGNMENT', async () => {
-    // Unassigned ASHA requests village reference data: scope comes ONLY from explicit assignments!
+  it('unassigned ASHA can select active villages from their own facility only', async () => {
     const res = await request(app)
-      .get('/api/v1/reference/villages')
+      .get('/api/v1/reference/villages?hospitalId=hosp_araku_area')
       .set('Authorization', `Bearer ${unassignedAshaToken}`);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.assignedScopeOnly).toBe(true);
-    expect(res.body.data.villages).toEqual([]);
-    expect(res.body.data.total).toBe(0);
+    expect(res.body.data.facilityScopeOnly).toBe(true);
+    expect(res.body.data.hospitalId).toBe('hosp_hukumpeta_phc');
+    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.villages.map((village: any) => village.villageId).sort()).toEqual([
+      'VIL-HUK-001',
+      'VIL-HUK-002',
+      'VIL-HUK-003',
+    ]);
+  });
+
+  it('allows unassigned ASHA patient registration and offline sync only within their facility', async () => {
+    const registered = await request(app)
+      .post('/api/v1/patients')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        fullName: 'Facility Scope Patient',
+        gender: 'female',
+        ageEstimated: 36,
+        villageId: 'VIL-HUK-003',
+        villageName: 'Pedda Garuvu',
+        mandal: 'Hukumpeta',
+        district: 'ASR',
+        originalAddressText: 'Upper Garuvu',
+        hospitalId: 'hosp_hukumpeta_phc',
+      });
+
+    expect(registered.status).toBe(201);
+    expect(registered.body.data.patient.villageId).toBe('VIL-HUK-003');
+
+    const ownPatient = await request(app)
+      .get(`/api/v1/patients/${registered.body.data.patient.patientId}`)
+      .set('Authorization', `Bearer ${unassignedAshaToken}`);
+    expect(ownPatient.status).toBe(200);
+
+    const crossFacilityRegistration = await request(app)
+      .post('/api/v1/patients')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        fullName: 'Outside Facility Patient',
+        gender: 'male',
+        ageEstimated: 40,
+        villageId: 'VIL-ARA-001',
+        villageName: 'Padmapuram',
+        mandal: 'Araku Valley',
+        district: 'ASR',
+        originalAddressText: 'Padmapuram',
+        hospitalId: 'hosp_hukumpeta_phc',
+      });
+
+    expect(crossFacilityRegistration.status).toBe(403);
+
+    const synced = await request(app)
+      .post('/api/v1/sync/batch')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        items: [{
+          clientMutationId: 'facility-village-offline-registration',
+          type: 'patient_registration',
+          payload: {
+            fullName: 'Offline Facility Patient',
+            gender: 'female',
+            ageEstimated: 28,
+            villageId: 'VIL-HUK-002',
+            villageName: 'Ganthaguda',
+            mandal: 'Hukumpeta',
+            district: 'ASR',
+            originalAddressText: 'Ganthaguda Old',
+            hospitalId: 'hosp_hukumpeta_phc',
+          },
+        }],
+      });
+
+    expect(synced.status).toBe(200);
+    expect(synced.body.data.results[0].status).toBe('synced');
+    const outsideFacilitySync = await request(app)
+      .post('/api/v1/sync/batch')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        items: [{
+          clientMutationId: 'facility-village-outside-sync',
+          type: 'patient_registration',
+          payload: {
+            fullName: 'Offline Outside Facility Patient',
+            gender: 'male',
+            ageEstimated: 34,
+            villageId: 'VIL-ARA-001',
+            villageName: 'Padmapuram',
+            mandal: 'Araku Valley',
+            district: 'ASR',
+            originalAddressText: 'Padmapuram',
+            hospitalId: 'hosp_hukumpeta_phc',
+          },
+        }],
+      });
+
+    expect(outsideFacilitySync.status).toBe(200);
+    expect(outsideFacilitySync.body.data.results[0].status).toBe('failed');
+
+    const patients = await request(app)
+      .get('/api/v1/patients')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`);
+    expect(patients.status).toBe(200);
+    expect(patients.body.data.facilityScopeOnly).toBe(true);
+    expect(patients.body.data.ownRegistrationsOnly).toBe(true);
+    expect(patients.body.data.patients).toHaveLength(2);
+  });
+
+  it('allows manually entered habitations only within an active facility mandal', async () => {
+    const manualRegistration = await request(app)
+      .post('/api/v1/patients')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        fullName: 'Kolaguda Online Patient',
+        gender: 'female',
+        ageEstimated: 32,
+        villageName: 'Kolaguda',
+        mandal: 'Hukumpeta',
+        district: 'ASR',
+        originalAddressText: 'Kolaguda habitation',
+        hospitalId: 'hosp_hukumpeta_phc',
+      });
+
+    expect(manualRegistration.status).toBe(201);
+    expect(manualRegistration.body.data.patient.villageName).toBe('Kolaguda');
+    expect(['VIL-HUK-001', 'VIL-HUK-002', 'VIL-HUK-003']).toContain(
+      manualRegistration.body.data.patient.villageId
+    );
+
+    const outsideMandal = await request(app)
+      .post('/api/v1/patients')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        fullName: 'Outside Mandal Patient',
+        gender: 'male',
+        ageEstimated: 35,
+        villageName: 'Kolaguda',
+        mandal: 'Araku Valley',
+        district: 'ASR',
+        originalAddressText: 'Kolaguda habitation',
+        hospitalId: 'hosp_hukumpeta_phc',
+      });
+    expect(outsideMandal.status).toBe(403);
+
+    const manualOfflineSync = await request(app)
+      .post('/api/v1/sync/batch')
+      .set('Authorization', `Bearer ${unassignedAshaToken}`)
+      .send({
+        items: [{
+          clientMutationId: 'facility-manual-habitation-sync',
+          type: 'patient_registration',
+          payload: {
+            fullName: 'Kolaguda Offline Patient',
+            gender: 'female',
+            ageEstimated: 27,
+            villageName: 'Kolaguda',
+            mandal: 'Hukumpeta',
+            district: 'ASR',
+            originalAddressText: 'Near Kolaguda stream',
+            hospitalId: 'hosp_hukumpeta_phc',
+          },
+        }],
+      });
+
+    expect(manualOfflineSync.status).toBe(200);
+    expect(manualOfflineSync.body.data.results[0].status).toBe('synced');
   });
 
   it('allows Admin to explicitly assign villages to Health Worker', async () => {

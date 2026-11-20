@@ -15,6 +15,11 @@ import { HealthWorkerAssignment } from '../assignment/assignmentModel.js';
 import { Village } from '../reference/villageModel.js';
 import { User } from '../auth/userModel.js';
 import { AuditLog } from '../audit/auditModel.js';
+import { Appointment } from '../appointment/appointmentModel.js';
+import { Referral } from '../referral/referralModel.js';
+import { ScreeningCase } from '../screening/screeningCaseModel.js';
+import { AiScreening } from '../ai/aiScreeningModel.js';
+import { FIELD_WORKER_ROLES, getActiveWorkerAssignment, resolveWorkerPatientScope } from './workerPatientScope.js';
 
 const router = Router();
 
@@ -137,12 +142,27 @@ router.post(
     try {
       const data = req.body;
       const clientMutationId = data.clientMutationId;
+      const isFieldWorker = FIELD_WORKER_ROLES.has(req.user!.role);
+      const workerScope = isFieldWorker
+        ? await resolveWorkerPatientScope({
+            workerId: req.user!.id,
+            authenticatedHospitalId: req.user!.hospitalId,
+            requestedHospitalId: data.hospitalId,
+            mandal: data.mandal,
+            villageId: data.villageId,
+            villageName: data.villageName,
+          })
+        : null;
 
       // 1. REPLAY PREVENTION / IDEMPOTENT SYNC LEDGER CHECK
       if (clientMutationId) {
         const existingLedger = await SyncLedger.findOne({ clientMutationId });
         if (existingLedger) {
           const existingPatient = await Patient.findOne({ patientId: existingLedger.entityId });
+          if (isFieldWorker && (!existingPatient || existingPatient.villageId !== workerScope?.villageId || existingPatient.hospitalId !== workerScope?.hospitalId)) {
+            res.envelopeError('PATIENT_SCOPE_DENIED', 'This registration belongs to a patient outside your assigned scope.', undefined, 403);
+            return;
+          }
           res.status(200).envelope({
             patient: existingPatient || existingLedger.responsePayload,
             idempotentReplay: true,
@@ -156,6 +176,10 @@ router.post(
         // Secondary check on Patient collection directly
         const directPatient = await Patient.findOne({ clientMutationId });
         if (directPatient) {
+          if (isFieldWorker && (directPatient.villageId !== workerScope?.villageId || directPatient.hospitalId !== workerScope?.hospitalId)) {
+            res.envelopeError('PATIENT_SCOPE_DENIED', 'This registration belongs to a patient outside your assigned scope.', undefined, 403);
+            return;
+          }
           res.status(200).envelope({
             patient: directPatient,
             idempotentReplay: true,
@@ -170,13 +194,15 @@ router.post(
       const patientId = generateTribalPatientId();
 
       // Resolve village ID internally if not provided by patient intake
-      const resolvedVillageId = await resolveInternalVillageId(
+      const resolvedVillageId = workerScope?.villageId || await resolveInternalVillageId(
         data.villageId,
         data.villageName,
         data.mandal,
         req.user?.id,
         req.user?.role
       );
+      const resolvedVillageName = workerScope?.villageName || data.villageName;
+      const resolvedMandal = workerScope?.mandal || data.mandal;
 
       // 2. COMPOSITE DUPLICATE DETECTION EVALUATION
       const duplicateResult = await evaluateDuplicateCandidate({
@@ -186,7 +212,7 @@ router.post(
         phone: data.phone,
         guardianName: data.guardianName,
         villageId: resolvedVillageId,
-        mandal: data.mandal,
+        mandal: resolvedMandal,
       });
 
       let duplicateReviewId: string | null = null;
@@ -219,16 +245,16 @@ router.post(
         phone: data.phone?.trim() || undefined,
         guardianName: data.guardianName?.trim() || undefined,
         villageId: resolvedVillageId,
-        villageName: data.villageName,
-        mandal: data.mandal,
+        villageName: resolvedVillageName,
+        mandal: resolvedMandal,
         district: data.district || 'Alluri Sitharama Raju',
         originalAddressText: data.originalAddressText, // Preserved verbatim
         emergencyContact: data.emergencyContact?.trim() || undefined,
         caregiverDetails: data.caregiverDetails?.trim() || undefined,
-        maskedAadhaar: data.maskedAadhaar?.trim() || undefined,
+        maskedAadhaar: isFieldWorker ? undefined : data.maskedAadhaar?.trim() || undefined,
         registrationMethod: data.registrationMethod || 'manual',
         consentObtained: data.consentObtained ?? true,
-        hospitalId: data.hospitalId,
+        hospitalId: workerScope?.hospitalId || data.hospitalId,
         registeredBy: req.user!.id,
         registeredAt: new Date(),
         isDuplicateCandidate,
@@ -322,24 +348,32 @@ router.get(
       if (duplicateOnly === 'true') filter.isDuplicateCandidate = true;
 
       // HEALTH WORKER JURISDICTION SCOPING
-      if (req.user!.role === 'asha' || req.user!.role === 'asha_worker' || req.user!.role === 'anm') {
-        const assignment = await HealthWorkerAssignment.findOne({
-          workerId: req.user!.id,
-          status: 'active',
-        });
-
-        if (!assignment || !assignment.assignedVillages || assignment.assignedVillages.length === 0) {
-          res.envelope({
-            patients: [],
-            total: 0,
-            assignedScopeOnly: true,
-            workerId: req.user!.id,
-            simulation: true,
-          });
+      const isFieldWorker = FIELD_WORKER_ROLES.has(req.user!.role);
+      let facilityScopeOnly = false;
+      let ownRegistrationsOnly = false;
+      if (isFieldWorker) {
+        const assignment = await getActiveWorkerAssignment(req.user!.id);
+        const assignedVillages = assignment?.assignedVillages || [];
+        const workerHospitalId = assignment?.hospitalId || req.user!.hospitalId;
+        if (!workerHospitalId) {
+          res.envelopeError(
+            'WORKER_FACILITY_REQUIRED',
+            'Your account must be linked to a healthcare facility before loading patients.',
+            undefined,
+            403
+          );
           return;
         }
 
-        filter.villageId = { $in: assignment.assignedVillages };
+        if (assignedVillages.length > 0) {
+          filter.villageId = { $in: assignedVillages };
+          filter.hospitalId = workerHospitalId;
+        } else {
+          filter.hospitalId = workerHospitalId;
+          filter.registeredBy = req.user!.id;
+          facilityScopeOnly = true;
+          ownRegistrationsOnly = true;
+        }
       }
 
       if (search) {
@@ -350,7 +384,76 @@ router.get(
         ];
       }
 
-      const patients = await Patient.find(filter).sort({ registeredAt: -1 }).limit(100).lean();
+      const patientQuery = Patient.find(filter).sort({ registeredAt: -1 }).limit(100);
+      if (isFieldWorker) {
+        patientQuery.select('patientId fullName gender ageEstimated phone villageId villageName mandal hospitalId registeredAt isDuplicateCandidate duplicateReviewStatus matchScore');
+      }
+      const patients = await patientQuery.lean();
+
+      if (isFieldWorker) {
+        const patientIds = patients.map((patient) => patient.patientId);
+        const [screenings, referrals, appointments, aiScreenings] = await Promise.all([
+          ScreeningCase.find({ patientId: { $in: patientIds } }).select('patientId status createdAt').sort({ createdAt: -1 }).lean(),
+          Referral.find({ patientId: { $in: patientIds } }).select('patientId status createdAt').sort({ createdAt: -1 }).lean(),
+          Appointment.find({ patientId: { $in: patientIds } }).select('patientId status createdAt').sort({ createdAt: -1 }).lean(),
+          AiScreening.find({ patientId: { $in: patientIds } })
+            .select('patientId screeningId createdAt clinicianReview.status')
+            .sort({ createdAt: -1 })
+            .lean(),
+        ]);
+        const latestStatusByPatient = (entries: unknown) => {
+          const statuses = new Map<string, string>();
+          if (!Array.isArray(entries)) return statuses;
+          for (const entry of entries) {
+            if (entry && typeof entry === 'object') {
+              const record = entry as Record<string, unknown>;
+              if (typeof record.patientId === 'string' && typeof record.status === 'string' && !statuses.has(record.patientId)) {
+                statuses.set(record.patientId, record.status);
+              }
+            }
+          }
+          return statuses;
+        };
+        const latestScreening = latestStatusByPatient(screenings);
+        const latestReferral = latestStatusByPatient(referrals);
+        const latestAppointment = latestStatusByPatient(appointments);
+        const latestAiScreening = new Map<string, { screeningId: string; createdAt: Date; reviewStatus: string }>();
+        for (const screening of aiScreenings) {
+          if (!latestAiScreening.has(screening.patientId)) {
+            latestAiScreening.set(screening.patientId, {
+              screeningId: screening.screeningId,
+              createdAt: screening.createdAt,
+              reviewStatus: screening.clinicianReview?.status || 'PENDING',
+            });
+          }
+        }
+        const trackedPatients = patients.map((patient) => ({
+          ...patient,
+          flow: {
+            screening: latestScreening.get(patient.patientId) || 'not_started',
+            aiScreening: latestAiScreening.get(patient.patientId)
+              ? {
+                  ...latestAiScreening.get(patient.patientId)!,
+                  status: latestAiScreening.get(patient.patientId)!.reviewStatus === 'PENDING'
+                    ? 'awaiting_clinician_review'
+                    : 'clinician_reviewed',
+                }
+              : { status: 'not_started' },
+            referral: latestReferral.get(patient.patientId) || 'not_referred',
+            appointment: latestAppointment.get(patient.patientId) || 'not_booked',
+          },
+        }));
+
+        res.envelope({
+          patients: trackedPatients,
+          total: trackedPatients.length,
+          assignedScopeOnly: !facilityScopeOnly,
+          facilityScopeOnly,
+          ownRegistrationsOnly,
+          simulation: true,
+        });
+        return;
+      }
 
       res.envelope({
         patients,
@@ -661,6 +764,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const patientId = req.params.id as string;
+      const isFieldWorker = FIELD_WORKER_ROLES.has(req.user!.role);
 
       // Patients can only access their own patient record (Invariant 7: Cross-Hospital & Patient Privacy Scoping)
       if (req.user!.role === 'patient') {
@@ -685,6 +789,26 @@ router.get(
         return;
       }
 
+      if (isFieldWorker) {
+        const assignment = await getActiveWorkerAssignment(req.user!.id);
+        const assignedVillages = assignment?.assignedVillages || [];
+        const workerHospitalId = assignment?.hospitalId || req.user!.hospitalId;
+        const hasVillageAssignment = assignedVillages.length > 0;
+        const canAccessPatient = hasVillageAssignment
+          ? assignedVillages.includes(patient.villageId) && patient.hospitalId === workerHospitalId
+          : Boolean(workerHospitalId
+            && patient.hospitalId === workerHospitalId
+            && patient.registeredBy === req.user!.id);
+        if (!canAccessPatient) {
+          res.envelopeError('PATIENT_NOT_FOUND', 'Patient record not found in your assigned villages.', undefined, 404);
+          return;
+        }
+        if (typeof req.query.healthCardDownload === 'string') {
+          res.envelopeError('FORBIDDEN', 'Health-card downloads are not available from the field-worker registry.', undefined, 403);
+          return;
+        }
+      }
+
       // Staff health-card/record reads remain constrained to their facility.
       if (req.user!.role !== 'patient' && req.user!.role !== 'system_admin' && req.user!.hospitalId && patient.hospitalId !== req.user!.hospitalId) {
         res.envelopeError('PATIENT_SCOPE_DENIED', 'Patient is outside your assigned hospital scope', undefined, 403);
@@ -697,8 +821,24 @@ router.get(
         }
       }
 
+      const patientData = isFieldWorker
+        ? {
+            patientId: patient.patientId,
+            fullName: patient.fullName,
+            gender: patient.gender,
+            ageEstimated: patient.ageEstimated,
+            phone: patient.phone,
+            villageId: patient.villageId,
+            villageName: patient.villageName,
+            mandal: patient.mandal,
+            registeredAt: patient.registeredAt,
+            isDuplicateCandidate: patient.isDuplicateCandidate,
+            duplicateReviewStatus: patient.duplicateReviewStatus,
+          }
+        : patient;
+
       res.envelope({
-        patient,
+        patient: patientData,
         simulation: true,
       });
     } catch (err) {

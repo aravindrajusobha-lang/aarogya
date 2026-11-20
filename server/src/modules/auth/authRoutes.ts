@@ -169,6 +169,18 @@ router.post(
         return;
       }
 
+      if (user.status !== 'active') {
+        res.status(403).envelopeError(
+          'ACCOUNT_NOT_ACTIVE',
+          user.approvalStatus === 'PENDING_ADMIN_APPROVAL'
+            ? 'Your ASHA worker application is awaiting administrator approval.'
+            : 'This account is not active. Contact your administrator.',
+          { approvalStatus: user.approvalStatus || null },
+          403
+        );
+        return;
+      }
+
       // Reset failed attempts on success
       await resetFailedAttempts(user);
 

@@ -291,6 +291,6 @@ AppointmentSchema.index(
   }
 );
 
-export const Appointment =
-  mongoose.models.Appointment ||
+export const Appointment: mongoose.Model<IAppointmentDocument> =
+  (mongoose.models.Appointment as mongoose.Model<IAppointmentDocument> | undefined) ||
   mongoose.model<IAppointmentDocument>('Appointment', AppointmentSchema);

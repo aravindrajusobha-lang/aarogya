@@ -33,7 +33,7 @@ const CreateVillageSchema = z.object({
 });
 
 // GET /api/v1/reference/villages
-// Enforces: Health Worker sees ONLY assigned villages (scope comes only from explicit assignments)
+// Field workers see their explicit assignment, or facility villages when unassigned.
 router.get(
   '/villages',
   requireAuth,
@@ -53,29 +53,33 @@ router.get(
           workerId: req.user!.id,
           status: 'active',
         });
-
-        if (!assignment || !assignment.assignedVillages || assignment.assignedVillages.length === 0) {
-          // Scope comes only from explicit assignments. Without assignment, worker sees no villages.
-          res.envelope({
-            villages: [],
-            total: 0,
-            assignedScopeOnly: true,
-            workerId: req.user!.id,
-            simulation: true,
-          });
+        const assignedVillages = assignment?.assignedVillages || [];
+        const hasVillageAssignment = assignedVillages.length > 0;
+        const workerHospitalId = assignment?.hospitalId || req.user!.hospitalId;
+        if (!workerHospitalId) {
+          res.envelopeError(
+            'WORKER_FACILITY_REQUIRED',
+            'Your account must be linked to a healthcare facility before loading villages.',
+            undefined,
+            403
+          );
           return;
         }
 
-        // Restrict filter strictly to assigned villages
-        filter.villageId = { $in: assignment.assignedVillages };
+        filter.hospitalId = workerHospitalId;
+        if (hasVillageAssignment) {
+          filter.villageId = { $in: assignedVillages };
+        }
 
         const villages = await Village.find(filter).sort({ villageName: 1 }).lean();
 
         res.envelope({
           villages,
           total: villages.length,
-          assignedScopeOnly: true,
-          assignedCount: assignment.assignedVillages.length,
+          assignedScopeOnly: hasVillageAssignment,
+          facilityScopeOnly: !hasVillageAssignment,
+          assignedCount: hasVillageAssignment ? assignedVillages.length : undefined,
+          hospitalId: workerHospitalId,
           workerId: req.user!.id,
           simulation: true,
         });

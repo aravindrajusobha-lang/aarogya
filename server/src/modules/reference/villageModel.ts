@@ -61,5 +61,6 @@ const VillageSchema = new Schema<IVillage>(
   }
 );
 
-export const Village =
-  mongoose.models.Village || mongoose.model<IVillage>('Village', VillageSchema);
+export const Village: mongoose.Model<IVillage> =
+  (mongoose.models.Village as mongoose.Model<IVillage> | undefined) ||
+  mongoose.model<IVillage>('Village', VillageSchema);

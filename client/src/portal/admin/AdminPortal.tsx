@@ -19,6 +19,10 @@ interface Doctor {
   qualificationDocuments: Array<{ documentId: string }>; rejectionReason: string | null; createdAt: string;
 }
 interface DoctorList { doctors: Doctor[]; counts: { total: number; verified: number; pending: number; rejected: number } }
+interface AshaApplication {
+  userId: string; username: string; fullName: string; phone: string; hospitalId: string; mandal: string; village: string;
+  registrationReference: string; approvalStatus: 'PENDING_ADMIN_APPROVAL' | 'REJECTED'; createdAt: string;
+}
 
 interface AdminPortalProps { currentUser: any; lang: LanguageCode; onChangeLang: (lang: LanguageCode) => void; route: string; onLogout: () => void }
 
@@ -344,6 +348,101 @@ const FacilitiesPage: React.FC<{ t: Translate; reference: Reference | null }> = 
   );
 };
 
+/* ---------- ASHA worker applications ---------- */
+const AshaApplicationsPage: React.FC<{ t: Translate; lang: LanguageCode }> = ({ t, lang }) => {
+  const tr = (key: string) => t(`admin.ashaReview.${key}`);
+  const [status, setStatus] = useState<'pending' | 'rejected'>('pending');
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState('');
+  const [actionError, setActionError] = useState('');
+  const { data, error, loading, reload } = useApi<{ applications: AshaApplication[] }>('/api/v1/asha-registration/applications', []);
+  const applications = (data?.applications || []).filter((item) => status === 'pending'
+    ? item.approvalStatus === 'PENDING_ADMIN_APPROVAL'
+    : item.approvalStatus === 'REJECTED');
+
+  const approve = async (item: AshaApplication) => {
+    setBusy(item.userId); setActionError('');
+    try {
+      await api(`/api/v1/asha-registration/${encodeURIComponent(item.userId)}/approve`, { method: 'POST' });
+      await reload();
+    } catch (e) { setActionError(e instanceof Error ? e.message : t('common.error')); }
+    finally { setBusy(''); }
+  };
+  const reject = async (item: AshaApplication) => {
+    setBusy(item.userId); setActionError('');
+    try {
+      await api(`/api/v1/asha-registration/${encodeURIComponent(item.userId)}/reject`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
+      setRejecting(null); setReason(''); await reload();
+    } catch (e) { setActionError(e instanceof Error ? e.message : t('common.error')); }
+    finally { setBusy(''); }
+  };
+
+  return (
+    <>
+      <PageHeader title={tr('title')} subtitle={tr('subtitle')} />
+      <Notice tone="info">
+        <div className="adp-asha-purpose">
+          <section>
+            <strong className="adp-asha-purpose-title">{tr('purposeTitle')}</strong>
+            <p>{tr('purpose')}</p>
+          </section>
+          <section>
+            <strong className="adp-asha-purpose-title">{tr('detailsTitle')}</strong>
+            <p>{tr('assignmentNote')}</p>
+            <p>{tr('responsibilityDetail')}</p>
+          </section>
+        </div>
+      </Notice>
+      <Card>
+        <div className="adp-tabs" role="group" style={{ marginBottom: 16 }}>
+          <button type="button" aria-pressed={status === 'pending'} onClick={() => setStatus('pending')}>{tr('pending')}</button>
+          <button type="button" aria-pressed={status === 'rejected'} onClick={() => setStatus('rejected')}>{tr('rejected')}</button>
+        </div>
+        {loading ? <Skeleton rows={3} /> : error ? <Notice tone="error">{error}</Notice> : !applications.length ? <Empty icon="users">{tr(status === 'pending' ? 'noPending' : 'noRejected')}</Empty> : (
+          <div className="adp-list">
+            {applications.map((item) => (
+              <article key={item.userId} className="adp-doc-card">
+                <div className="adp-doc-head">
+                  <span className="adp-appt-avatar" aria-hidden="true">{initials(item.fullName)}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="adp-appt-title"><strong>{item.fullName}</strong><StatusPill tone={item.approvalStatus === 'REJECTED' ? 'red' : 'amber'}>{item.approvalStatus === 'REJECTED' ? tr('rejected') : tr('pendingStatus')}</StatusPill></div>
+                    <div className="adp-meta"><span>{item.username}</span><span>{item.phone}</span><span><Icon.clinic size={16} />{item.hospitalId}</span></div>
+                  </div>
+                </div>
+                <div className="adp-doc-body">
+                  <dl className="adp-doc-grid">
+                    <div><dt>{tr('village')}</dt><dd>{item.village}</dd></div>
+                    <div><dt>{tr('mandal')}</dt><dd>{item.mandal}</dd></div>
+                    <div><dt>{tr('reference')}</dt><dd>{item.registrationReference}</dd></div>
+                    <div><dt>{tr('submitted')}</dt><dd>{fmtDate(item.createdAt, lang)}</dd></div>
+                  </dl>
+                  {status === 'pending' && rejecting !== item.userId && (
+                    <div className="adp-doc-actions">
+                      <button type="button" className="adp-btn adp-btn-primary adp-btn-sm" disabled={!!busy} onClick={() => void approve(item)}><Icon.check size={16} />{busy === item.userId ? t('common.loading') : tr('approve')}</button>
+                      <button type="button" className="adp-btn adp-btn-ghost adp-btn-sm" disabled={!!busy} onClick={() => { setRejecting(item.userId); setActionError(''); }}>{tr('reject')}</button>
+                    </div>
+                  )}
+                  {rejecting === item.userId && (
+                    <div className="adp-review-box">
+                      <label className="adp-field">{tr('reason')}<textarea rows={2} minLength={5} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+                      <div className="adp-doc-actions">
+                        <button type="button" className="adp-btn adp-btn-danger adp-btn-sm" disabled={reason.trim().length < 5 || !!busy} onClick={() => void reject(item)}>{tr('confirmReject')}</button>
+                        <button type="button" className="adp-btn adp-btn-ghost adp-btn-sm" onClick={() => setRejecting(null)}>{tr('cancel')}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        {actionError && <Notice tone="error">{actionError}</Notice>}
+      </Card>
+    </>
+  );
+};
+
 /* ---------- Portal ---------- */
 export const AdminPortal: React.FC<AdminPortalProps> = ({ currentUser, lang, onChangeLang, route, onLogout }) => {
   const t = useMemo(() => makeT(lang), [lang]);
@@ -362,6 +461,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentUser, lang, onC
   const nav: PortalNavItem[] = [
     { key: 'dashboard', label: t('admin.nav.dashboard'), icon: 'home', mobile: true },
     { key: 'doctors', label: t('admin.nav.doctors'), icon: 'users', mobile: true },
+    { key: 'asha-applications', label: t('admin.nav.ashaApplications'), icon: 'users', mobile: true },
     { key: 'add-doctor', label: t('admin.nav.addDoctor'), icon: 'user', mobile: true },
     isSystemAdmin || !ownHospitalId
       ? { key: 'facilities', label: t('admin.nav.facilities'), icon: 'clinic', mobile: true }
@@ -375,6 +475,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentUser, lang, onC
   let content: React.ReactNode;
   switch (active) {
     case 'doctors': content = <DoctorsPage key={`${queryPart}-${refreshKey}`} t={t} lang={lang} initialStatus={query.get('status') || 'all'} onCredentials={showCredentials(true)} />; break;
+    case 'asha-applications': content = <AshaApplicationsPage key={refreshKey} t={t} lang={lang} />; break;
     case 'add-doctor': content = <AddDoctorPage key={queryPart} t={t} reference={reference.data} referenceError={reference.error} onCreated={showCredentials(false)} presetHospitalId={query.get('hospital') || undefined} />; break;
     case 'facilities': case 'my-facility': content = facilityId
       ? <FacilityDetailPage key={facilityId} t={t} lang={lang} hospitalId={facilityId} isSystemAdmin={isSystemAdmin} initialTab={query.get('tab') || undefined} showBack={isSystemAdmin} />

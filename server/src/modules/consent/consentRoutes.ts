@@ -6,6 +6,7 @@ import { requireAuth } from '../../middleware/authGuard.js';
 import { auditTag } from '../../middleware/auditTag.js';
 import { authorizeCapability } from '../auth/authorizationEngine.js';
 import { Consent } from './consentModel.js';
+import { FIELD_WORKER_ROLES, getWorkerAccessiblePatient } from '../patient/workerPatientScope.js';
 
 const router = Router();
 
@@ -49,6 +50,11 @@ router.post(
 
       if (req.user!.role === 'patient' && req.user!.patientId !== patientId) {
         res.envelopeError('FORBIDDEN', 'Patients may only grant consent for their own record.', undefined, 403);
+        return;
+      }
+      if (FIELD_WORKER_ROLES.has(req.user!.role)
+        && !(await getWorkerAccessiblePatient(req.user!.id, req.user!.hospitalId, patientId))) {
+        res.envelopeError('PATIENT_SCOPE_DENIED', 'Consent may only be recorded for a patient in your assigned scope.', undefined, 403);
         return;
       }
 

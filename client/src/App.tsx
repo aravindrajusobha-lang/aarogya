@@ -1,7 +1,7 @@
 import { PatientPortal } from './portal/patient/PatientPortal';
 import { DoctorPortal } from './portal/doctor/DoctorPortal';
 import { AdminPortal } from './portal/admin/AdminPortal';
-import { HomePage, StaffLoginPage, PatientLoginPage as EasyPatientLoginPage } from './portal/public/PublicPages';
+import { HomePage, StaffAccessPage, AshaPortalPage, PatientLoginPage as EasyPatientLoginPage } from './portal/public/PublicPages';
 import { PatientRegisterPage } from './portal/public/PatientRegisterPage';
 import React, { useState, useEffect } from 'react';
 import { OfflineStatusIndicator } from './components/OfflineStatusIndicator';
@@ -36,6 +36,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { PatientDashboard } from './pages/dashboards/PatientDashboard';
 import { LiveVideoConsultationModal } from './components/LiveVideoConsultationModal';
 import { AiOralHealthEngine } from './components/AiEngine/AiOralHealthEngine';
+import { FieldWorkerAiScreening } from './components/FieldWorkerAiScreening';
 import { LanguagePreferenceModal } from './components/LanguagePreferenceModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { DailyConsultationPage } from './components/VideoConsultation';
@@ -202,6 +203,15 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [tokens, setTokens] = useState<AuthTokens | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [fieldWorkerScreeningPatientId, setFieldWorkerScreeningPatientId] = useState('');
+  const isFieldWorker = ['asha_worker', 'asha', 'anm'].includes(currentUser?.role?.toLowerCase() || '');
+  const fieldWorkerTabs = new Set(['patients', 'ai-screening', 'notifications', 'auth']);
+
+  useEffect(() => {
+    if (isFieldWorker && !fieldWorkerTabs.has(mainTab)) {
+      setMainTab('patients');
+    }
+  }, [isFieldWorker, mainTab]);
 
   useEffect(() => {
     const handleRefresh = (event: Event) => {
@@ -450,10 +460,22 @@ export const App: React.FC = () => {
       window.location.hash = homeForRole(user.role);
     };
 
+    if (currentRoute.startsWith('#/asha')) {
+      if (currentUser) return <PortalRedirect route="#/" />;
+      const routeQuery = currentRoute.split('?')[1] || '';
+      const initialMode = currentRoute.includes('/register') || new URLSearchParams(routeQuery).get('mode') === 'register' ? 'register' : 'login';
+      return <AshaPortalPage
+        lang={lang}
+        onChangeLang={changePublicLang}
+        initialMode={initialMode}
+        onLoggedIn={({ user, tokens: userTokens }) => completeLogin(user, userTokens as AuthTokens)}
+      />;
+    }
+
     // 1A. ROUTE: /login — simple staff login (doctor / admin); patients use #/patient/login
     if (currentRoute.startsWith('#/login')) {
       if (currentUser) return <PortalRedirect route={homeForRole(currentUser.role)} />;
-      return <StaffLoginPage lang={lang} onChangeLang={changePublicLang} onLoggedIn={({ user, tokens: userTokens }) => completeLogin(user, userTokens as AuthTokens)} />;
+      return <StaffAccessPage lang={lang} onChangeLang={changePublicLang} onLoggedIn={({ user, tokens: userTokens }) => completeLogin(user, userTokens as AuthTokens)} />;
     }
 
     const patientAuthRoute = currentRoute.split('?')[0];
@@ -556,7 +578,7 @@ export const App: React.FC = () => {
       // home '#/' falls through to main authenticated workspace below
     }
 
-    if (isLandingRoute) {
+    if (isLandingRoute && !currentUser) {
       return (
         <>
           <HomePage lang={lang} onChangeLang={changePublicLang} />
@@ -658,6 +680,10 @@ export const App: React.FC = () => {
       );
     }
 
+    if (isFieldWorker && !fieldWorkerTabs.has(mainTab)) {
+      return <div className="login-page-root" aria-live="polite">Opening your assigned patient workspace…</div>;
+    }
+
     return (
       <div className="app-root-wrapper theme-study">
         <LanguagePreferenceModal
@@ -679,7 +705,7 @@ export const App: React.FC = () => {
           {/* 2. Preserved Side Dashboard Navigation */}
           <Sidebar
             activeTab={mainTab}
-            onSelectTab={(tabId) => setMainTab(tabId as MainTabType)}
+            onSelectTab={(tabId) => setMainTab(isFieldWorker && !fieldWorkerTabs.has(tabId) ? 'patients' : tabId as MainTabType)}
             currentUser={currentUser}
             onLogout={handleLogout}
             currentLang={lang}
@@ -708,15 +734,19 @@ export const App: React.FC = () => {
                 </button>
                 <div className="topbar-title-wrap">
                   <h1>
-                    <span>{activeTitle[lang]}</span>
+                    <span>{isFieldWorker
+                      ? lang === 'te' ? 'ఆశా కార్యకర్త పోర్టల్' : lang === 'hi' ? 'आशा कार्यकर्ता पोर्टल' : 'ASHA Worker Portal'
+                      : activeTitle[lang]}</span>
                     {mainTab === 'aadhaar' && <span className="badge badge-mock">MOCK</span>}
                   </h1>
                   <span className="topbar-subtitle">
-                    {lang === 'te'
-                      ? 'ఐటీడీఏ పాడేరు గిరిజన ప్రాంత నోటి ఆరోగ్య ప్రాజెక్ట్ • తూర్పు కనుమలు'
-                      : lang === 'hi'
-                        ? 'आईटीडीए पाडेरु आदिवासी स्वास्थ्य परियोजना • पूर्वी घाट'
-                        : 'ITDA Paderu Tribal Agency • Eastern Ghats Community Oral Health Screening'}
+                    {isFieldWorker
+                      ? lang === 'te' ? 'కేటాయించిన గ్రామాల్లో రోగులను నమోదు చేసి, వారి సంరక్షణ వివరాలను చూడండి.' : lang === 'hi' ? 'निर्धारित गाँवों में मरीज़ों का पंजीकरण करें और उनकी देखभाल के रिकॉर्ड देखें।' : 'Register patients and review care records in your assigned villages.'
+                      : lang === 'te'
+                        ? 'ఐటీడీఏ పాడేరు గిరిజన ప్రాంత నోటి ఆరోగ్య ప్రాజెక్ట్ • తూర్పు కనుమలు'
+                        : lang === 'hi'
+                          ? 'आईटीडीए पाडेरु आदिवासी स्वास्थ्य परियोजना • पूर्वी घाट'
+                          : 'ITDA Paderu Tribal Agency • Eastern Ghats Community Oral Health Screening'}
                   </span>
                 </div>
               </div>
@@ -766,7 +796,7 @@ export const App: React.FC = () => {
                       🚪 {lang === 'te' ? 'లాగౌట్' : 'Sign Out'}
                     </button>
                   </div>
-                ) : (
+                ) : isFieldWorker ? null : (
                   /* ADMIN PORTAL: simplified topbar controls */
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <button
@@ -807,7 +837,7 @@ export const App: React.FC = () => {
                 <ThemeToggle currentLang={lang} />
 
                 {/* Language Switcher */}
-                <LanguageSwitcher currentLang={lang} onSelect={setLang} />
+                {!isFieldWorker && <LanguageSwitcher currentLang={lang} onSelect={setLang} />}
               </div>
             </header>
 
@@ -847,15 +877,25 @@ export const App: React.FC = () => {
 
               {/* VIEW: AI ORAL HEALTH SCREENING ENGINE (MODULE A + B + C) */}
               {mainTab === 'ai-screening' && (
-                <AiOralHealthEngine
-                  patientId={currentUser?.patientId || ''}
-                  patientName={currentUser?.fullName || ''}
-                  hospitalId={currentUser?.hospitalId}
-                  userRole={currentUser?.role?.toLowerCase() || ''}
-                  token={tokens?.accessToken || ''}
-                  currentLang={lang}
-                  onClose={() => setMainTab('hospitals')}
-                />
+                isFieldWorker ? (
+                  <FieldWorkerAiScreening
+                    accessToken={tokens?.accessToken || null}
+                    currentUser={currentUser}
+                    currentLang={lang}
+                    initialPatientId={fieldWorkerScreeningPatientId}
+                    onGoToPatients={() => setMainTab('patients')}
+                  />
+                ) : (
+                  <AiOralHealthEngine
+                    patientId={currentUser?.patientId || ''}
+                    patientName={currentUser?.fullName || ''}
+                    hospitalId={currentUser?.hospitalId}
+                    userRole={currentUser?.role?.toLowerCase() || ''}
+                    token={tokens?.accessToken || ''}
+                    currentLang={lang}
+                    onClose={() => setMainTab('hospitals')}
+                  />
+                )
               )}
 
               {/* VIEW: TELECONSULTATION */}
@@ -876,6 +916,10 @@ export const App: React.FC = () => {
                   currentLang={lang}
                   onRequireLogin={handleQuickDemoLogin}
                   onGoToAuth={() => setMainTab('auth')}
+                  onStartAiScreening={(patient) => {
+                    setFieldWorkerScreeningPatientId(patient.patientId);
+                    setMainTab('ai-screening');
+                  }}
                 />
               )}
 

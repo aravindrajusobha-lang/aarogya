@@ -36,7 +36,7 @@
   /* Typography Roles (Paired with --surface and --bg) */
   --text-primary: #253B32;
   --text-secondary: #45574F;
-  --text-muted: #68766D;
+  --text-muted: #56665D;
 
   /* Accent & Action Roles */
   --accent: #287A62;
@@ -197,7 +197,27 @@
 body {
   background-color: var(--bg);
   color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.55;
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  line-height: 1.25;
+}
+
+p, li, label, dd, dt {
+  line-height: 1.55;
+}
+
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+:where(input, textarea)::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 .app-root-wrapper,
